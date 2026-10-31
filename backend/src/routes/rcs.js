@@ -160,7 +160,7 @@ router.post('/templates', adminOnly, wrap(async (req, res) => {
   const extras = bodyExtras(b, {});
   if (extras.error) return res.status(400).json({ error: extras.error });
   const r = await rcs.createTemplate(type, b);
-  if (!r.ok) return res.status(r.invalid ? 400 : 502).json({ error: r.error, errorCode: r.errorCode || null });
+  if (!r.ok) return res.status(r.invalid ? 400 : 422).json({ error: r.error, errorCode: r.errorCode || null }); // 422, not 502: the app's API helper re-sends a 502 POST ("server restarting"), which would create the template again
   const vc = varsIn(`${r.fields.title || ''} ${r.fields.description || ''}`).length;
   const body = { ...extras.body, ...r.fields, source: 'teamlink', varCount: extras.body.varCount !== undefined ? extras.body.varCount : vc };
   const row = await prisma.rcsTemplate.upsert({
