@@ -226,6 +226,7 @@ async function sweep() {
 
 let timers = [];
 function start() {
+  require('./rcsOmniSync').start(); // eslint-disable-line global-require -- Omni-Channel's RCS templates every hour (not in the sandbox)
   if (require('./sandbox').isSandbox() || /^(0|off|false)$/i.test(String(process.env.RCS_QUEUE || ''))) return; // eslint-disable-line global-require
   timers.forEach(clearInterval);
   timers = [

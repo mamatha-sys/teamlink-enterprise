@@ -200,7 +200,10 @@ function TemplateForm({ edit, onClose, onSaved }) {
             <option value="">Every module</option><option value="ATS">ATS</option><option value="HRMS">HRMS</option><option value="Accounts">Accounts</option>
           </Combo>
         </Field>
-        {f.mode !== 'create' && (
+        {f.mode === 'edit' && edit.source === 'omnichannel' && (
+          <Field label="Status" hint="This template was made in Omni-Channel: its status comes from the answer rcssms.in gives there."><div><Pill s={edit.status} /></div></Field>
+        )}
+        {f.mode !== 'create' && !(f.mode === 'edit' && edit.source === 'omnichannel') && (
           <Field label="Status" hint="Only if you saw it on rcssms.in. Normally rcssms.in's webhook changes it.">
             <Combo value={f.status} onChange={(e) => set('status', e.target.value)}>
               <option value="PENDING">Waiting for approval</option><option value="APPROVED">Approved</option><option value="REJECTED">Rejected</option>
@@ -256,17 +259,34 @@ function TemplatesTab() {
   const [err, setErr] = useState('');
   const [form, setForm] = useState(null); // 'new' | template
   const [q, setQ] = useState('');
+  const [omni, setOmni] = useState(null); // last "Get from Omni-Channel"
+  const [fwd, setFwd] = useState(null); // last rcssms.in call handed to Omni-Channel
+  const [pulling, setPulling] = useState(false);
   const load = useCallback(() => api.get('/rcs/templates').then((r) => { setRows(r.data); setErr(''); }).catch((e) => setErr(errOf(e, 'Could not load the templates.'))), []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); api.get('/rcs/templates/omni').then((r) => { setOmni(r.data.last); setFwd({ ...(r.data.forward || {}), set: r.data.forwardSet }); }).catch(() => {}); }, [load]);
+  const pull = async () => {
+    setPulling(true);
+    try { const r = await api.post('/rcs/templates/omni/pull'); setOmni(r.data); } catch (e) { setOmni((e.response && e.response.data) || { ok: false, words: 'Omni-Channel could not be reached.' }); }
+    finally { setPulling(false); load(); }
+  };
   const remove = async (t) => {
-    if (!window.confirm(`Remove "${t.name}" from TeamLink? It stays on rcssms.in.`)) return;
+    const where = t.source === 'omnichannel' ? 'It stays in Omni-Channel and on rcssms.in, and is not taken in again.' : 'It stays on rcssms.in.';
+    if (!window.confirm(`Remove "${t.name}" from TeamLink? ${where}`)) return;
     try { await api.delete(`/rcs/templates/${t.id}`); load(); } catch (e) { setErr(errOf(e, 'Not removed.')); }
   };
   const shown = (rows || []).filter((t) => !q || `${t.name} ${t.templateId} ${t.module || ''}`.toLowerCase().includes(q.toLowerCase()));
   return (
     <div className="cm-card">
-      <div className="cm-cardhead"><h3>RCS templates</h3><button type="button" className="btn btn-primary" onClick={() => setForm('new')}>New template</button></div>
-      <div className="cm-help">Only <b>Approved</b> templates can be sent. A new one is sent to rcssms.in and waits for their approval.</div>
+      <div className="cm-cardhead"><h3>RCS templates</h3>
+        <div className="sp-actions">
+          <button type="button" className="btn" disabled={pulling} onClick={pull}>{pulling ? 'Getting…' : 'Get from Omni-Channel'}</button>
+          <button type="button" className="btn btn-primary" onClick={() => setForm('new')}>New template</button>
+        </div>
+      </div>
+      <div className="cm-help">Only <b>Approved</b> templates can be sent. A new one is sent to rcssms.in and waits for their approval. Templates made and sent for approval in <b>Omni-Channel &gt; Templates &gt; RCS</b> come here by themselves every hour and after each approval (or press &quot;Get from Omni-Channel&quot;).</div>
+      {omni && <div className={omni.ok ? 'cm-help' : 'error-text'}>Omni-Channel{omni.at ? ` (${fmt(omni.at)})` : ''}: {omni.words}</div>}
+      {fwd && (fwd.set ? (fwd.at && <div className={fwd.ok ? 'cm-help' : 'error-text'}>Last rcssms.in answer passed to Omni-Channel ({fmt(fwd.at)}): {fwd.ok ? 'received' : fwd.error}</div>)
+        : <div className="cm-help">rcssms.in answers are not passed to Omni-Channel yet (GREENSTART_RCS_WEBHOOK_SECRET is not set on the server: run .\link-rcs-templates-omni-on-vps.ps1).</div>)}
       <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or template id…" style={{ maxWidth: 320, margin: '6px 0' }} />
       {err && <div className="error-text">{err}</div>}
       {!rows ? <div className="cm-help">Loading…</div> : shown.length === 0 ? <div className="cm-help">No templates yet. Add 22SVkoeCBF with &quot;New template&quot; &gt; &quot;Add one already on rcssms.in&quot;.</div> : (
@@ -274,7 +294,7 @@ function TemplatesTab() {
           <thead><tr><th>Name</th><th>Template id</th><th>Type</th><th>Module</th><th>Status</th><th>Blanks</th><th>SMS fallback</th><th>Added</th><th /></tr></thead>
           <tbody>{shown.map((t) => (
             <tr key={t.id}>
-              <td>{t.name}{t.promotional && <span className="cell-muted"> · promotional</span>}</td><td><code>{t.templateId}</code></td><td>{TYPE_WORD[t.rcsType] || t.rcsType}</td><td>{t.module || 'Every module'}</td>
+              <td>{t.name}{t.promotional && <span className="cell-muted"> · promotional</span>}{t.source === 'omnichannel' && <span className="cell-muted"> · from Omni-Channel{t.omni && t.omni.workspace ? ` (${t.omni.workspace})` : ''}</span>}</td><td><code>{t.templateId}</code></td><td>{TYPE_WORD[t.rcsType] || t.rcsType}</td><td>{t.module || 'Every module'}</td>
               <td><Pill s={t.status} /></td><td>{t.varCount}{t.rcsType === 'RICHCASOUREL' ? ` × ${t.cards} cards` : ''}</td><td>{t.fallback ? 'Yes' : '—'}</td><td>{fmt(t.createdAt)}</td>
               <td className="sp-actions"><button type="button" className="btn btn-sm" onClick={() => setForm(t)}>Edit</button><button type="button" className="btn btn-sm" onClick={() => remove(t)}>Remove</button></td>
             </tr>

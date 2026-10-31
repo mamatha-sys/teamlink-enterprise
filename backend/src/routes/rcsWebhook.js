@@ -8,6 +8,8 @@
 //     expired -> failed (+ the SMS fallback when it is switched on). A status never goes backwards: a delivered message stays delivered.
 //     The same report twice changes nothing.
 //   * ALWAYS answers 200 (a wrong token too: nothing is applied or kept then, only counted).
+//   * 2026-10-31: the same call is handed to Omni-Channel (Green Start) on this server, which designs and submits RCS templates; when it
+//     was a template answer, Omni-Channel's templates are pulled into rcs_templates again (utils/rcsOmniSync.js).
 // ---------------------------------------------------------------------------
 const crypto = require('crypto');
 const express = require('express');
@@ -126,7 +128,13 @@ async function handle(req, res) {
       return res.status(200).json({ ok: false });
     }
     await keepRaw(req);
-    const done = await apply(objectsOf(req.body, req.query));
+    const objs = objectsOf(req.body, req.query);
+    const done = await apply(objs);
+    // the same answer to Omni-Channel (its own webhook is behind the TeamLink gate), then its RCS templates are pulled in again
+    const omni = require('../utils/rcsOmniSync'); // eslint-disable-line global-require
+    omni.forward({ method: req.method, raw: req.rawBody || '', contentType: req.get('content-type'), query: req.query, signature: req.get('x-smstake-signature') })
+      .then((f) => { if (f.ok && objs.some((o) => o.templateid || o.templatecode)) omni.pullAfterApproval(); })
+      .catch(() => {});
     return res.status(200).json({ ok: true, ...done });
   } catch (e) {
     console.error('[rcs-webhook]', String(e && e.message).slice(0, 200)); // eslint-disable-line no-console

@@ -73,6 +73,7 @@ function shapeTemplate(t) {
     title: b.title || null, description: b.description || null, mediaUrl: b.media_url || null, hasButtonLink: !!b.buttonLink, hasImageLink: !!b.imageLink,
     fallback: b.fallback && b.fallback.text ? { text: b.fallback.text, dltTemplateId: b.fallback.dltTemplateId || '' } : null,
     source: b.source || 'teamlink',
+    omni: b.source === 'omnichannel' ? { workspace: b.omniWorkspace || null, statusAt: b.statusAt || null } : null,
   };
 }
 function bodyExtras(p, base = {}) {
@@ -197,7 +198,9 @@ router.patch('/templates/:id', adminOnly, wrap(async (req, res) => {
   const data = { bodyJson: JSON.stringify(extras.body) };
   if (b.name !== undefined && String(b.name).trim()) data.name = String(b.name).trim().slice(0, 100);
   if (b.module !== undefined) data.module = cleanModule(b.module);
-  if (b.status !== undefined) {
+  if (b.status !== undefined && String(b.status).toUpperCase() !== t.status) {
+    // a template from Omni-Channel gets its status from rcssms.in's answer there, never by hand here
+    if (old.source === 'omnichannel') return res.status(400).json({ error: 'This template comes from Omni-Channel: its status comes from the answer rcssms.in gives there. Use "Get from Omni-Channel".' });
     const s = String(b.status).toUpperCase();
     if (!['APPROVED', 'REJECTED', 'PENDING'].includes(s)) return res.status(400).json({ error: 'Status is Approved, Rejected or Pending.' });
     data.status = s;
@@ -211,6 +214,7 @@ router.delete('/templates/:id', adminOnly, wrap(async (req, res) => {
   const t = await prisma.rcsTemplate.findUnique({ where: { id: req.params.id } });
   if (!t) return res.status(404).json({ error: 'Template not found.' });
   await prisma.rcsTemplate.delete({ where: { id: t.id } });
+  if (parse(t.bodyJson, {}).source === 'omnichannel') await require('../utils/rcsOmniSync').forget(t.templateId); // eslint-disable-line global-require
   await logAudit({ userId: req.user.id, actorName: req.user.name, action: 'RCS template removed from TeamLink', entity: 'RcsTemplate', entityId: t.id, fromValue: `${t.name} (${t.templateId})`, toValue: 'Removed (still on rcssms.in)' });
   res.json({ ok: true });
 }));
@@ -274,6 +278,18 @@ async function approvedTemplate(id) {
   if (t.status !== 'APPROVED') return { error: 'This template is not approved yet, so it cannot be sent.' };
   return { tpl: shapeTemplate(t) };
 }
+
+// Omni-Channel (Green Start) designs RCS templates and sends them for approval; its templates with an rcssms.in id are kept here too
+router.get('/templates/omni', adminOnly, wrap(async (_req, res) => {
+  const O = require('../utils/rcsOmniSync'); // eslint-disable-line global-require
+  const [last, fwd] = await Promise.all([O.lastPull(), O.lastForward()]);
+  res.json({ last, forward: fwd, forwardSet: !!String(process.env.GREENSTART_RCS_WEBHOOK_SECRET || '').trim() });
+}));
+router.post('/templates/omni/pull', adminOnly, wrap(async (req, res) => {
+  const r = await require('../utils/rcsOmniSync').pull({ why: 'manual' }); // eslint-disable-line global-require
+  if (r.ok && (r.added || r.updated)) await logAudit({ userId: req.user.id, actorName: req.user.name, action: 'RCS templates taken from Omni-Channel', entity: 'RcsTemplate', entityId: 'omni', toValue: r.words });
+  res.json(r); // always 200: the screen reads ok (a 502 would make the app's API helper retry it as "server restarting")
+}));
 
 router.post('/check', wrap(async (req, res) => {
   const b = req.body || {};
