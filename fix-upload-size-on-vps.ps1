@@ -17,9 +17,10 @@ if ($ok.Trim() -ne 'YES') { Write-Host 'Not changed.' -ForegroundColor Yellow; e
 Write-Host "[2/2] Changing it (a backup of the site file is kept)..." -ForegroundColor Cyan
 $Script.Replace("`r", "") | ssh $VpsHost 'tr -d ''\r'' | bash -s -- --apply'
 if ($LASTEXITCODE -ne 0) { throw 'It did not finish (see the lines above).' }
+# the check uses curl.exe (in Windows 10 and later): Windows PowerShell's Invoke-WebRequest gave no status for a refused 12 MB PUT
 $tmp = New-TemporaryFile
 [IO.File]::WriteAllBytes($tmp, (New-Object byte[] (12MB)))
-try { $code = (Invoke-WebRequest -Uri 'https://teamlink.teamlinks.in/api/lms/material-uploads/check?offset=0' -Method Put -InFile $tmp -ContentType 'application/octet-stream' -UseBasicParsing -TimeoutSec 120).StatusCode } catch { $code = $_.Exception.Response.StatusCode.value__ }
+$code = & curl.exe -s -m 120 -o NUL -w '%{http_code}' -X PUT -H 'Content-Type: application/octet-stream' --data-binary "@$tmp" 'https://teamlink.teamlinks.in/api/lms/material-uploads/check?offset=0'
 Remove-Item $tmp -ErrorAction SilentlyContinue
-if ($code -eq 401) { Write-Host "`nDONE: a 12 MB upload now reaches TeamLink (it answers 'sign in first', as it should)." -ForegroundColor Green }
+if ("$code" -eq '401') { Write-Host "`nDONE: a 12 MB upload now reaches TeamLink (it answers 'sign in first', as it should)." -ForegroundColor Green }
 else { Write-Host "`nA 12 MB upload still answers $code. Send these lines to Claude." -ForegroundColor Red }
