@@ -3,8 +3,8 @@
 # UPLOADS BIGGER THAN 1 MB ON THE LIVE SITE (2026-11-02). Checked from outside: https://teamlink.teamlinks.in took a 900 KB request
 # but answered nginx's "413 Request Entity Too Large" to a 3 MB one - nginx's default limit. So every LMS document / video over
 # ~1 MB was refused before it reached TeamLink. This sets client_max_body_size 64m for the teamlink.teamlinks.in site (LMS videos go
-# in 8 MB pieces, documents are up to 25 MB): a smaller value already in the site file is raised; none at all = one line is added
-# under the site's server_name. The site file is backed up first (/root/nginx-site-before-upload-size-<time>.conf); if nginx -t fails
+# in 8 MB pieces, documents are up to 25 MB): a smaller value already in the site file is raised, and when there is none at the
+# server level (a location's own value does not count for /api) one line is added under the site's server_name. The site file is backed up first (/root/nginx-site-before-upload-size-<time>.conf); if nginx -t fails
 # the backup is put back and nothing changes.
 # ---------------------------------------------------------------------------
 set -e
@@ -32,9 +32,12 @@ awk -v W=$WANT '
     }
     print out line
   }' "$B" > "$F"
-if ! grep -qE 'client_max_body_size' "$F"; then
-  # none at all: one line under every server_name of this site
-  awk -v W=$WANT '/^[[:space:]]*server_name[^;]*teamlink\.teamlinks\.in/ { print; print "    client_max_body_size " W "m;  # uploads: LMS pieces + documents (2026-11-02)"; next } { print }' "$B" > "$F"
+# A value inside one location (e.g. /jobs) does not cover /api. With no value at the SERVER level (indented at most 4 spaces), one line
+# goes under every server_name of this site, with the same indent - live 2026-11-02: only /jobs had 50m, so /api kept nginx's 1m.
+if ! grep -qE '^[[:space:]]{0,4}client_max_body_size' "$F"; then
+  cp -a "$F" "$F.tmp-upload-size"
+  awk -v W=$WANT '/^[[:space:]]*server_name[^;]*teamlink\.teamlinks\.in/ { print; match($0, /^[[:space:]]*/); print substr($0, 1, RLENGTH) "client_max_body_size " W "m;  # uploads: LMS pieces + documents (2026-11-02)"; next } { print }' "$F.tmp-upload-size" > "$F"
+  rm -f "$F.tmp-upload-size"
 fi
 echo "set: $(grep -nE 'client_max_body_size' "$F" | tr '\n' ' ')"
 if nginx -t 2>&1; then
