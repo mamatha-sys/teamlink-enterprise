@@ -7,6 +7,7 @@ import { useSearchParams } from 'react-router-dom';
 import api from '../../api';
 import Modal from '../../components/Modal.jsx';
 import { useCrm, errOf, dateOf, istToday, Pill, RecordForm, RecordPanel, useOpenParam, download } from './crmShared.jsx';
+import CrmCampaigns from './CrmCampaigns.jsx';
 
 function ImportLeads({ onClose, onDone }) {
   const { me, toast } = useCrm();
@@ -66,6 +67,7 @@ function ImportLeads({ onClose, onDone }) {
 export default function CrmLeads() {
   const { me, toast } = useCrm();
   const [sp, setSp] = useSearchParams();
+  const [view, setView] = useState(sp.get('tab') === 'campaigns' ? 'campaigns' : 'leads');
   const [open, setOpen] = useOpenParam(sp, setSp);
   const [adding, setAdding] = useState(sp.get('add') === '1');
   const [importing, setImporting] = useState(false);
@@ -91,13 +93,18 @@ export default function CrmLeads() {
   return (
     <div className="page">
       <div className="page-head">
-        <div><h1>Leads</h1><div className="page-sub">Companies to sell to, before they become a deal</div></div>
+        <div><h1>Leads</h1><div className="page-sub">Companies to sell to, before they become a deal · campaigns to reach many at once</div></div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button type="button" className="btn" onClick={() => download('/crm/export/leads', `crm-leads-${today}.csv`).catch(() => toast('The download did not work.'))}>Download</button>
           {me.canEdit && <button type="button" className="btn" onClick={() => setImporting(true)}>Import Excel</button>}
           {me.canEdit && <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>+ Lead</button>}
         </div>
       </div>
+      <div className="tabs" role="tablist">
+        {[['leads', 'Leads'], ['campaigns', 'Campaigns']].map(([k, l]) => <div key={k} role="tab" tabIndex={0} aria-selected={view === k} className={`tab${view === k ? ' active' : ''}`} onClick={() => setView(k)} onKeyDown={(e) => { if (e.key === 'Enter') setView(k); }}>{l}</div>)}
+      </div>
+      {view === 'campaigns' && <CrmCampaigns />}
+      {view === 'leads' && (<>
       <div className="filter-row">
         <input type="text" placeholder="Search company, person, phone, email, city" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 260 }} aria-label="Search leads" />
         <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status">
@@ -151,6 +158,7 @@ export default function CrmLeads() {
           </tbody>
         </table>
       </div>
+      </>)}
       {adding && <RecordForm kind="lead" preset={{ source: '' }} onClose={() => setAdding(false)} onSaved={(row) => { setAdding(false); load(); setOpen({ kind: 'lead', id: row.id }); }} />}
       {importing && <ImportLeads onClose={() => setImporting(false)} onDone={() => { setImporting(false); load(); }} />}
       {open && <RecordPanel kind={open.kind} id={open.id} onClose={() => setOpen(null)} onChanged={load} />}

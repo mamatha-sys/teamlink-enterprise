@@ -168,6 +168,41 @@ export function ForecastFunnel() {
   );
 }
 
+// Sample data to try every screen (crm/sample.js): load / remove, a sales manager or Admin
+function SampleData() {
+  const { toast } = useCrm();
+  const [st, setSt] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const load = () => api.get('/crm/sample').then((r) => setSt(r.data)).catch(() => setSt(null));
+  useEffect(() => { load(); }, []);
+  async function act(on) {
+    setBusy(true);
+    try {
+      const r = on ? await api.post('/crm/sample') : await api.delete('/crm/sample');
+      toast(on ? `Sample data loaded: ${r.data.counts.leads} leads, ${r.data.counts.deals} deals, ${r.data.counts.tickets} tickets.` : 'Sample data removed.');
+      setTimeout(() => window.location.reload(), 900);
+    } catch (e) { toast(errOf(e, 'This did not work.')); setBusy(false); }
+  }
+  if (!st) return null;
+  return (
+    <div className="card" style={{ padding: 12, marginBottom: 14, background: 'var(--line-soft)' }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 240 }}>
+          <b>Sample data</b>
+          <div className="small-muted" style={{ fontSize: 12.5 }}>
+            {st.loaded
+              ? `Loaded by ${st.by || '—'}: ${st.counts.leads} leads, ${st.counts.accounts} accounts, ${st.counts.deals} deals, ${st.counts.tickets} tickets. Every name starts with "Sample ·".`
+              : 'Fill the CRM with a small sample sales book (leads, accounts, deals in every stage, calls, follow-ups, tickets, a target, a proposal) to try every screen. No message is sent for it; remove it in one click.'}
+          </div>
+        </div>
+        {st.loaded
+          ? <button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={() => act(false)}>{busy ? 'Removing…' : 'Remove sample data'}</button>
+          : <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => act(true)}>{busy ? 'Loading…' : 'Load sample data'}</button>}
+      </div>
+    </div>
+  );
+}
+
 export function CrmSettings({ onClose, onSaved }) {
   const { me, toast } = useCrm();
   const L = me.lists;
@@ -191,6 +226,7 @@ export function CrmSettings({ onClose, onSaved }) {
   }
   return (
     <Modal title="CRM settings" size="wide" onClose={onClose} foot={<><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="button" className="btn btn-primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button></>}>
+      <SampleData />
       <div className="section-label" style={{ marginTop: 0 }}>Sales team</div>
       <p className="small-muted" style={{ marginTop: 0 }}>Who uses the CRM. A <b>Salesperson</b> sees and works their own leads and deals; a <b>Sales manager</b> sees the whole team, gives leads to people, sets targets and these settings. The BDEs and BDE team leads are on the team already; add anybody else here.</p>
       {f.salesTeam.map((m, i) => (

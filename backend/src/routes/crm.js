@@ -16,6 +16,9 @@
 //   GET    /crm/tasks?when=overdue|today|upcoming|open|done[&mine=1]
 //   POST   /crm/tasks                      {title, dueDate, dueTime, leadId|dealId|accountId, ownerId?}
 //   POST   /crm/tasks/:id/done             {note}
+//   GET/POST /crm/tickets   GET/PUT /crm/tickets/:id   POST /crm/tickets/:id/comments {body, toCustomer, to}   (support)
+//   GET/POST /crm/campaigns  POST /crm/campaigns/preview  GET/PUT /crm/campaigns/:id  POST .../test {to}  .../send  .../cancel
+//   POST   /crm/opt-out {channel, value}    GET /crm/ai/insight/:kind/:id    POST /crm/ai/summary|draft/:kind/:id    POST /crm/ai/ask
 //   GET    /crm/overview?period=month|last_month|quarter|year[&mine=1]   the dashboard cards, funnel, today, recent deals, flow
 //   GET    /crm/activities?kind=&from=&to=&owner=&q=   every call / meeting / email / WhatsApp / note in one list
 //   GET    /crm/reports?month=YYYY-MM      BDE performance vs target, forecast, funnel, deals going cold
@@ -29,6 +32,9 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const CRM = require('../crm/service');
 const X = require('../crm/extra');
+const SUP = require('../crm/support');
+const CMP = require('../crm/campaigns');
+const AI = require('../crm/ai');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -55,6 +61,31 @@ router.post('/tasks/:id/done', wrap((req) => CRM.finishTask(req.user, req.params
 router.post('/activities', wrap((req) => CRM.addActivity(req.user, req.body || {})));
 
 // the full CRM (crm/extra.js): reports, targets, settings, import, bulk, export, proposals
+// Sample data to try the CRM (crm/sample.js): status / load / remove - a sales manager or Admin
+router.get('/sample', wrap((req) => require('../crm/sample').status(req.user))); // eslint-disable-line global-require
+router.post('/sample', wrap((req) => require('../crm/sample').load(req.user))); // eslint-disable-line global-require
+router.delete('/sample', wrap((req) => require('../crm/sample').remove(req.user))); // eslint-disable-line global-require
+// Customer support (crm/support.js)
+router.get('/tickets', wrap((req) => SUP.list(req.user, req.query || {})));
+router.post('/tickets', wrap((req) => SUP.create(req.user, req.body || {})));
+router.get('/tickets/:id', wrap((req) => SUP.detail(req.user, req.params.id)));
+router.put('/tickets/:id', wrap((req) => SUP.edit(req.user, req.params.id, req.body || {})));
+router.post('/tickets/:id/comments', wrap((req) => SUP.comment(req.user, req.params.id, req.body || {})));
+// Campaigns (crm/campaigns.js)
+router.get('/campaigns', wrap((req) => CMP.list(req.user)));
+router.post('/campaigns/preview', wrap((req) => CMP.preview(req.user, req.body || {})));
+router.post('/campaigns', wrap((req) => CMP.save(req.user, null, req.body || {})));
+router.get('/campaigns/:id', wrap((req) => CMP.detail(req.user, req.params.id)));
+router.put('/campaigns/:id', wrap((req) => CMP.save(req.user, req.params.id, req.body || {})));
+router.post('/campaigns/:id/test', wrap((req) => CMP.testSend(req.user, req.params.id, req.body || {})));
+router.post('/campaigns/:id/send', wrap((req) => CMP.sendNow(req.user, req.params.id)));
+router.post('/campaigns/:id/cancel', wrap((req) => CMP.cancel(req.user, req.params.id)));
+router.post('/opt-out', wrap((req) => CMP.markOptOut(req.user, req.body || {})));
+// AI assistant (crm/ai.js)
+router.get('/ai/insight/:kind/:id', wrap((req) => AI.insight(req.user, req.params.kind, req.params.id)));
+router.post('/ai/summary/:kind/:id', wrap((req) => AI.summary(req.user, req.params.kind, req.params.id)));
+router.post('/ai/draft/:kind/:id', wrap((req) => AI.draftEmail(req.user, req.params.kind, req.params.id, req.body || {})));
+router.post('/ai/ask', wrap((req) => AI.ask(req.user, req.body || {})));
 router.get('/overview', wrap((req) => X.overview(req.user, { period: String(req.query.period || ''), mine: String(req.query.mine || '') === '1' })));
 router.get('/activities', wrap((req) => X.activities(req.user, req.query || {})));
 router.get('/reports', wrap((req) => X.reports(req.user, { month: String(req.query.month || '') })));
@@ -99,6 +130,9 @@ router.post('/:kind(leads|accounts|contacts|deals)', wrap((req) => CRM.create(re
 router.get('/:kind(leads|accounts|contacts|deals)/:id', wrap((req) => CRM.detail(req.user, kindOf(req), req.params.id)));
 router.put('/:kind(leads|accounts|contacts|deals)/:id', wrap((req) => CRM.edit(req.user, kindOf(req), req.params.id, req.body || {})));
 router.delete('/:kind(lead|account|contact|deal|activity|task)/:id', wrap((req) => CRM.remove(req.user, req.params.kind, req.params.id)));
+
+// Campaigns that were sending when the server restarted carry on (30 s after start).
+if (!process.env.TEST_MODE) setTimeout(() => CMP.resume().catch(() => {}), 30000).unref();
 
 // Follow-up reminders for everybody, once an hour between 9 am and 8 pm India time (a bell notice + one email a day per owner).
 if (!process.env.TEST_MODE && process.env.NODE_ENV !== 'test') {

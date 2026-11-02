@@ -14,6 +14,9 @@
 //   CrmTask      a follow-up with a due date (bell + email reminder to the owner the day it is due, once)
 //   CrmTarget    a BDE's target for a month (won value, and optionally a number of deals) - set by the BDE TL / Admin
 //   CrmProposal  a proposal (fee terms, positions) made from a deal: PDF, emailed to the client, Accepted / Declined
+//   CrmTicket    a customer support ticket (priority, SLA due time, status, assignee) + CrmTicketComment (its thread)
+//   CrmCampaign  an email / WhatsApp campaign to filtered leads or contacts + CrmCampaignRecipient (one row a person)
+//   CrmOptOut    an email / phone that asked for no more campaign messages (unsubscribe link, or marked by hand)
 // ---------------------------------------------------------------------------
 const prisma = require('../db');
 
@@ -105,6 +108,58 @@ const DDL = [
     "createdById" TEXT, "createdByName" TEXT, "createdAt" TEXT NOT NULL, "updatedAt" TEXT NOT NULL
   )`,
   'CREATE INDEX IF NOT EXISTS "CrmProposal_deal" ON "CrmProposal"("dealId")',
+  // (2026-11-02, Campaigns / Customer Support from the reference) support tickets with their thread; campaigns with their
+  // recipients; people who asked for no more campaign messages
+  `CREATE TABLE IF NOT EXISTS "CrmTicket" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "number" TEXT NOT NULL,
+    "subject" TEXT NOT NULL, "description" TEXT,
+    "accountId" TEXT, "contactId" TEXT,
+    "category" TEXT, "channel" TEXT,
+    "priority" TEXT NOT NULL DEFAULT 'Medium',
+    "status" TEXT NOT NULL DEFAULT 'Open',
+    "dueAt" TEXT, "firstReplyAt" TEXT, "resolvedAt" TEXT, "closedAt" TEXT,
+    ${owner}
+  )`,
+  'CREATE INDEX IF NOT EXISTS "CrmTicket_status" ON "CrmTicket"("status", "dueAt")',
+  'CREATE INDEX IF NOT EXISTS "CrmTicket_account" ON "CrmTicket"("accountId")',
+  `CREATE TABLE IF NOT EXISTS "CrmTicketComment" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "ticketId" TEXT NOT NULL,
+    "body" TEXT NOT NULL,
+    "internal" INTEGER NOT NULL DEFAULT 1,
+    "emailedTo" TEXT,
+    "byId" TEXT, "byName" TEXT, "createdAt" TEXT NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS "CrmTicketComment_ticket" ON "CrmTicketComment"("ticketId")',
+  `CREATE TABLE IF NOT EXISTS "CrmCampaign" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "name" TEXT NOT NULL,
+    "channel" TEXT NOT NULL,
+    "subject" TEXT, "body" TEXT NOT NULL,
+    "waTemplate" TEXT, "waLanguage" TEXT,
+    "audienceJson" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'Draft',
+    "total" INTEGER NOT NULL DEFAULT 0, "sent" INTEGER NOT NULL DEFAULT 0, "failed" INTEGER NOT NULL DEFAULT 0, "skipped" INTEGER NOT NULL DEFAULT 0,
+    "startedAt" TEXT, "finishedAt" TEXT,
+    ${owner}
+  )`,
+  `CREATE TABLE IF NOT EXISTS "CrmCampaignRecipient" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "campaignId" TEXT NOT NULL,
+    "kind" TEXT NOT NULL, "recordId" TEXT NOT NULL,
+    "name" TEXT, "company" TEXT, "toAddr" TEXT,
+    "status" TEXT NOT NULL DEFAULT 'queued',
+    "error" TEXT, "sentAt" TEXT
+  )`,
+  'CREATE INDEX IF NOT EXISTS "CrmCampaignRecipient_campaign" ON "CrmCampaignRecipient"("campaignId", "status")',
+  `CREATE TABLE IF NOT EXISTS "CrmOptOut" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "value" TEXT NOT NULL,
+    "channel" TEXT NOT NULL,
+    "reason" TEXT, "byId" TEXT, "createdAt" TEXT NOT NULL
+  )`,
+  'CREATE UNIQUE INDEX IF NOT EXISTS "CrmOptOut_value" ON "CrmOptOut"("value", "channel")',
 ];
 // Columns added after the first release: added once, "duplicate column" is the normal answer afterwards.
 const COLUMNS = [

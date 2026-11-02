@@ -73,9 +73,11 @@ function Overview({ mine, period, onTab }) {
   const { me } = useCrm();
   const [o, setO] = useState(null);
   const [d, setD] = useState(null);
+  const [sup, setSup] = useState(null);
   const [err, setErr] = useState('');
   const load = () => {
     const params = mine ? { mine: 1 } : {};
+    api.get('/crm/tickets', { params: { status: 'open' } }).then((r) => setSup(r.data.stats)).catch(() => setSup(null));
     api.get('/crm/overview', { params: { ...params, period } }).then((r) => { setO(r.data); setErr(''); }).catch((e) => setErr(errOf(e, 'The dashboard could not be read.')));
     api.get('/crm/dashboard', { params }).then((r) => setD(r.data)).catch(() => {});
   };
@@ -186,6 +188,15 @@ function Overview({ mine, period, onTab }) {
               </div>
             ))}
           </div>
+          {sup && (
+            <Link to="/crm/accounts?tab=tickets" className="crm-support-line">
+              <span aria-hidden="true">🎧</span> <b>Customer support</b>
+              <span>{sup.open} open</span>
+              <span style={{ color: sup.late ? 'var(--red)' : undefined }}>{sup.late} reply late</span>
+              <span>{sup.resolved30} resolved (30 days)</span>
+              <span style={{ marginLeft: 'auto', color: 'var(--crm-blue)', fontWeight: 600 }}>Tickets →</span>
+            </Link>
+          )}
           {d && d.closingSoon.length > 0 && (
             <>
               <div className="section-label">Closing in the next 30 days</div>

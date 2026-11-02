@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 import api from '../../api';
-import { CrmCtx, errOf } from './crmShared.jsx';
+import { CrmCtx, errOf, AskAi } from './crmShared.jsx';
 import CrmDashboard from './CrmDashboard.jsx';
 import CrmLeads from './CrmLeads.jsx';
 import CrmDeals from './CrmDeals.jsx';
@@ -43,7 +43,7 @@ export default function CrmPage() {
   if (!me) return <div className="page"><div className="small-muted">Loading the CRM…</div></div>;
   return (
     <CrmCtx.Provider value={ctx}>
-      <div className="crm-page"><Page /></div>
+      <div className="crm-page"><Page /><AskAi /></div>
       <div className="toast-stack" role="status" aria-live="polite">{toasts.map((t) => <div key={t.id} className="toast">{t.text}</div>)}</div>
     </CrmCtx.Provider>
   );

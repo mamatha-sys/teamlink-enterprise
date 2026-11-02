@@ -351,6 +351,7 @@ app.use('/api/admin/logins', require('./routes/adminLogins')); // separate login
 app.use('/api/ai-calling', require('./routes/aiCalling'));
 // THE SALES CRM (2026-11-02): leads, accounts & contacts, deals pipeline, activities, follow-ups, dashboard (routes/crm.js, crm/*).
 app.use('/api/crm', require('./routes/crm'));
+app.use('/api/crm-public', require('./routes/crmPublic')); // the campaign email unsubscribe link (no login)
 app.use('/api/admin', adminRoutes);
 app.use('/api/reports', reportRoutes);
 // ATS -> Reports: the ten recruitment reports, their drill-down and exports.

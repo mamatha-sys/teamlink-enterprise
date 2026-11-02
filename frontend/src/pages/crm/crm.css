@@ -106,3 +106,22 @@
 .crm-rec-info div{display:flex;gap:8px;align-items:baseline;min-width:0}
 .crm-rec-info .k{color:var(--ink-soft);font-size:12px;min-width:92px}
 @media(max-width:700px){.crm-rec-info{grid-template-columns:1fr}}
+
+/* AI assistant (2026-11-02): the insight card on a record, and the "Ask AI" button + panel on every CRM page */
+.crm-ai{border:1px solid color-mix(in srgb,#8b5cf6 30%,#fff);background:linear-gradient(135deg,color-mix(in srgb,#8b5cf6 6%,#fff),color-mix(in srgb,#2f6fed 5%,#fff));border-radius:12px;padding:12px 14px;margin-bottom:12px}
+.crm-ai-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.crm-ai-badge{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,#8b5cf6,#2f6fed);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px}
+.crm-ai-body{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}
+.crm-ai-score{display:flex;gap:10px;align-items:center}
+.crm-ai-score .ring{width:58px;height:58px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.crm-ai-score .ring span{width:44px;height:44px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px}
+.crm-ask-fab{position:fixed;right:84px;bottom:22px;z-index:90;border:none;border-radius:24px;padding:11px 18px;font-weight:600;color:#fff;background:linear-gradient(135deg,#8b5cf6,#2f6fed);box-shadow:0 8px 24px rgba(47,111,237,.35);cursor:pointer}
+.crm-ask-panel{position:fixed;right:84px;bottom:76px;z-index:91;width:min(400px,calc(100vw - 32px));max-height:min(560px,calc(100vh - 120px));background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 20px 50px rgba(18,28,52,.25);display:flex;flex-direction:column}
+.crm-ask-head{display:flex;gap:8px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)}
+.crm-ask-body{flex:1;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.crm-ask-msg{padding:8px 11px;border-radius:10px;font-size:13px;white-space:pre-wrap;max-width:92%}
+.crm-ask-msg.me{align-self:flex-end;background:var(--crm-blue,#2f6fed);color:#fff}
+.crm-ask-msg.ai{align-self:flex-start;background:var(--line-soft)}
+.crm-ask-msg.err{background:var(--red-tint);color:var(--red)}
+.crm-ask-foot{display:flex;gap:6px;padding:10px 12px;border-top:1px solid var(--line)}
+.crm-support-line{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:14px;padding:10px 12px;border-radius:10px;background:var(--line-soft);color:var(--ink);text-decoration:none;font-size:13px}

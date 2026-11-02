@@ -487,7 +487,7 @@ async function remind({ userId } = {}) {
   const today = istToday();
   const rows = await DB.all(`SELECT t.*, COALESCE(d."title", l."company", a."name") AS "recordName" FROM "CrmTask" t
     LEFT JOIN "CrmDeal" d ON d."id" = t."dealId" LEFT JOIN "CrmLead" l ON l."id" = t."leadId" LEFT JOIN "CrmAccount" a ON a."id" = t."accountId"
-    WHERE t."status" = 'Open' AND t."dueDate" <= ? AND COALESCE(t."remindedOn", '') != ? ${userId ? 'AND t."ownerId" = ?' : ''} LIMIT 500`, today, today, ...(userId ? [userId] : []));
+    WHERE t."status" = 'Open' AND t."dueDate" <= ? AND COALESCE(t."remindedOn", '') < ? ${userId ? 'AND t."ownerId" = ?' : ''} LIMIT 500`, today, today, ...(userId ? [userId] : []));
   if (!rows.length) return 0;
   const byOwner = new Map();
   rows.forEach((t) => { if (t.ownerId) byOwner.set(t.ownerId, [...(byOwner.get(t.ownerId) || []), t]); });
@@ -608,6 +608,12 @@ async function accountFromClient(user, clientId) {
   return okBody({ ok: true, account });
 }
 
+// the support pick lists (crm/support.js requires this file, so it is read when asked)
+function ticketLists() {
+  const T = require('./support'); // eslint-disable-line global-require
+  return { ticketPriorities: T.PRIORITIES, ticketStatuses: T.STATUSES, ticketCategories: T.CATEGORIES, ticketChannels: T.CHANNELS, slaHours: T.SLA_HOURS };
+}
+
 async function me(user) {
   const r = roleOf(user);
   if (!r) return fail(403, 'The CRM is for the sales team. Ask an Admin to add you to the sales team (CRM settings).');
@@ -617,7 +623,7 @@ async function me(user) {
     role: r, canEdit: mayEdit(r), canAssign: mayAssign(r), seesAll: seesAll(r),
     owners: mayAssign(r) || seesAll(r) ? await ownerOptions() : [],
     salesTeam: mayAssign(r) ? st.salesTeam : [], // the people added in CRM settings (the BDEs / BDE TLs are on the team anyway)
-    lists: { stages: STAGES, stageProbability: st.stageProbability, leadStatuses: LEAD_STATUSES, sources: st.sources, contactRoles: CONTACT_ROLES, activityKinds: ACTIVITY_KINDS, lostReasons: st.lostReasons, ratings: RATINGS, staleDays: st.staleDays, proposalValidityDays: st.proposalValidityDays },
+    lists: { stages: STAGES, stageProbability: st.stageProbability, leadStatuses: LEAD_STATUSES, sources: st.sources, contactRoles: CONTACT_ROLES, activityKinds: ACTIVITY_KINDS, lostReasons: st.lostReasons, ratings: RATINGS, staleDays: st.staleDays, proposalValidityDays: st.proposalValidityDays, ...ticketLists() },
   });
 }
 

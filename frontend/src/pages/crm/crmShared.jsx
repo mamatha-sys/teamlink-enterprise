@@ -10,6 +10,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../../api';
 import Modal from '../../components/Modal.jsx';
+import { TicketList } from './CrmSupport.jsx'; // eslint-disable-line import/no-cycle
 
 export const CrmCtx = createContext(null);
 export const useCrm = () => useContext(CrmCtx);
@@ -443,6 +444,94 @@ function ProposalBox({ dealId, onChanged }) {
   );
 }
 
+// ---- the AI assistant on a record: health score, next best actions (rules, always), summary / email draft (the model) ------
+function AiInsight({ kind, id, refresh }) {
+  const { toast } = useCrm();
+  const [d, setD] = useState(null);
+  const [out, setOut] = useState(null); // { title, text }
+  const [busy, setBusy] = useState('');
+  useEffect(() => { if (!['lead', 'deal', 'account'].includes(kind)) return; api.get(`/crm/ai/insight/${kind}/${id}`).then((r) => setD(r.data)).catch(() => setD(null)); }, [kind, id, refresh]);
+  async function ask(what) {
+    setBusy(what); setOut(null);
+    try {
+      const r = await api.post(`/crm/ai/${what}/${kind}/${id}`, {});
+      setOut({ title: what === 'summary' ? 'AI summary' : 'Follow-up email draft', text: r.data.text });
+    } catch (e) { toast(errOf(e, 'The AI is not available right now.')); } finally { setBusy(''); }
+  }
+  if (!d) return null;
+  const tone = d.score >= 70 ? 'var(--teal)' : d.score >= 45 ? 'var(--amber)' : 'var(--red)';
+  return (
+    <div className="crm-ai">
+      <div className="crm-ai-head">
+        <span className="crm-ai-badge" aria-hidden="true">✨</span>
+        <b>AI assistant</b>
+        <span className="small-muted" style={{ fontSize: 11.5 }}>{d.ai && d.ai.available ? `model: ${d.ai.provider}` : 'insights from your CRM data'}</span>
+        <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
+          <button type="button" className="btn btn-sm" disabled={!!busy} onClick={() => ask('summary')}>{busy === 'summary' ? 'Thinking…' : 'Summarize'}</button>
+          {kind !== 'account' && <button type="button" className="btn btn-sm" disabled={!!busy} onClick={() => ask('draft')}>{busy === 'draft' ? 'Writing…' : 'Draft follow-up email'}</button>}
+        </span>
+      </div>
+      <div className="crm-ai-body">
+        <div className="crm-ai-score" title={d.reasons.map((r) => r.why).join('\n')}>
+          <div className="ring" style={{ background: `conic-gradient(${tone} ${d.score * 3.6}deg, var(--line-soft) 0)` }}><span>{d.score}</span></div>
+          <div><b style={{ color: tone }}>{d.label}</b><div className="small-muted" style={{ fontSize: 11.5 }}>{kind === 'deal' ? 'deal health' : kind === 'lead' ? 'lead score' : 'account health'}</div></div>
+        </div>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div className="small-muted" style={{ fontSize: 11.5, fontWeight: 600, marginBottom: 4 }}>NEXT BEST ACTIONS</div>
+          {!d.actions.length && <div className="small-muted">Nothing pressing. Keep the follow-ups going.</div>}
+          {d.actions.map((a) => <div key={a.text} style={{ fontSize: 13, padding: '2px 0' }}>{a.urgent ? '🔴' : '•'} {a.text}</div>)}
+          <details style={{ marginTop: 4 }}><summary className="small-muted" style={{ fontSize: 11.5, cursor: 'pointer' }}>Why this score</summary>{d.reasons.map((r) => <div key={r.why} className="small-muted" style={{ fontSize: 12 }}>{r.pts > 0 ? `+${r.pts}` : r.pts || ''} {r.why}</div>)}</details>
+        </div>
+      </div>
+      {out && (
+        <div className="card" style={{ padding: 10, marginTop: 8, whiteSpace: 'pre-wrap', fontSize: 13 }}>
+          <div style={{ display: 'flex', marginBottom: 4 }}><b>{out.title}</b><button type="button" className="crm-linkbtn" style={{ marginLeft: 'auto' }} onClick={() => { navigator.clipboard.writeText(out.text).then(() => toast('Copied.')).catch(() => {}); }}>Copy</button></div>
+          {out.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// "Ask AI" about my pipeline: a floating button on every CRM page
+export function AskAi() {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [chat, setChat] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const SUGGEST = ['Which deals need my attention this week?', 'Which follow-ups are late?', 'How far am I from my target this month?', 'Which leads should I call today?'];
+  async function send(text) {
+    const question = (text || q).trim();
+    if (!question) return;
+    setChat((c) => [...c, { who: 'me', text: question }]); setQ(''); setBusy(true);
+    try { const r = await api.post('/crm/ai/ask', { question }); setChat((c) => [...c, { who: 'ai', text: r.data.text }]); } catch (e) { setChat((c) => [...c, { who: 'ai', text: errOf(e, 'The AI is not available right now.'), err: true }]); } finally { setBusy(false); }
+  }
+  return (
+    <>
+      <button type="button" className="crm-ask-fab" onClick={() => setOpen((o) => !o)} aria-expanded={open}>✨ Ask AI</button>
+      {open && (
+        <div className="crm-ask-panel" role="dialog" aria-label="Ask AI about your sales">
+          <div className="crm-ask-head"><b>✨ AI assistant</b><span className="small-muted" style={{ fontSize: 11.5 }}>answers from your CRM data</span><button type="button" className="close-x" style={{ marginLeft: 'auto' }} onClick={() => setOpen(false)} aria-label="Close">×</button></div>
+          <div className="crm-ask-body">
+            {!chat.length && (
+              <div>
+                <div className="small-muted" style={{ marginBottom: 6 }}>Ask about your leads, deals, follow-ups and target. For example:</div>
+                {SUGGEST.map((s) => <button key={s} type="button" className="btn btn-sm" style={{ display: 'block', marginBottom: 6, textAlign: 'left', width: '100%' }} onClick={() => send(s)}>{s}</button>)}
+              </div>
+            )}
+            {chat.map((m, i) => <div key={i} className={`crm-ask-msg ${m.who}${m.err ? ' err' : ''}`}>{m.text}</div>)} {/* eslint-disable-line react/no-array-index-key */}
+            {busy && <div className="crm-ask-msg ai small-muted">Thinking…</div>}
+          </div>
+          <div className="crm-ask-foot">
+            <input type="text" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') send(); }} placeholder="Ask a question" aria-label="Question" />
+            <button type="button" className="btn btn-primary btn-sm" disabled={busy || !q.trim()} onClick={() => send()}>Ask</button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ---- one record ---------------------------------------------------------------------------------------------
 export function RecordPanel({ kind, id, onClose, onChanged }) {
   const { me, toast } = useCrm();
@@ -502,7 +591,7 @@ export function RecordPanel({ kind, id, onClose, onChanged }) {
       ['Next follow-up', nextTask ? <span style={{ color: nextTask.dueDate < today ? 'var(--red)' : undefined, fontWeight: nextTask.dueDate <= today ? 600 : undefined }}>{nextTask.dueDate === today ? 'Today' : dateOf(nextTask.dueDate)} · {nextTask.title}</span> : 'None set'],
       ['Last touched', lastAct ? `${dateTimeOf(lastAct.at)}${lastAct.byName ? ` · ${lastAct.byName}` : ''}` : 'Never'],
     ].filter(([, v]) => v);
-    const tabs = [['overview', 'Overview'], ['activities', `Activities (${(d.activities || []).length})`], ['followups', `Follow-ups (${openTasks.length})`], ...(kind === 'deal' ? [['proposals', 'Proposals']] : []), ['notes', 'Notes']];
+    const tabs = [['overview', 'Overview'], ['activities', `Activities (${(d.activities || []).length})`], ['followups', `Follow-ups (${openTasks.length})`], ...(kind === 'deal' ? [['proposals', 'Proposals']] : []), ...(kind === 'account' ? [['support', 'Support tickets']] : []), ['notes', 'Notes']];
     const kindPill = kind === 'lead' ? row.status : kind === 'deal' ? row.stage : row.kind;
     body = (
       <>
@@ -556,6 +645,7 @@ export function RecordPanel({ kind, id, onClose, onChanged }) {
         </div>
         {tab === 'overview' && (
           <>
+            <AiInsight kind={kind} id={row.id} refresh={d} />
             {kind === 'account' && (
               <div className="grid-2" style={{ marginBottom: 12 }}>
                 <div className="card" style={{ padding: 12 }}>
@@ -601,6 +691,7 @@ export function RecordPanel({ kind, id, onClose, onChanged }) {
         )}
         {tab === 'followups' && <TaskList tasks={d.tasks || []} link={link} onChanged={changed} canEdit={d.canEdit} />}
         {tab === 'proposals' && kind === 'deal' && <ProposalBox dealId={row.id} onChanged={changed} />}
+        {tab === 'support' && kind === 'account' && <TicketList accountId={row.id} compact />}
         {tab === 'notes' && (
           <div>
             {notes == null ? (
