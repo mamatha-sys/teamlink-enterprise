@@ -1,5 +1,6 @@
 // ---------------------------------------------------------------------------
-// THE SALES CRM API (founder 2026-11-02) - the rules and data are in crm/service.js.
+// THE SALES CRM API (founder 2026-11-02) - the rules and data are in crm/service.js. Mounted at /api/crm in index.js; the
+// screen says "The CRM could not be opened" when this mount is missing on a server (a copy without this file was deployed).
 //
 //   GET    /crm/me                         my CRM role, the owner list, the pick lists (stages, sources ...)
 //   GET    /crm/dashboard[?mine=1]         pipeline, won / lost this month, follow-ups due, lead sources, closing soon
