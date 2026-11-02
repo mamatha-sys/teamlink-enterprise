@@ -8,7 +8,9 @@
 # hands each call to Green Start on the server itself. For that, TeamLink needs Green Start's SMSTAKE_RCS_WEBHOOK_SECRET:
 #   1. reads it from /opt/green-start/gs-api/.env (if it is not set there, makes a new random one and sets it there; Green Start restarts);
 #   2. puts the SAME value into /opt/teamlink-enterprise/backend/.env as GREENSTART_RCS_WEBHOOK_SECRET (TeamLink restarts);
-#   3. pulls Omni-Channel's RCS templates into TeamLink once and prints the result line.
+#   3. gives TeamLink's rcssms.in account to every Omni-Channel workspace (Settings > Integrations > RCS there; the password goes server
+#      to server, never shown) and prints what each workspace says;
+#   4. templates both ways once: Omni-Channel's into TeamLink, TeamLink's APPROVED ones into Omni-Channel; prints the result line.
 # Never prints the secret. Changes nothing else. rcssms.in's settings are not touched.
 # ---------------------------------------------------------------------------
 $ErrorActionPreference = 'Stop'
@@ -43,14 +45,24 @@ else
 fi
 for i in $(seq 1 40); do curl -fsS -m 3 http://127.0.0.1:4010/api/health > /dev/null 2>&1 && break; sleep 2; done
 for i in $(seq 1 40); do curl -fsS -m 3 http://127.0.0.1:4020/api/v1/health > /dev/null 2>&1 && break; sleep 2; done
-echo "== taking Omni-Channel's RCS templates into TeamLink once"
+echo "== the rcssms.in account into Omni-Channel (every workspace)"
+cd /opt/teamlink-enterprise/backend
+node -e '
+require("dotenv").config();
+require("./src/utils/greenStartIntegrations").sync({ force: true, why: "link-rcs script" }).then((r) => {
+  for (const w of r.workspaces || []) console.log("   " + w.name + ": RCS " + ((w.channels.rcs || {}).state || "-") + " - " + ((w.channels.rcs || {}).words || ""));
+  if (!(r.workspaces || []).length) console.log("   " + r.words);
+  return require("./src/db").$disconnect();
+}).catch((e) => { console.log("   failed: " + String(e.message).slice(0, 200)); process.exit(1); });
+'
+echo "== RCS templates both ways once"
 cd /opt/teamlink-enterprise/backend
 node -e '
 require("dotenv").config();
 const O = require("./src/utils/rcsOmniSync");
 O.pull({ why: "link-script" }).then((r) => { console.log("   " + (r.ok ? "OK: " : "NOT DONE: ") + r.words); return require("./src/db").$disconnect(); }).catch((e) => { console.log("   failed: " + String(e.message).slice(0, 200)); process.exit(1); });
 '
-echo "Done. Integrations > RCS > Templates shows the Omni-Channel templates (approved ones can be sent) and, after rcssms.in's next call, \"Last rcssms.in answer passed to Omni-Channel\"."
+echo "Done. Omni-Channel > Communication > RCS can pick the account; Integrations > RCS > Templates (TeamLink) and Manage Templates > RCS (Omni-Channel) show the same approved template ids."
 '@
 $script = $script.Replace("`r", '')
 # tr on the server: PowerShell ends piped text with a Windows line end, which bash would read as a command
