@@ -26,6 +26,11 @@ const T = require('../utils/messageTemplates');
 
 const router = express.Router();
 router.use(requireAuth);
+// a number saved / moved / given to a department -> its Omni-Channel department workspace and login follow (utils/omniDeptLogins.js)
+router.use((req, res, next) => {
+  if (req.method !== 'GET') res.on('finish', () => { if (res.statusCode < 300) require('../utils/omniDeptLogins').schedule('WhatsApp number saved'); }); // eslint-disable-line global-require
+  next();
+});
 
 const wrap = (fn) => async (req, res, next) => { try { await fn(req, res); } catch (e) { next(e); } };
 const external = (u) => ['CLIENT', 'CANDIDATE', 'VENDOR', 'PARTNER'].includes(u.role) || ['CLIENT', 'CANDIDATE'].includes(u.atsRole);

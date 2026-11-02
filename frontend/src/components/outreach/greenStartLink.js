@@ -56,10 +56,15 @@ export async function openGreenStart({ url, postSession, openWindow, assign, goL
   }
   let dest = url;
   if (getTicket) {
-    try {
-      const t = await getTicket();
-      if (t && t.ticket) dest = `${String(url).replace(/\/+$/, '')}/auth/teamlink#ticket=${encodeURIComponent(t.ticket)}&next=${encodeURIComponent(t.next || '/app')}`;
-    } catch { /* no ticket: Green Start's own login page, as before */ }
+    let t = null;
+    try { t = await getTicket(); } catch { /* no ticket: Green Start's own login page, as before */ }
+    // Omni-Channel by department (2026-11-02): this person's department has no Omni-Channel login yet -> say why, open nothing
+    if (t && t.blocked) {
+      if (tab) { try { tab.close(); } catch { /* gone */ } }
+      if (notify) notify(t.reason || 'Omni-Channel is not open for your department yet.');
+      return { mode: 'error', reason: t.reason };
+    }
+    if (t && t.ticket) dest = `${String(url).replace(/\/+$/, '')}/auth/teamlink#ticket=${encodeURIComponent(t.ticket)}&next=${encodeURIComponent(t.next || '/app')}`;
   }
   // 3. send the tab on; it must not be able to reach back into TeamLink
   if (tab && tab.closed) return { mode: 'cancelled' }; // the person closed the new tab while waiting: nothing more to do

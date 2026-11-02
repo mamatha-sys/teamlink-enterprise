@@ -13,6 +13,50 @@ const STATE = {
 };
 const when = (iso) => (iso ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
 
+// Omni-Channel BY DEPARTMENT (founder 2026-11-02, backend utils/omniDeptLogins.js): a WhatsApp number's department decides its workspace
+// ("Teamlink <Department>"); each department has its own Omni-Channel login, a member of only that workspace. Super Admin and Admin
+// open the company account (every department); everybody else opens their department's login (their number, its replies, campaigns).
+function DepartmentLogins({ canConfigure }) {
+  const [d, setD] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const load = () => api.get('/omni-gs/departments').then((r) => setD(r.data)).catch(() => setD({ departments: [], last: null }));
+  useEffect(() => { load(); }, []);
+  async function run() {
+    setBusy(true); setMsg('');
+    try { const r = await api.post('/omni-gs/departments/run'); setMsg(r.data.words); await load(); } catch (e) { setMsg(e.response?.data?.error || 'It could not be set up.'); } finally { setBusy(false); }
+  }
+  const rows = (d && d.departments) || [];
+  return (
+    <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div>
+          <b>Departments in Omni-Channel</b>
+          <div className="small-muted" style={{ marginTop: 4, lineHeight: 1.6 }}>
+            Give each WhatsApp number one department (Connections &gt; WhatsApp &gt; the number&apos;s access). That department gets its own Omni-Channel workspace
+            with that number, and its own login: its people see only their number, its replies and their campaigns. Super Admin and Admin see every department.
+          </div>
+        </div>
+        {canConfigure && <button className="btn" onClick={run} disabled={busy}>{busy ? 'Setting up…' : 'Set up department logins now'}</button>}
+      </div>
+      {msg && <div className="small-muted" role="status" style={{ marginTop: 10 }}>{msg}</div>}
+      {d && d.last && <div className="small-muted" style={{ marginTop: 8 }}>Last checked {when(d.last.at)}: {d.last.words}</div>}
+      {rows.length > 0 && (
+        <table className="table" style={{ marginTop: 10 }}>
+          <thead><tr><th>Department</th><th>Workspace</th><th>WhatsApp number</th><th>Its Omni-Channel login</th><th>State</th></tr></thead>
+          <tbody>{rows.map((r) => (
+            <tr key={`${r.dept}-${r.number}`}>
+              <td><b>{r.dept}</b></td><td>{r.workspace || '—'}</td><td>{r.number || <span className="small-muted">none now</span>}</td>
+              <td style={{ fontSize: 12 }}>{r.email || '—'}</td>
+              <td><Chip tone={r.state === 'ready' ? 'live' : 'red'}>{r.state === 'ready' ? 'Ready' : 'Did not work'}</Chip>{r.words && <div className="small-muted" style={{ fontSize: 12, marginTop: 2 }}>{r.words}</div>}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 function Chip({ tone, children }) {
   const bg = tone === 'live' ? '#e8f7ef' : tone === 'red' ? '#fdecec' : '#f1f3f6';
   const fg = tone === 'live' ? '#1c7c4a' : tone === 'red' ? '#b42318' : '#555';
@@ -51,6 +95,8 @@ export default function OmniChannelIntegrations({ canConfigure }) {
         </div>
         {msg && <div className="small-muted" role="status" style={{ marginTop: 10 }}>{msg}</div>}
       </div>
+
+      <DepartmentLogins canConfigure={canConfigure} />
 
       <OmniWhatsappMap onSaved={load} />
 

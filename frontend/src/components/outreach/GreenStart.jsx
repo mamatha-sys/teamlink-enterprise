@@ -357,9 +357,11 @@ export default function GreenStart({ full = false }) {
   // NO LOGIN PAGE (founder 2026-10-26): when the server has one-click sign-in set up, /green-start opens Green Start already signed in to
   // the company account (a single-use 60 s ticket from POST /api/omni-gs/sso-ticket). Not set up = Green Start's own login, as before.
   const [sso, setSso] = useState(undefined); // undefined = asking, null = not set up, string = the signed-in link
+  const [blocked, setBlocked] = useState(''); // Omni-Channel by department: this person's department has no login yet (the reason)
   useEffect(() => {
     if (!full || !ready || sso !== undefined) return; // /omni-channel asks for its own ticket when the button is clicked
     api.post('/omni-gs/sso-ticket').then((r) => {
+      if (r.data && r.data.blocked) { setBlocked(r.data.reason || 'Omni-Channel is not open for your department yet.'); setSso(null); return; }
       const t = r.data && r.data.ticket;
       setSso(t ? `${gsOrigin(st && st.port)}/auth/teamlink#ticket=${encodeURIComponent(t)}&next=${encodeURIComponent(r.data.next || '/app')}` : null);
     }).catch(() => setSso(null));
@@ -373,9 +375,10 @@ export default function GreenStart({ full = false }) {
     return () => { document.title = was; };
   }, [full]);
   // /green-start: this tab BECOMES Green Start (replace: Back does not land on this hand-over page and its used ticket again)
-  const goTop = full && ready && sso !== undefined;
+  const goTop = full && ready && sso !== undefined && !blocked;
   useEffect(() => { if (goTop) window.location.replace(src); }, [goTop, src]);
   if (goTop) return <div className="gs-wrap"><div className="oc-note" role="status">Opening Green Start…</div></div>;
+  if (full && blocked) return <div className="gs-wrap"><div className="oc-note" role="alert">{blocked}</div></div>;
   const frameSlot = ready ? <OpenGreenStart port={st && st.port} onNote={setNote} /> : null;
 
   return <GreenStartView st={st} err={err} busy={busy} ready={ready} onCheck={check} onAction={act} onLog={showLog} log={log} logPart={logPart} note={note} frameSlot={frameSlot} srcUrl={loginUrl} />;

@@ -82,7 +82,7 @@ async function signIn() {
 }
 async function workspacesOf(token) {
   const list = await call('GET', '/workspaces', { token });
-  return (Array.isArray(list) ? list : (list && list.items) || []).map((w) => ({ id: w.id, name: w.name }));
+  return (Array.isArray(list) ? list : (list && list.items) || []).map((w) => ({ id: w.id, name: w.name, orgId: (w.organization && w.organization.id) || w.organizationId || null }));
 }
 
 // One Green Start template (its wire form) -> the rcs_templates fields, or null when it has no rcssms.in id.
@@ -242,4 +242,4 @@ async function forget(templateId) {
 
 const lastPull = () => lastOf(STATE_KEY);
 const lastForward = () => lastOf(FWD_KEY);
-module.exports = { pull, forward, pullAfterApproval, forget, start, lastPull, lastForward, rowOf, pasteBodyOf, STATE_KEY, FWD_KEY, GONE_KEY };
+module.exports = { pull, forward, pullAfterApproval, forget, start, lastPull, lastForward, rowOf, pasteBodyOf, call, signIn, workspacesOf, STATE_KEY, FWD_KEY, GONE_KEY };

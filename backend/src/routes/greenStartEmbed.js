@@ -68,14 +68,31 @@ router.get('/log', adminOnly, limited, (req, res) => {
 const prisma = require('../db');
 const { SSO_EMAIL_KEY, EMAIL_RE, ssoEmail, greenStartTicket } = require('../utils/greenStartSso');
 
+// BY DEPARTMENT (founder 2026-11-02, utils/omniDeptLogins.js): Super Admin / Admin open the company account (every workspace); everybody
+// else opens their department's own login, a member of only their department workspace (their WhatsApp number, its replies, their
+// campaigns). No department login yet = no ticket, with the reason (never the company account).
 router.post('/sso-ticket', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   const secret = String(process.env.GREENSTART_SSO_SECRET || '');
   if (secret.length < 32) return res.json({ ticket: null, reason: 'One-click sign-in is not set up on this server (GREENSTART_SSO_SECRET).' });
-  const email = await ssoEmail();
-  if (!EMAIL_RE.test(email)) return res.json({ ticket: null, reason: 'An Admin has not picked the company Green Start account yet (Omni-Channel → Manage).' });
-  await logAudit({ userId: req.user.id, actorName: req.user.name, action: 'Opened Omni-Channel (Green Start) with the company account', entity: 'GreenStart', toValue: email }).catch(() => {});
-  return res.json({ ticket: greenStartTicket({ email, name: 'TeamLink', externalUserId: req.user.id }), next: '/app' });
+  const company = await ssoEmail();
+  if (!EMAIL_RE.test(company)) return res.json({ ticket: null, reason: 'An Admin has not picked the company Green Start account yet (Omni-Channel → Manage).' });
+  const who = await require('../utils/omniDeptLogins').loginFor(req.user); // eslint-disable-line global-require
+  if (who.blocked) return res.json({ ticket: null, blocked: true, reason: who.reason });
+  const email = who.email;
+  await logAudit({ userId: req.user.id, actorName: req.user.name, action: who.all ? 'Opened Omni-Channel (Green Start) with the company account' : `Opened Omni-Channel (Green Start) as ${who.dept}`, entity: 'GreenStart', toValue: email }).catch(() => {});
+  return res.json({ ticket: greenStartTicket({ email, name: who.all ? 'TeamLink' : `TeamLink ${who.dept}`, externalUserId: req.user.id }), next: '/app', ...(who.all ? {} : { department: who.dept, workspace: who.workspace }) });
+});
+// the departments' Omni-Channel workspaces and logins (Integrations > Omni-Channel), and "Set up department logins now"
+router.get('/departments', adminOnly, async (req, res) => {
+  const st = await require('../utils/omniDeptLogins').last(); // eslint-disable-line global-require
+  // the last run's rows (ready ones, failures, numbers with several departments); before any run, the stored logins
+  res.set('Cache-Control', 'no-store').json({ last: st.last || null, departments: (st.last && st.last.rows) || Object.values(st.departments || {}) });
+});
+router.post('/departments/run', adminOnly, async (req, res) => {
+  const r = await require('../utils/omniDeptLogins').run({ why: `${req.user.name || 'Admin'} pressed Set up now` }); // eslint-disable-line global-require
+  await logAudit({ userId: req.user.id, actorName: req.user.name, action: 'Omni-Channel department logins set up', entity: 'GreenStart', entityId: 'departments', toValue: String(r.words).slice(0, 480) }).catch(() => {});
+  res.set('Cache-Control', 'no-store').json(r);
 });
 router.get('/sso-settings', adminOnly, async (req, res) => {
   res.json({ email: await ssoEmail(), secretSet: String(process.env.GREENSTART_SSO_SECRET || '').length >= 32 });
@@ -95,4 +112,5 @@ router.post('/session', (req, res) => {
   return res.set('Cache-Control', 'no-store').json({ ok: true, port: G.gatePort() });
 });
 
+require('../utils/omniDeptLogins').start(); // eslint-disable-line global-require -- hourly; not in the sandbox
 module.exports = router;
