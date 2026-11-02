@@ -17,6 +17,10 @@
 //   Omni-Channel -> TeamLink   connections() lists what Green Start has connected (Facebook, Instagram, LinkedIn, Shopify, Google Ads ...) so
 //                              Administration > Integrations > Omni-Channel shows them next to TeamLink's own (status only, never a token).
 //
+// RCS (2026-11-02, founder: "connect rcs account ... in omnichannel"): the rcssms.in login TeamLink sends with (backend/.env RCS_*,
+// set by set-rcs-credentials-on-vps.ps1) goes to EVERY workspace's SMSTAKE RCS connection (POST /integrations/smstake_rcs/api-credentials),
+// so Communication > RCS there can pick it; bulk RCS campaigns run from Omni-Channel, one person / a group from TeamLink. An RCS
+// connection somebody made inside Omni-Channel itself is never replaced.
 // When: right after Email / SMS / WhatsApp is saved, connected or disconnected in Administration > Integrations (schedule()), every hour
 // (start()), and on "Send to Omni-Channel now". A setting that did not change is not sent again (a SHA-256 fingerprint is kept per
 // workspace and channel - never the value). Nothing here can stop TeamLink: every failure becomes words in the last result.
@@ -134,12 +138,19 @@ async function teamlinkChannels() {
     else if (!token) out.threads = { none: 'Threads is not connected in TeamLink (Administration > Integrations > Facebook, Threads step).' };
     else out.threads = { body: { accessToken: token } };
   } catch (err) { out.threads = { none: `Threads could not be read: ${err.message}` }; }
+  try {
+    const c = require('./rcsService').config(); // eslint-disable-line global-require
+    if (!c.configured) out.rcs = { none: c.reason || 'RCS is not set up in TeamLink (backend/.env RCS_*).' };
+    else if (c.mode === 'token') out.rcs = { body: { secret: c.clientSecret, settings: { username: c.user, rcsId: c.rcsId, authMode: 'api_key' }, label: LABEL } };
+    else out.rcs = { body: { secret: c.pass, settings: { username: c.user, rcsId: c.rcsId, authMode: 'login' }, label: LABEL } };
+  } catch (err) { out.rcs = { none: `RCS could not be read: ${err.message}` }; }
   return out;
 }
 
 // ---- one channel into one workspace -----------------------------------------------
-const NAME = { email: 'Email', sms: 'SMS', whatsapp: 'WhatsApp', facebook: 'Facebook', threads: 'Threads' };
-const ONE_ROW = ['whatsapp', 'facebook', 'threads']; // channels that are one row in Green Start's integration list (removed by that row's id)
+const NAME = { email: 'Email', sms: 'SMS', whatsapp: 'WhatsApp', facebook: 'Facebook', threads: 'Threads', rcs: 'RCS' };
+const ONE_ROW = ['whatsapp', 'facebook', 'threads', 'rcs']; // channels that are one row in Green Start's integration list (removed by that row's id)
+const PROVIDER = { rcs: 'smstake_rcs' }; // Green Start's provider name where it is not the channel's
 const GONE = ['NOT_CONNECTED', 'DISCONNECTED'];
 async function pushOne(token, ws, channel, want, prev, force) {
   if (want.none) {
@@ -148,7 +159,7 @@ async function pushOne(token, ws, channel, want, prev, force) {
     try {
       if (ONE_ROW.includes(channel)) {
         const list = await call('GET', '/integrations', { token, ws: ws.id });
-        const row = (list || []).find((x) => x.provider === channel && x.id && !GONE.includes(x.status));
+        const row = (list || []).find((x) => x.provider === (PROVIDER[channel] || channel) && x.id && !GONE.includes(x.status));
         if (row) await call('DELETE', `/integrations/${row.id}`, { token, ws: ws.id });
       } else await call('DELETE', `/integrations/${channel}`, { token, ws: ws.id });
       return { state: 'removed', words: `Disconnected in Omni-Channel too (TeamLink: ${want.none})`, fp: null };
@@ -188,6 +199,17 @@ async function pushOne(token, ws, channel, want, prev, force) {
       }
       await call('POST', '/social/threads/connect-token', { token, ws: ws.id, body: { accessToken: want.body.accessToken } });
       return { state: 'sent', words: 'Same Threads profile as TeamLink now', fp };
+    }
+    if (channel === 'rcs') {
+      // the same rule as Facebook: an RCS connection made inside Omni-Channel itself is never replaced
+      if (!prev) {
+        const list = await call('GET', '/integrations', { token, ws: ws.id });
+        if ((list || []).some((x) => x.provider === 'smstake_rcs' && x.status && !GONE.includes(x.status))) {
+          return { state: 'skipped', words: 'Omni-Channel already has its own RCS connection, so TeamLink left it as it is.' };
+        }
+      }
+      await call('POST', '/integrations/smstake_rcs/api-credentials', { token, ws: ws.id, body: want.body });
+      return { state: 'sent', words: `Same rcssms.in account as TeamLink now (RCS ID ${want.body.settings.rcsId})`, fp };
     }
     if (channel === 'email') await call('PUT', '/integrations/email', { token, ws: ws.id, body: want.body });
     else if (channel === 'sms') await call('PUT', '/integrations/sms', { token, ws: ws.id, body: want.body });
@@ -316,7 +338,7 @@ async function sync({ force = false, why = 'manual', by = null } = {}) {
       }
       for (const [i, ws] of wss.entries()) {
         const one = { id: ws.id, name: ws.name, main: i === 0, channels: {} };
-        for (const ch of ['email', 'sms', 'whatsapp', 'facebook', 'threads']) {
+        for (const ch of ['email', 'sms', 'whatsapp', 'facebook', 'threads', 'rcs']) {
           const k = `${ws.id}:${ch}`;
           let r;
           if (ch === 'whatsapp' && mapped && ws.waDone) r = ws.waDone;
@@ -332,7 +354,7 @@ async function sync({ force = false, why = 'manual', by = null } = {}) {
       }
       const bad = result.workspaces.flatMap((w) => Object.entries(w.channels).filter(([, c]) => c.state === 'failed').map(([ch, c]) => `${w.name} ${NAME[ch]}: ${c.words}`));
       result.ok = !bad.length;
-      result.words = bad.length ? `Not everything reached Omni-Channel: ${bad.join(' | ')}` : 'Omni-Channel uses the same Email, SMS, WhatsApp and Facebook as TeamLink.';
+      result.words = bad.length ? `Not everything reached Omni-Channel: ${bad.join(' | ')}` : 'Omni-Channel uses the same Email, SMS, WhatsApp, Facebook and RCS as TeamLink.';
     } catch (err) {
       result.words = err.message;
       result.down = !!err.down;

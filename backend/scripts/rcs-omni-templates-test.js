@@ -19,6 +19,7 @@ const PORT = Number(process.env.RCS_OMNI_STUB_PORT) || 47312;
 const HOOK = 'zz-hook-secret'; const GS_HOOK = 'zz-gs-rcs-hook-secret'; const GS_TOKEN = 'zz-gs-access-token-9';
 const GOT = [];
 let DOWN = false;
+const PASTED = []; const RCS_CONNECTS = []; let OWN_RCS = false;
 const card = (vars, url = 0) => ({ variables: vars, urlButtons: url });
 const TPLS = [
   { id: 'gs-1', name: 'ZZTEST RCSOMNI approved', status: 'approved', category: 'marketing', providerTemplateId: 'ZZOMNI1',
@@ -44,6 +45,17 @@ const stub = http.createServer((req, res) => {
     if (u.pathname === '/api/v1/auth/teamlink' && req.method === 'POST') return /"ticket":"[^"]+"/.test(raw) ? json({ success: true, data: { accessToken: GS_TOKEN } }) : json({ message: 'no ticket' }, 400);
     if (req.headers.authorization !== `Bearer ${GS_TOKEN}`) return json({ message: 'Unauthorized' }, 401);
     if (u.pathname === '/api/v1/workspaces') return json({ success: true, data: [{ id: 'zz-ws-1', name: 'ZZTEST Main' }] });
+    // TeamLink -> Omni-Channel: "add an approved template ID" (kept in the list, so the next read sees it, as Green Start would)
+    if (u.pathname === '/api/v1/templates/rcs-carrier' && req.method === 'POST') {
+      const b = JSON.parse(raw);
+      PASTED.push(b);
+      if (TPLS.some((t) => t.providerTemplateId === b.templateId)) return json({ success: false, error: { code: 'TEMPLATE_ID_EXISTS', message: 'This SMSTAKE RCS template ID is already added in this workspace.' } }, 409);
+      TPLS.push({ id: `gs-p${PASTED.length}`, name: b.name, status: 'approved', providerTemplateId: b.templateId, rcsCarrier: { templateId: b.templateId, kind: b.shape.kind, source: 'pasted', shape: b.shape } });
+      return json({ success: true, data: TPLS[TPLS.length - 1] }, 201);
+    }
+    // the RCS account: Green Start's integration list and its SMSTAKE RCS connect
+    if (u.pathname === '/api/v1/integrations' && req.method === 'GET') return json({ success: true, data: OWN_RCS ? [{ id: 'int-own', provider: 'smstake_rcs', status: 'CONNECTED' }] : [] });
+    if (u.pathname === '/api/v1/integrations/smstake_rcs/api-credentials' && req.method === 'POST') { RCS_CONNECTS.push(JSON.parse(raw)); return json({ success: true, data: { id: 'int-rcs', provider: 'smstake_rcs', status: 'CONNECTED' } }, 201); }
     if (u.pathname === '/api/v1/templates') {
       if (u.searchParams.get('channel') !== 'rcs' || req.headers['x-workspace-id'] !== 'zz-ws-1') return json({ success: true, data: { items: [] } });
       return json({ success: true, data: { items: Number(u.searchParams.get('page')) > 1 ? [] : TPLS, page: 1, pageSize: 100 } });
@@ -60,7 +72,7 @@ const hooks = (from) => GOT.slice(from).filter((g) => g.url.startsWith('/api/v1/
   await new Promise((r) => stub.listen(PORT, '127.0.0.1', r));
   const realFetch = globalThis.fetch;
   globalThis.fetch = (u, o) => { const h = new URL(String(u)).hostname; if (!['127.0.0.1', 'localhost'].includes(h)) throw new Error(`blocked ${h}`); return realFetch(u, o); };
-  const KEYS = ['rcs.omniSync', 'rcs.omniForward', 'rcs.omniRemoved', 'rcs.webhook.raw'];
+  const KEYS = ['rcs.omniSync', 'rcs.omniForward', 'rcs.omniRemoved', 'rcs.webhook.raw', 'omni.gs.integrationSync'];
   const saved = await prisma.appSetting.findMany({ where: { key: { in: KEYS } } });
   await prisma.appSetting.deleteMany({ where: { key: { in: KEYS } } });
   const IDS = ['ZZOMNI1', 'ZZOMNI1B', 'ZZOMNI2', 'ZZOWN1'];
@@ -150,12 +162,48 @@ const hooks = (from) => GOT.slice(from).filter((g) => g.url.startsWith('/api/v1/
     const p5 = await Z.call('POST', '/api/rcs/templates/omni/pull', sTok);
     DOWN = false;
     Z.check('D14 Omni-Channel not answering: a clear failure (HTTP 200, ok false: no retry loop), the templates already here stay', p5.status === 200 && !p5.body.ok && p5.body.words && (await prisma.rcsTemplate.count({ where: { templateId: { in: IDS } } })) === 2, p5.body);
+
+    // ======================= E. TeamLink -> Omni-Channel: templates and the RCS account =======================
+    const tlApp = await prisma.rcsTemplate.create({ data: { templateId: 'ZZTLAPP1', name: 'ZZTEST RCSOMNI Job Alert', rcsType: 'BASIC', status: 'APPROVED', bodyJson: JSON.stringify({ source: 'teamlink', varCount: 2, promotional: true, description: 'Hi {#var1#}, new job {#var2#}' }) } });
+    const tlPend = await prisma.rcsTemplate.create({ data: { templateId: 'ZZTLPEND', name: 'ZZTEST RCSOMNI Waiting', rcsType: 'RICH', status: 'PENDING', bodyJson: JSON.stringify({ source: 'teamlink', varCount: 1, buttonLink: true, imageLink: true }) } });
+    const n0 = PASTED.length;
+    const e1 = await Z.call('POST', '/api/rcs/templates/omni/pull', sTok);
+    const sent = PASTED.slice(n0);
+    const pa = sent.find((x) => x.templateId === 'ZZTLAPP1');
+    Z.check('E1 an APPROVED TeamLink template is added in Omni-Channel by its rcssms.in id (Green Start name rule, its blanks, Marketing when promotional); the waiting one is not',
+      e1.body.ok && pa && pa.name === 'zztest_rcsomni_job_alert' && pa.category === 'Marketing' && JSON.stringify(pa.shape) === JSON.stringify({ kind: 'basic', cards: [{ variables: ['var1', 'var2'], urlButtons: 0 }], dynamicImage: false })
+      && !sent.some((x) => x.templateId === 'ZZTLPEND') && e1.body.sentToOmni >= 1 && /added in Omni-Channel/.test(e1.body.words), [e1.body, sent]);
+    Z.check('E2 a template that came FROM Omni-Channel is never sent back', !PASTED.some((x) => /^ZZOMNI/.test(x.templateId)));
+    const n1 = PASTED.length;
+    const e3 = await Z.call('POST', '/api/rcs/templates/omni/pull', sTok);
+    const appRows = await prisma.rcsTemplate.findMany({ where: { templateId: 'ZZTLAPP1' } });
+    Z.check('E3 next run: not added twice; reading it back from Omni-Channel makes no second TeamLink row and keeps it as a TeamLink template',
+      e3.body.ok && !PASTED.slice(n1).some((x) => x.templateId === 'ZZTLAPP1') && appRows.length === 1 && appRows[0].id === tlApp.id && JSON.parse(appRows[0].bodyJson).source === 'teamlink', [PASTED.slice(n1), appRows.length]);
+    // rcssms.in approves the waiting one: TeamLink's webhook applies it, then it goes to Omni-Channel by itself
+    await Z.call('POST', `/api/webhooks/rcs?token=${HOOK}`, null, { templateid: 'ZZTLPEND', status: 'APPROVED' });
+    const went = await until(() => PASTED.find((x) => x.templateId === 'ZZTLPEND'), 10000);
+    Z.check('E4 approved through the webhook -> added in Omni-Channel by itself (rich: dynamic image, a link button)',
+      went && (await prisma.rcsTemplate.findUnique({ where: { id: tlPend.id } })).status === 'APPROVED' && went.shape.kind === 'rich' && went.shape.dynamicImage === true && went.shape.cards[0].urlButtons === 1, went);
+    // the RCS account: TeamLink's own rcssms.in login (server settings) into the Omni-Channel workspace
+    await prisma.appSetting.deleteMany({ where: { key: 'omni.gs.integrationSync' } });
+    OWN_RCS = true;
+    const s1 = await Z.call('POST', '/api/admin/integrations-omni-channel/sync', sTok);
+    const ownRcs = s1.body && s1.body.workspaces && s1.body.workspaces[0] && s1.body.workspaces[0].channels.rcs;
+    Z.check('E5 Omni-Channel already has its own RCS connection: TeamLink leaves it as it is', ownRcs && ownRcs.state === 'skipped' && RCS_CONNECTS.length === 0, ownRcs);
+    OWN_RCS = false;
+    const s2 = await Z.call('POST', '/api/admin/integrations-omni-channel/sync', sTok);
+    const rc = s2.body.workspaces && s2.body.workspaces[0].channels.rcs;
+    const conn = RCS_CONNECTS[0];
+    Z.check('E6 the RCS account goes to Omni-Channel (SMSTAKE RCS connect: username, RCS ID, login mode, the password as the secret)',
+      rc && rc.state === 'sent' && conn && conn.settings.username === 'zzrcsuser' && conn.settings.rcsId === '230' && conn.settings.authMode === 'login' && conn.secret === 'zz-rcs-pass-7', [rc, conn && conn.settings]);
+    Z.check('E7 the RCS password is in no TeamLink answer', !JSON.stringify([s1.body, s2.body, e1.body, e3.body]).includes('zz-rcs-pass-7'));
     const all = JSON.stringify([st.body, p1.body, p2.body, p3.body, p5.body, ap.body, fwd.body]);
     Z.check('D15 no token or secret in any answer', !all.includes(GS_TOKEN) && !all.includes(GS_HOOK) && !all.includes(HOOK) && !all.includes('zz-sso-secret'));
   } catch (e) { Z.fail += 1; console.log('FAIL  crashed', e && e.stack ? e.stack.slice(0, 900) : e); } finally {
     try {
       stub.close();
-      await prisma.rcsTemplate.deleteMany({ where: { OR: [{ templateId: { in: IDS } }, { name: { contains: 'ZZTEST RCSOMNI' } }] } });
+      await prisma.rcsTemplate.deleteMany({ where: { OR: [{ templateId: { in: [...IDS, 'ZZTLAPP1', 'ZZTLPEND'] } }, { name: { contains: 'ZZTEST RCSOMNI' } }] } });
+      await prisma.auditLog.deleteMany({ where: { entity: 'Integration', entityId: 'omni-channel', createdAt: { gte: START } } });
       await prisma.auditLog.deleteMany({ where: { OR: [{ actorName: { contains: 'ZZTEST RCSOMNI' } }, { entity: { in: ['Rcs', 'RcsTemplate'] }, createdAt: { gte: START } }] } });
       await prisma.appSetting.deleteMany({ where: { key: { in: KEYS } } });
       for (const s of saved) await prisma.appSetting.create({ data: { key: s.key, value: s.value } }); // eslint-disable-line no-await-in-loop
