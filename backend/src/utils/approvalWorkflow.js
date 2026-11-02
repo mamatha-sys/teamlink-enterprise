@@ -516,7 +516,13 @@ async function start({ workflow, recordId, employee, applicantUserId, applicantN
       approverName: person ? person.name : null,
       approverDepartment: person ? person.department : null,
     };
-    if (l.seq <= startAboveSeq) {
+    // THE REQUESTER'S OWN TL STILL APPROVES (founder 2026-11-02: "divya sri sivatmika hr valla tl purna sekhar koti unnaru kanni
+    // ayyana permission skipped ani undhi adhi enable chey"). An HR employee's rung is HR, above TL, so her own team lead was skipped as
+    // "below the requester's level". A rung below the requester's own is kept when the person on it is the requester's OWN reporting
+    // manager (Employee.reportingManagerId) or the TL named on their record - their real line, never a peer or someone they lead.
+    const ownLead = !!person && l.seq < startAboveSeq && person.user.id !== applicantUserId
+      && (person.id === employee.reportingManagerId || (!!employee.tl && String(person.name || '').toLowerCase() === String(employee.tl).toLowerCase()));
+    if (l.seq <= startAboveSeq && !ownLead) {
       data.push({
         ...base,
         status: ST.SKIPPED,
@@ -680,6 +686,32 @@ async function reroutePausedSteps() {
     }
   }
   return { moved, kept };
+}
+
+// REQUESTS ALREADY WAITING when the "own TL still approves" rule came in (2026-11-02): their own TL was skipped as "below the requester's
+// level". When nobody has decided yet, that step is opened again and the request goes back to the TL first; the step that was current
+// waits again behind it. A request somebody already approved or rejected is left as it is. Runs at server start; returns how many moved.
+async function reopenOwnLeads() {
+  const pending = await prisma.approvalStep.findMany({ where: { status: ST.PENDING } });
+  let moved = 0;
+  for (const cur of pending) { // eslint-disable-line no-restricted-syntax
+    const steps = await loadSteps(cur.workflow, cur.recordId); // eslint-disable-line no-await-in-loop
+    if (steps.some((x) => x.status === ST.APPROVED || x.status === ST.REJECTED)) continue; // eslint-disable-line no-continue
+    const applied = steps.find((x) => x.status === ST.APPLIED);
+    const lead = steps.find((x) => x.status === ST.SKIPPED && x.mode === MODE_REQUIRED && x.seq < cur.seq && x.approverUserId
+      && x.approverUserId !== (applied && applied.approverUserId) && /^Skipped — below the requester's own level/.test(x.note || ''));
+    if (!applied || !applied.approverUserId || !lead) continue; // eslint-disable-line no-continue
+    const emp = await prisma.employee.findUnique({ where: { userId: applied.approverUserId }, select: { reportingManagerId: true, tl: true } }).catch(() => null); // eslint-disable-line no-await-in-loop
+    const leadEmp = await prisma.employee.findUnique({ where: { userId: lead.approverUserId }, select: { id: true, name: true } }).catch(() => null); // eslint-disable-line no-await-in-loop
+    const own = emp && leadEmp && (leadEmp.id === emp.reportingManagerId || (!!emp.tl && String(leadEmp.name || '').toLowerCase() === String(emp.tl).toLowerCase()));
+    if (!own) continue; // eslint-disable-line no-continue
+    await prisma.approvalStep.update({ where: { id: lead.id }, data: { status: ST.WAITING, note: null } }); // eslint-disable-line no-await-in-loop
+    await prisma.approvalStep.update({ where: { id: cur.id }, data: { status: ST.WAITING, activatedAt: null, dueAt: null } }); // eslint-disable-line no-await-in-loop
+    const now = await activateNext(cur.workflow, cur.recordId); // eslint-disable-line no-await-in-loop
+    if (now) moved += 1;
+    else await prisma.approvalStep.update({ where: { id: cur.id }, data: { status: ST.PENDING, activatedAt: cur.activatedAt, dueAt: cur.dueAt } }); // eslint-disable-line no-await-in-loop
+  }
+  return { moved };
 }
 
 // ---------------------------------------------------------------------------
@@ -1225,6 +1257,7 @@ module.exports = {
   ladder,
   labelFor,
   reroutePausedSteps,
+  reopenOwnLeads,
   resolveChain,
   levelConfig,
   levelConfigList,

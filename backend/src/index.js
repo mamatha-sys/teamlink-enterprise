@@ -506,6 +506,8 @@ const server = app.listen(PORT, () => {
   require('./outreach/tplFromMeta').start(); // WhatsApp template approvals from Meta, TeamLink + Omni-Channel, every 15 minutes
   // TEST SANDBOX: no background workers or timers at all (utils/sandbox.js).
   if (sandbox.isSandbox()) { sandbox.banner(PORT); return; }
+  // Requests waiting since before 2026-11-02 whose own TL was skipped as "below the requester's level" go back to that TL (once, at start).
+  setTimeout(() => require('./utils/approvalWorkflow').reopenOwnLeads().then((r) => { if (r.moved) console.log(`[approvals] ${r.moved} request(s) sent back to the requester's own TL`); }).catch((e) => console.error('[approvals] reopen own TL:', e.message)), 20 * 1000).unref();
   // AI phone calls through our own SIP line with free voices (calling/voice/sipCall.js): off unless AI_VOICE_GATEWAY=1.
   require('./calling/voice/sipCall').start().catch((e) => console.error('[ai-phone] start failed:', e.message));
   // Vendors may edit and import bills (founder 2026-10-28): switched on ONCE for the logins that already exist (utils/vendorSwitchOn.js).

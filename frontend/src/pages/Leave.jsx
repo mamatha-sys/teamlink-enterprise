@@ -3,13 +3,11 @@ import { useSearchParams } from 'react-router-dom';
 import api from '../api';
 import { useAuth } from '../context/AuthContext.jsx';
 import TabsPage from '../components/TabsPage.jsx';
-import { Panel, PanelPad, PanelHead, AssignRow, EmptyMini, ScopeNote, SectionLabel, TwoCol, Status, Modal } from '../components/proto.jsx';
+import { Panel, PanelPad, PanelHead, AssignRow, EmptyMini, ScopeNote, TwoCol, Status, Modal } from '../components/proto.jsx';
 import { isAdmin, isHR as hasHrmsAdmin, can } from '../permissions';
 import Combo from '../components/Combo.jsx';
 import { HR_STATUSES, hrStatusOf } from '../hrStatus';
-import ApprovalChain, { ApprovalChainLine } from '../components/ApprovalChain.jsx';
 import ExportMenu from '../components/ExportMenu.jsx';
-import InsightsPanel from '../components/charts/InsightsPanel.jsx';
 import DataIoBar from '../components/dataio/DataIoBar.jsx';
 // Requests list (team, designation, approved-by, comments), Approve · Reject ·
 // Reassign with the TL rule, month-wise balance + report, TL rule setting.
@@ -21,8 +19,6 @@ import {
 import LeaveBalancesTab from './leave/LeaveBalancesTab.jsx';
 import HolidayCalendar from './leave/HolidaysTab.jsx';
 import LeaveKpiCards from './leave/LeaveKpiCards.jsx';
-import PulseSyncTab from './leave/PulseSyncTab.jsx';
-import { ChainButton } from './leave/LeaveChainScreen.jsx'; // the Chain screen: who approved, when, the reason (2026-10-28)
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -74,7 +70,7 @@ function ApprovalWorkflowModal({ requestId, onClose, onActed }) {
   const wf = data?.workflow;
 
   return (
-    <Modal title="Approval Workflow" onClose={onClose} wide footer={<button className="btn" onClick={onClose}>Close</button>}>
+    <Modal title="Approve / Reject leave" onClose={onClose} wide footer={<button className="btn" onClick={onClose}>Close</button>}>
       {error && <div className="error-text">{error}</div>}
       {!data && !error && <EmptyMini>Loading…</EmptyMini>}
       {leave && (
@@ -84,14 +80,10 @@ function ApprovalWorkflowModal({ requestId, onClose, onActed }) {
           </div>
           <LeaveFacts leave={leave} handoffs={data.handoffs} early={data.earlyLogout} source={data.source} pulse={data.pulse} />
 
-          <SectionLabel style={{ marginTop: 14 }}>Approval Workflow</SectionLabel>
-          <ApprovalChain workflow={wf} recordStatus={leave.status} />
-          {/* APPROVE · REJECT · REASSIGN — the TL rule is decided by the server. */}
+          {/* No chain picture here any more (founder 2026-11-02: "approve/reject unchi and chain thisai"): only who it waits for.
+              APPROVE · REJECT · REASSIGN — the TL rule is decided by the server. */}
+          {wf && wf.currentOwnerName && leave.status === 'Pending' ? <div style={{ margin: '12px 0 4px', fontSize: 13 }}>Waiting for: <b>{wf.currentOwnerName}</b>{wf.currentLabel ? <span className="cell-muted"> ({wf.currentLabel})</span> : null}</div> : null}
           <LeaveDecidePanel data={data} onDone={() => { load(); onActed(); }} />
-          <div className="cell-muted" style={{ fontSize: 11.5, marginTop: 10 }}>
-            Pending-since and overdue are worked out when you open this screen — there is no background job
-            chasing these, so an overdue step starts reading &quot;Overdue&quot; the next time somebody looks.
-          </div>
         </>
       )}
     </Modal>
@@ -508,26 +500,20 @@ function DashboardTab({ user, isHR, canEditPolicy, canApprove, canConfigure, rel
   async function toggleReason(reason) { await api.put(`/leave/reasons/${reason.id}`, { active: !reason.active }); onReload(); }
 
   const scoped = requests.filter((r) => leaveMatches(r, filters));
-  // Only genuinely pending requests are "pending" here; the rest (left, duplicate, old) are under Sync with Pulse > Old pending.
+  // Only genuinely pending requests are "pending" here (not people who left, repeats or very old ones).
   const pending = scoped.filter((r) => r.status === 'Pending' && (!r.pendingState || r.pendingState === 'genuine'));
   const departments = [...new Set(requests.map((r) => r.employee?.department).filter(Boolean))].sort();
 
   return (
     <div>
-      {/* hrms-24 §1 / §9 — From → To → Apply, and the tiles and charts
-          (by type, by status, department-wise) for requests overlapping it,
-          counted on the server in this login's scope. */}
-      {/* ONE KPI row, from the range: requests, pending, approved,
-          rejected, cancelled, cancellation requests, approved days and who
-          is on leave today. Filters → tiles → charts, then the lists below
-          with their own filter bar. */}
+      {/* No charts and no Sync with Pulse here (founder 2026-11-02: "charts thisai and sync with pulse remove that"): my balance, the filters,
+          then the lists. */}
       {myAvail && myAvail.length > 0 && (
         <Panel style={{ marginBottom: 14 }}>
           <PanelHead title="My leave balance" />
           <div style={{ padding: '10px 14px 2px' }}><LeaveBalanceCards avail={myAvail} /></div>
         </Panel>
       )}
-      <InsightsPanel module="leave" storageKey="tl_range_leave" />
 
       <LeaveFilterBar filters={filters} setFilters={setFilters} departments={departments} types={types}>
         <span className="small-muted" style={{ alignSelf: 'center' }}>{scoped.length} of {requests.length}</span>
@@ -541,11 +527,7 @@ function DashboardTab({ user, isHR, canEditPolicy, canApprove, canConfigure, rel
       <TwoCol>
         {/* ① Approval chain — WHERE EACH REQUEST CURRENTLY SITS */}
         <Panel>
-          <PanelHead title="① Leave Approval Chain" />
-          <div style={{ padding: '8px 18px 4px' }} className="cell-muted">
-            Employee → TL → STL → HR → Assistant Manager → Manager → Super Admin.
-            Open a request to see the full chain, who has acted and what it is waiting on.
-          </div>
+          <PanelHead title="① Pending Leave Requests" />
           {pending.length === 0
             ? <EmptyMini>No pending requests.</EmptyMini>
             : pending.slice(0, 8).map((r) => {
@@ -569,21 +551,16 @@ function DashboardTab({ user, isHR, canEditPolicy, canApprove, canConfigure, rel
                     <span className="cell-muted" style={{ fontSize: 11.5 }}>
                       {r.type} · {r.fromDate}{r.toDate && r.toDate !== r.fromDate ? ` → ${r.toDate}` : ''}
                     </span>
-                    {wf && wf.currentLabel && (
+                    {wf && wf.currentOwnerName && (
                       <div style={{ fontSize: 11.5, marginTop: 3 }}>
-                        <b>Current Approval: {wf.currentLabel}</b>
-                        {wf.currentOwnerName ? <span className="cell-muted"> – {wf.currentOwnerName}</span> : null}
-                        {wf.nextLabel && <span className="cell-muted"> · next {wf.nextLabel}</span>}
+                        Waiting for <b>{wf.currentOwnerName}</b>
                         {wf.overdue && <> <span className="status overdue">Overdue</span></>}
                       </div>
                     )}
-                    {wf && <ApprovalChainLine workflow={wf} compact />}
-                    {!wf && <div className="cell-muted" style={{ fontSize: 11.5, marginTop: 3 }}>No approval chain — decided in one step.</div>}
                   </span>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {/* ONE button (founder 2026-10-28: "Chain and Decide directly are the same - keep one"): it opens the request with
-                        its chain, the reason, the employee's comments, the TL rule, Approve / Reject and the reassign picker. */}
-                    <ChainButton requestId={r.id} />
+                    {/* Approve / Reject only (founder 2026-11-02: "approve/reject unchi and chain thisai"): it opens the request with
+                        the reason, the employee's comments, the TL rule, Approve / Reject and the reassign picker. */}
                     <button className={`btn btn-sm${mayDecide ? ' btn-primary' : ''}`} title={mayDecide ? (direct ? 'Approve or reject now - the levels still waiting are skipped' : 'Approve, reject or reassign') : 'See who approves this request'} onClick={() => setChainFor(r.id)}>{mayDecide ? 'Approve / Reject' : 'View'}</button>
                   </span>
                 </AssignRow>
@@ -698,7 +675,7 @@ function DashboardTab({ user, isHR, canEditPolicy, canApprove, canConfigure, rel
           limit={10}
           renderActions={(r) => (
             <>
-              <ChainButton requestId={r.id} />
+              {canApprove && r.status === 'Pending' && <button className="btn btn-sm btn-primary" onClick={() => setChainFor(r.id)}>Approve / Reject</button>}
               {/* Confirming a cancellation is a DECISION, so it needs the
                   approve permission. */}
               {canApprove && r.status === 'Cancellation Requested' && <button className="btn btn-sm" onClick={() => decide(r, 'Cancelled')}>Confirm Cancel</button>}
@@ -764,7 +741,7 @@ function RequestsTab({ isHR, canApprove, reloadKey, onReload }) {
           onOpen={setOpenId}
           renderActions={(r) => (
             <>
-              <ChainButton requestId={r.id} />
+              {canApprove && r.status === 'Pending' && <button className="btn btn-sm btn-primary" onClick={() => setOpenId(r.id)}>Approve / Reject</button>}
               {canApprove && r.status === 'Cancellation Requested' && <button className="btn btn-sm" onClick={() => confirmCancel(r)}>Confirm Cancel</button>}
               <OwnCancelButton r={r} onDone={onReload} onError={setError} />
               {!r.mine && !isHR && r.status === 'Approved' && <button className="btn btn-sm" onClick={() => requestCancel(r.id)}>Request Cancellation</button>}
@@ -912,7 +889,6 @@ export default function Leave() {
   const [reloadKey, setReloadKey] = useState(0);
   const [urlTab] = useSearchParams();
   const [tab, setTab] = useState(urlTab.get('tab') || 'dashboard');
-  const canSync = can(user, 'hrms', 'hrms', 'Leave & Holidays', 'edit');
 
   useEffect(() => {
     api.get('/leave/types').then((res) => setTypes(res.data.filter((t) => t.active)));
@@ -939,7 +915,6 @@ export default function Leave() {
           { key: 'reports', label: 'Reports', element: <ReportsTab reloadKey={reloadKey} canExport={canExport} /> },
           // Managing holidays is a WRITE, so it follows the create permission
           // and not a role name — HR manages holidays, a view-only Manager does not.
-          ...(canSync ? [{ key: 'pulse', label: 'Sync with Pulse', element: <PulseSyncTab onChanged={() => setReloadKey((k) => k + 1)} /> }] : []),
           { key: 'holidays', label: 'Holidays', element: <HolidayCalendar canManage={canManageHolidays} canEdit={canEditHolidays} canExport={canExport} /> },
         ]}
       />

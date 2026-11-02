@@ -275,7 +275,7 @@ function HrDashboard() {
         <PanelPad>
           <h3 style={{ marginBottom: 12, fontSize: 14 }}>Pending Tasks &amp; Approvals (now)</h3>
           <Tiles section="tasks" drill={drill} onPick={pick} cells={[
-            { id: 'leave', tile: 'taskLeave', value: pt.leaveApprovals, label: 'Leave Approvals', sub: `Really waiting, any dates${(pt.leaveApprovalsFromLeft || pt.leaveOldPending || pt.leaveDuplicatePending) ? `. Not counted: ${pt.leaveApprovalsFromLeft || 0} from people who left, ${pt.leaveOldPending || 0} old, ${pt.leaveDuplicatePending || 0} repeated (Leave > Sync with Pulse)` : ''}` },
+            { id: 'leave', tile: 'taskLeave', value: pt.leaveApprovals, label: 'Leave Approvals', sub: `Really waiting, any dates${(pt.leaveApprovalsFromLeft || pt.leaveOldPending || pt.leaveDuplicatePending) ? `. Not counted: ${pt.leaveApprovalsFromLeft || 0} from people who left, ${pt.leaveOldPending || 0} old, ${pt.leaveDuplicatePending || 0} repeated` : ''}` },
             { id: 'reg', tile: 'taskRegularization', value: pt.attendanceRegularization, label: 'Attendance Regularization' },
             ...(pt.lateComing != null ? [{ id: 'latec', tile: 'taskLateComing', value: pt.lateComing, label: 'Late coming', sub: 'Waiting for approval' }] : []),
             { id: 'assets', tile: 'taskAssets', value: pt.assetsAssigned, label: 'Assets Assigned' },
