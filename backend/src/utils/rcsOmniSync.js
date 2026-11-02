@@ -11,6 +11,10 @@
 //                  the row TeamLink already has for that Omni-Channel template moves to the new id (module, SMS fallback kept).
 //                  A template that disappears from Omni-Channel is NOT deleted here (it may still be approved at rcssms.in), and one an
 //                  Admin removed here is not taken in again. A draft (no rcssms.in id yet) stays in Omni-Channel only.
+//   ...and back (2026-11-02, founder: "templates should be created either in omnichannel or administration integration rcs, the template
+//                  id should visible in both places"): every APPROVED template made / added in TeamLink that a workspace does not have yet is
+//                  added there by its rcssms.in id (POST /templates/rcs-carrier: Green Start saves it approved, as "an ID SMSTAKE had
+//                  approved"). Waiting ones go when rcssms.in approves them. One that came from Omni-Channel is never sent back.
 //   forward()      rcssms.in posts template approvals and delivery reports to ONE address: TeamLink's public /api/webhooks/rcs. Green
 //                  Start's own webhook sits behind the TeamLink gate (no pass = 401), so TeamLink hands the same payload to Green Start
 //                  on this server (127.0.0.1, its /api/v1/webhooks/smstake-rcs/<GREENSTART_RCS_WEBHOOK_SECRET>), then pulls templates.
@@ -24,6 +28,23 @@ const FWD_KEY = 'rcs.omniForward';
 const GONE_KEY = 'rcs.omniRemoved'; // template ids an Admin removed from TeamLink: not taken in again
 const KIND_TO_TYPE = { basic: 'BASIC', rich: 'RICH', carousel: 'RICHCASOUREL' };
 const STATUS = { approved: 'APPROVED', rejected: 'REJECTED' };
+const TYPE_TO_KIND = { BASIC: 'basic', RICH: 'rich', RICHCASOUREL: 'carousel' };
+// Green Start's template name: lowercase letters, digits and _ (its RCS name rule)
+const gsName = (name, templateId) => (String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || `tl_${String(templateId).toLowerCase()}`);
+
+// A TeamLink template -> Green Start's "add an approved template ID" body.
+function pasteBodyOf(t) {
+  const b = parse(t.bodyJson, {});
+  const kind = TYPE_TO_KIND[t.rcsType] || 'basic';
+  const n = kind === 'carousel' ? Math.min(10, Math.max(2, Number(b.cards) || 2)) : 1;
+  const vars = Array.from({ length: Math.min(20, Math.max(0, Number(b.varCount) || 0)) }, (_, i) => `var${i + 1}`);
+  const cards = Array.from({ length: n }, (_, i) => ({ variables: i === 0 ? vars : [], urlButtons: i === 0 && b.buttonLink ? 1 : 0 }));
+  const description = String(b.description || b.title || '').trim().slice(0, 2000);
+  return {
+    name: gsName(t.name, t.templateId), templateId: t.templateId, category: b.promotional ? 'Marketing' : 'Utility',
+    ...(description ? { description } : {}), shape: { kind, cards, dynamicImage: kind === 'rich' && !!b.imageLink },
+  };
+}
 const enabled = () => String(process.env.GREENSTART_ENABLED || 'true').toLowerCase() !== 'false';
 const apiBase = () => `http://127.0.0.1:${parseInt(process.env.GREENSTART_API_PORT, 10) || 4020}/api/v1`;
 const parse = (s, d) => { try { return s ? JSON.parse(s) : d; } catch { return d; } };
@@ -91,19 +112,26 @@ let running = null;
 async function pull({ why = 'manual' } = {}) {
   if (running) return running;
   running = (async () => {
-    const result = { at: new Date().toISOString(), why, ok: false, words: '', added: 0, updated: 0, alreadyHere: 0, removedHere: 0, seen: 0, workspaces: 0 };
+    const result = { at: new Date().toISOString(), why, ok: false, words: '', added: 0, updated: 0, alreadyHere: 0, removedHere: 0, seen: 0, workspaces: 0, sentToOmni: 0, sendProblems: [] };
     try {
       if (!enabled()) throw new Error('Omni-Channel is switched off on this server (GREENSTART_ENABLED=false).');
       const gone = new Set((await lastOf(GONE_KEY)) || []);
       const token = await signIn();
       const wss = await workspacesOf(token);
       result.workspaces = wss.length;
+      // TeamLink's own approved templates (made here or added by hand), to be offered to every workspace
+      const mine = (await prisma.rcsTemplate.findMany({ where: { status: 'APPROVED' } })).filter((t) => parse(t.bodyJson, {}).source !== 'omnichannel');
       for (const ws of wss) {
+        const there = new Set(); // rcssms.in ids this workspace already has
+        const names = new Set();
         for (let page = 1; page <= 20; page += 1) {
           // eslint-disable-next-line no-await-in-loop
           const res = await call('GET', `/templates?channel=rcs&pageSize=100&page=${page}`, { token, ws: ws.id });
           const items = (res && res.items) || [];
           for (const t of items) {
+            const pid = String((t && t.providerTemplateId) || (t && t.rcsCarrier && t.rcsCarrier.templateId) || '').trim();
+            if (pid) there.add(pid);
+            if (t && t.name) names.add(String(t.name));
             const r = rowOf(t, ws);
             if (!r) continue; // eslint-disable-line no-continue
             result.seen += 1;
@@ -138,9 +166,25 @@ async function pull({ why = 'manual' } = {}) {
           }
           if (items.length < 100) break;
         }
+        for (const t of mine) {
+          if (there.has(t.templateId)) continue; // eslint-disable-line no-continue
+          const body = pasteBodyOf(t);
+          if (names.has(body.name)) body.name = `${body.name}_tl`.slice(0, 64); // the same title is already used there by another template
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            await call('POST', '/templates/rcs-carrier', { token, ws: ws.id, body });
+            result.sentToOmni += 1;
+            there.add(t.templateId); names.add(body.name);
+          } catch (err) {
+            if (/TEMPLATE_ID_EXISTS|already added/i.test(String(err.message))) continue; // eslint-disable-line no-continue
+            result.sendProblems.push(`${t.name} -> ${ws.name}: ${String(err.message).slice(0, 120)}`);
+          }
+        }
       }
       result.ok = true;
-      result.words = `${result.seen} RCS template${result.seen === 1 ? '' : 's'} in Omni-Channel: ${result.added} new here, ${result.updated} updated, ${result.alreadyHere} already in TeamLink${result.resubmitted ? ` (${result.resubmitted} submitted again with a new rcssms.in id)` : ''}${result.removedHere ? `, ${result.removedHere} removed here by an Admin` : ''}.`;
+      result.words = `${result.seen} RCS template${result.seen === 1 ? '' : 's'} in Omni-Channel: ${result.added} new here, ${result.updated} updated, ${result.alreadyHere} already in TeamLink${result.resubmitted ? ` (${result.resubmitted} submitted again with a new rcssms.in id)` : ''}${result.removedHere ? `, ${result.removedHere} removed here by an Admin` : ''}.`
+        + `${result.sentToOmni ? ` ${result.sentToOmni} approved TeamLink template${result.sentToOmni === 1 ? '' : 's'} added in Omni-Channel.` : ''}`
+        + `${result.sendProblems.length ? ` Not added in Omni-Channel: ${result.sendProblems.slice(0, 3).join(' | ')}${result.sendProblems.length > 3 ? ' ...' : ''}` : ''}`;
     } catch (err) {
       result.words = String((err && err.message) || err).slice(0, 300);
     }
@@ -198,4 +242,4 @@ async function forget(templateId) {
 
 const lastPull = () => lastOf(STATE_KEY);
 const lastForward = () => lastOf(FWD_KEY);
-module.exports = { pull, forward, pullAfterApproval, forget, start, lastPull, lastForward, rowOf, STATE_KEY, FWD_KEY, GONE_KEY };
+module.exports = { pull, forward, pullAfterApproval, forget, start, lastPull, lastForward, rowOf, pasteBodyOf, STATE_KEY, FWD_KEY, GONE_KEY };

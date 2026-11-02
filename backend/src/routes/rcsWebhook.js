@@ -132,9 +132,11 @@ async function handle(req, res) {
     const done = await apply(objs);
     // the same answer to Omni-Channel (its own webhook is behind the TeamLink gate), then its RCS templates are pulled in again
     const omni = require('../utils/rcsOmniSync'); // eslint-disable-line global-require
+    const verdict = objs.some((o) => o.templateid || o.templatecode);
+    // a template verdict: templates are read again both ways (Omni-Channel's in, TeamLink's newly approved ones out), handed on or not
     omni.forward({ method: req.method, raw: req.rawBody || '', contentType: req.get('content-type'), query: req.query, signature: req.get('x-smstake-signature') })
-      .then((f) => { if (f.ok && objs.some((o) => o.templateid || o.templatecode)) omni.pullAfterApproval(); })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => { if (verdict) omni.pullAfterApproval(); });
     return res.status(200).json({ ok: true, ...done });
   } catch (e) {
     console.error('[rcs-webhook]', String(e && e.message).slice(0, 200)); // eslint-disable-line no-console
