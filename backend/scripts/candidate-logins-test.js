@@ -51,6 +51,10 @@ const call = async (path, body, method = 'POST') => {
   r = await call('/candidates/invite', { people: [a], dryRun: false });
   check('and asking again right away sends nothing and does not throw', r.status === 200 && by(r).zz1 === 'retry-later', r.json);
 
+  r = await call('/candidates/invite', { people: [{ ...a, resend: true }], dryRun: true });
+  check('one person asked for on purpose (resend) is offered a fresh login', by(r).zz1 === 'would-resend', r.json);
+  r = await call('/candidates/invite', { people: [{ ...a, resend: true }, b], dryRun: true });
+  check('"resend" is ignored in a list of several people (never part of a bulk run)', by(r).zz1 !== 'would-resend', r.json);
   r = await call('/candidates/auto', undefined, 'GET');
   check('the Naukri / Shine switch can be read', r.status === 200 && typeof r.json.on === 'boolean', r);
   r = await call('/candidates/auto', { on: 'yes' });

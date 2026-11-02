@@ -598,6 +598,11 @@ export function teamlinkFrontRouter({ root, express }) {
               where ($1::text is not null and lower(c.email) = $1) or ($2::text is not null and right(regexp_replace(coalesce(c.phone, ''), '\\D', '', 'g'), 10) = $2)
               order by c.created_at asc limit 1`, [email, phone])).rows[0];
           if (found && found.do_not_contact) return { ref, result: 'do-not-contact' };
+          // ONE person, asked for on purpose (resend:true, a single entry): a fresh login for somebody who already has an account - the portal's
+          // own "resend credentials" (the new password is written only after the message was sent). Never part of a list run.
+          if (found && found.user_id && p && p.resend === true && people.length === 1) {
+            return dryRun ? { ref, result: 'would-resend', candidateId: found.id } : { ref, result: 'resend', candidateId: found.id };
+          }
           // the portal does not write to one person twice in a day (0024): a message that really left = 'already'; one tried and failed in the last 24 h = 'retry-later'
           if (found && found.invited) return { ref, result: found.was_sent ? 'already' : 'retry-later', candidateId: found.id };
           // an account exists but nobody ever signed in to it and no message ever left (an earlier send failed): send it again - the portal's
