@@ -127,6 +127,8 @@ app.use('/api/public/linkedin-connect', require('./utils/linkedinConnect').route
 app.use('/api/public/job-card', require('./utils/jobCard').router); // the picture of an open job that Instagram fetches when a job is posted there
 // Omni-Channel email delivery events (bounce / complaint / delivered): signed, raw body, so it sits before the JSON parser (routes/outreachWebhook.js).
 app.use('/api/public/outreach/webhook', require('./routes/outreachWebhook'));
+// TeamLink WhatsApp numbers on Omni-Channel's Settings page (routes/omniNumbers.js): its own CORS for the Green Start address, so ahead of the site-wide one.
+app.use(require('./routes/omniNumbers'));
 // CORS: open only for the public paths third parties use; everything else = CORS_ORIGINS / this site / localhost in dev.
 app.use(require('./utils/webSecurity').corsMiddleware());
 app.use(express.json());

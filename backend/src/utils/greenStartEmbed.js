@@ -68,6 +68,11 @@ function validToken(t) {
   if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) return false;
   return Number(m[2]) > Math.floor(Date.now() / 1000);
 }
+// The TeamLink user a good, unexpired pass was issued to (null otherwise) — routes/omniNumbers.js only.
+function userOfToken(t) {
+  if (!validToken(t)) return null;
+  return String(t).split('.')[0];
+}
 function readCookie(req, name) {
   const h = String(req.headers.cookie || '');
   for (const part of h.split(';')) {
@@ -153,4 +158,4 @@ function proxy() {
   };
 }
 
-module.exports = { proxy, enabled, status, issueCookies, clearCookies, validToken, makeToken, gatePort, COOKIE, cookieDomain, ttlS, isHttpsRequest };
+module.exports = { proxy, enabled, status, issueCookies, clearCookies, validToken, userOfToken, readCookie, makeToken, gatePort, COOKIE, cookieDomain, ttlS, isHttpsRequest };
