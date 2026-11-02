@@ -55,8 +55,16 @@ const NOISE_MS = Math.max(0, num(process.env.AI_VOICE_NOISE_MS, 150)); // less r
 const MIN_LEVEL = Math.min(800, Math.max(100, num(process.env.AI_VOICE_MIN_LEVEL, 220)));
 // "Bangalore" was heard as "Bang the law" (2026-10-30 test): at "which city?" Whisper is told the usual answers
 const CITY_HINT = ' Hyderabad, Secunderabad, Bangalore, Chennai, Vijayawada, Visakhapatnam, Warangal, Guntur, Kakinada, Tirupati, Nellore, Karimnagar, Pune, Mumbai, Delhi, Kolkata.';
-const END_YESNO_MS = Math.min(2000, Math.max(400, num(process.env.AI_VOICE_END_YESNO_MS, 750)));
-const END_OPEN_MS = Math.min(2500, Math.max(600, num(process.env.AI_VOICE_END_OPEN_MS, 1150)));
+// how long a pause ends the answer (founder 2026-11-02: "conversation lo gap theeskuntundhi"): 750 / 1150 ms -> 600 / 950 ms
+const END_YESNO_MS = Math.min(2000, Math.max(400, num(process.env.AI_VOICE_END_YESNO_MS, 600)));
+const END_OPEN_MS = Math.min(2500, Math.max(600, num(process.env.AI_VOICE_END_OPEN_MS, 950)));
+// A SHORT "OKAY" WHILE THINKING (2026-11-02): hearing the answer takes ~0.9 s on the server (up to 1.5 s, more when the
+// language is checked again), and a new sentence's voice can take longer still. When the reply is not playing FILLER_MS after
+// the answer ended, the assistant says a short "okay" in the call's language at once, so the line is never silent. Made
+// ahead (prepareFixed / prepareCall) and only played from the cache - never made on the spot. Not for a cough / noise.
+// AI_VOICE_FILLER_MS (default 800 - at 600 ms the "okay" came too early and a long pause followed it; 0 = off).
+const FILLER_MS = Math.max(0, num(process.env.AI_VOICE_FILLER_MS, 800));
+const FILLERS = { English: 'Okay.', Telugu: 'సరే.', Hindi: 'ठीक है।' };
 const OPEN_STEPS = ['qExp', 'qLoc', 'qNotice', 'later_when', 'resched_time', 'why_not'];
 // Whisper's known made-up lines on noise / non-English sound (Bag of Hallucinations, arXiv 2501.11378, + our own calls): believed
 // only when Whisper was really sure (a real "Thank you." is said with a high logprob)
@@ -268,11 +276,12 @@ async function prepare(engines, lines, lang) {
 function prepareCall(engines, d, { ownOnly = false } = {}) {
   const own = Object.values(d.B || {}).flat().filter((t) => typeof t === 'string' && t);
   const fixed = ownOnly ? [] : Object.values(d.P || {}).filter((t) => typeof t === 'string' && t && !t.includes('{'));
-  return prepare(engines, [...own, ...fixed], d.language).catch((e) => log('prepare failed:', e.message));
+  const filler = FILLERS[d.language] ? [FILLERS[d.language]] : [];
+  return prepare(engines, [...filler, ...own, ...fixed], d.language).catch((e) => log('prepare failed:', e.message));
 }
 // The fixed replies of every language, once when the gateway starts (idle time), so the first calls are quick too.
 function prepareFixed(engines, S) {
-  return S.LANGS.reduce((p, lang) => p.then(() => prepare(engines, Object.values(S.phrases(lang)).filter((t) => typeof t === 'string' && t && !t.includes('{')), lang)).catch(() => {}), Promise.resolve());
+  return S.LANGS.reduce((p, lang) => p.then(() => prepare(engines, [...(FILLERS[lang] ? [FILLERS[lang]] : []), ...Object.values(S.phrases(lang)).filter((t) => typeof t === 'string' && t && !t.includes('{'))], lang)).catch(() => {}), Promise.resolve());
 }
 
 // Plays PCM to Asterisk at real-time pace (20 ms frames). stop() = silence at once (barge-in).
@@ -368,6 +377,7 @@ function handle(sock, engines, opts = {}) {
     const pcm = louder(pcmIn);
     if (busy) { pending = pcm; return; } // keep only the latest sentence said while we were still thinking
     busy = true;
+    let fillT = null; let over = false; // the short "okay" while thinking (FILLER_MS), and "this turn is finished"
     try {
       // which language + the words, at the same time; only when the person really switched is it heard again in the new one
       // (a clip under ~2 s with its end pause - "yes", "haan theek" - is too short to tell a language by sound)
@@ -385,6 +395,19 @@ function handle(sock, engines, opts = {}) {
       let found = null; let first = { text: '', conf: null }; let byScript = false; let enProb = null;
       // how much real speech (Silero VAD, server) - asked at the same time as the words, so it costs no time
       const speechP = engines.speech ? engines.speech(pcm) : Promise.resolve(null);
+      // nothing playing yet FILLER_MS after the answer ended: a short "okay" at once (from the cache only), unless it was noise
+      if (FILLER_MS && FILLERS[cur]) {
+        fillT = setTimeout(async () => {
+          const sp = await speechP.catch(() => null);
+          if (over || ended || !d || sock.destroyed || speaker.busy || speaker.timer) return;
+          if (sp && Number.isFinite(sp.speechMs) && sp.speechMs < NOISE_MS) return;
+          const key = `${d.language}|${FILLERS[d.language] || FILLERS[cur]}`;
+          const pcmF = cache.get(key) || diskGet(engines, key);
+          if (!pcmF || !pcmF.length) return;
+          speaker.add(pcmF); speaker.add(E.silence(GAP_MS));
+          if (DEBUG && row) debug(`${row.id} filler after ${Date.now() - t0} ms`);
+        }, FILLER_MS);
+      }
       // (Starting BOTH other listeners on every turn was tried: it loaded the speech server and made every reply ~1 s slower.)
       // An ENGLISH call starts ONE Indian listener at the same time as Whisper - the language the person already spoke in
       // this call, else Telugu (Hyderabad) - on a different server, so nothing queues; a switch then has its words at once
@@ -519,6 +542,7 @@ function handle(sock, engines, opts = {}) {
       log('turn failed:', e.message);
       if (!ended && d && !sock.destroyed) await say(d.P.notClear).catch(() => {});
     } finally {
+      over = true; if (fillT) clearTimeout(fillT);
       busy = false;
       if (pending && !ended) { const p = pending; pending = null; heard(p); }
     }
@@ -541,6 +565,8 @@ function handle(sock, engines, opts = {}) {
     if (!row || !['calling', 'queued'].includes(row.status)) { log('unknown call', uuid); hangup(); return; }
     d = await require('../webTalk').dialogueFor(row); // eslint-disable-line global-require
     if (!d) { hangup(); return; }
+    // the short "okay" of this call's language, ready before the first answer (also when nothing was prepared while ringing)
+    if (FILLER_MS && FILLERS[d.language]) voiceOf(engines, FILLERS[d.language], d.language, false).catch(() => {});
     const at = new Date().toISOString();
     await svc.setRow(row.id, { status: 'calling', startedAt: at, providerStatus: 'answered' });
     row.startedAt = at;
