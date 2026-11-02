@@ -578,6 +578,17 @@ function AssessmentScreen({ data, reload, onBack }) {
   const page = usePaged(matching);
   const qLike = { activeCount: needle ? 1 : 0, clear: () => setQ('') };
 
+  // every question at once - Super Admin / TL only (founder 2026-11-02); the server checks the same
+  async function deleteAllQuestions() {
+    const n = data.questions.length;
+    // eslint-disable-next-line no-alert
+    if (!confirm(`Delete ALL ${n} question${n === 1 ? '' : 's'} of this course? This cannot be undone. Learners who already took the assessment keep their scores.`)) return;
+    setError('');
+    try { await api.delete(`/lms/courses/${data.course.id}/questions`); reload(); } catch (err) {
+      setError(err.response?.data?.error || 'Could not delete the questions.');
+    }
+  }
+
   async function remove(q) {
     // eslint-disable-next-line no-alert
     if (!confirm('Delete this question?')) return;
@@ -735,16 +746,6 @@ export default function CourseManage({ courseId, onBack }) {
     setError('');
     try { await api.patch(`/lms/materials/${m.id}`, patch); load(); } catch (err) {
       setError(err.response?.data?.error || 'Could not update that material.');
-    }
-  }
-
-  async function deleteAllQuestions() {
-    const n = data.questions.length;
-    // eslint-disable-next-line no-alert
-    if (!confirm(`Delete ALL ${n} question${n === 1 ? '' : 's'} of this course? This cannot be undone. Learners who already took the assessment keep their scores.`)) return;
-    setError(''); setNote('');
-    try { const r = await api.delete(`/lms/courses/${data.course.id}/questions`); setNote(`Deleted ${r.data.deleted} question${r.data.deleted === 1 ? '' : 's'}.`); load(); } catch (err) {
-      setError(err.response?.data?.error || 'Could not delete the questions.');
     }
   }
 
