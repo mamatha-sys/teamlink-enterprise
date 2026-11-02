@@ -1,18 +1,21 @@
 # ---------------------------------------------------------------------------
-# UPDATE GREEN START ON THE LIVE SITE (greenstart.teamlinks.in, /opt/green-start on the VPS). 2026-10-31.
+# UPDATE GREEN START ON THE LIVE SITE (greenstart.teamlinks.in, /opt/green-start on the VPS). 2026-10-31, package of 2026-11-02.
 #
 #   .\update-greenstart-on-vps.ps1           DRY RUN: uploads the new code, builds it NEXT TO the live one, shows which database changes
 #                                            would run. Live Green Start keeps running and nothing is switched.
 #   .\update-greenstart-on-vps.ps1 -Apply    does it: database backup, build next to live, a SHORT stop (switch + database changes),
 #                                            start, health check. If the health check fails it switches back to the old code by itself.
 #
-# What goes live: Green Start "release" d2f52bce (30 Oct, the owner's fully tested version) + SEO -> Keyword Research.
-# The archive: Desktop\TeamLink-GreenStart-VPS\green-start-update-20261031-kr.tar.gz (code only: no .env, no packages, no data).
+# What goes live: Green Start "release" d2f52bce (30 Oct, the owner's fully tested version) + SEO -> Keyword Research (live since 31 Oct)
+# + SEO -> Search Console phase 1 (2 Nov: stored history, daily + Sync now, comparisons, TeamLink keyword groups, CSV / Excel).
+# The archive: Desktop\TeamLink-GreenStart-VPS\green-start-update-20261102-search-console.tar.gz (code only: no .env, no packages, no data;
+# built from git branch claude/search-console-on-live = the 31 Oct live code + the Search Console commits, tested on that base).
+# The 31 Oct package (green-start-update-20261031-kr.tar.gz) can still be passed with -Archive.
 # Kept as they are: gs-api/.env (secrets), green-start-web/.env.production, /opt/green-start/uploads, run/ (gate etc.), the database
-# (only NEW tables are added: 5 changes of the release + 7 Keyword Research tables). The old code stays in /opt/green-start/.old-<time>.
+# (only NEW tables are added: on today's live only 20261102100000_gsc_history, 7 Search Console tables). The old code stays in /opt/green-start/.old-<time>.
 # TeamLink (pm2, port 4010) is not touched. Do not click inside this window while it runs.
 # ---------------------------------------------------------------------------
-param([switch]$Apply, [string]$Archive = (Join-Path $env:USERPROFILE 'Desktop\TeamLink-GreenStart-VPS\green-start-update-20261031-kr.tar.gz'))
+param([switch]$Apply, [string]$Archive = (Join-Path $env:USERPROFILE 'Desktop\TeamLink-GreenStart-VPS\green-start-update-20261102-search-console.tar.gz'))
 $ErrorActionPreference = 'Stop'
 $VpsHost = 'root@72.61.233.104'
 if (-not (Test-Path $Archive)) { throw "The update archive is not here: $Archive" }
@@ -44,7 +47,7 @@ as_gs "cd '$NEW/gs-api' && nice -n 10 npm ci --no-audit --no-fund --loglevel=err
 as_gs "cd '$NEW/green-start-web' && nice -n 10 npm ci --no-audit --no-fund --loglevel=error && nice -n 10 npm run build" >> /root/gs-update-build-$T.log 2>&1 || { echo "WEB BUILD FAILED (log /root/gs-update-build-$T.log). Live was not touched."; tail -30 /root/gs-update-build-$T.log; exit 1; }
 [ -f "$NEW/gs-api/dist/main.js" ] && [ -f "$NEW/green-start-web/dist/index.html" ] || { echo "BUILD OUTPUT MISSING. Live was not touched."; exit 1; }
 say "build ok"
-say "database changes waiting (should be only what this package adds, e.g. 20261031140000_seo_keyword_research):"
+say "database changes waiting (should be only what this package adds: 20261102100000_gsc_history):"
 MS=$(as_gs "cd '$NEW/gs-api' && set -a && . ./.env && set +a && npx prisma migrate status" 2>&1 || true)
 echo "$MS" | grep -E "^20|following|up to date|not yet been applied|not found locally|have not been found" || true
 # GUARD (2026-10-31): live already shows Reviews / Site Audit, so it may run a NEWER Green Start than this package. If the live
@@ -95,7 +98,7 @@ if [ "$ok" != 1 ]; then
   exit 1
 fi
 rm -f "$SRC"
-echo "GREEN START UPDATED: release d2f52bce + Keyword Research. Old code kept in $OLD (delete it after a few good days)."
+echo "GREEN START UPDATED: release d2f52bce + Keyword Research + Search Console. Old code kept in $OLD (delete it after a few good days)."
 systemctl is-active green-start-api green-start-worker green-start-gate | paste -sd' '
 '@
 $mode = if ($Apply) { 'apply' } else { 'dry' }
@@ -105,4 +108,4 @@ Write-Host "[2/2] $(if ($Apply) { 'Updating Green Start on the VPS (backup, buil
 $script | ssh $VpsHost 'tr -d ''\r'' | bash -s'
 if ($LASTEXITCODE -ne 0) { throw 'The update on the VPS stopped (see the lines above). If it said ROLLED BACK, the old Green Start is running again.' }
 if (-not $Apply) { Write-Host "`nDRY RUN finished. If it built fine, run:  .\update-greenstart-on-vps.ps1 -Apply" -ForegroundColor Yellow }
-else { Write-Host "`nDone. Open https://greenstart.teamlinks.in (from TeamLink > Omni-Channel) > SEO > Keyword Research." -ForegroundColor Green }
+else { Write-Host "`nDone. Open https://greenstart.teamlinks.in (from TeamLink > Omni-Channel) > SEO > Search Console (press Sync now once)." -ForegroundColor Green }
