@@ -187,8 +187,10 @@ const EXITED = ['Relieved', 'Exited', 'Exit Process'];
 // A document (or link) counts as read once it has been open in the viewer for
 // this long AND the learner has said they have read it.
 const DOC_MIN_SECONDS = 30;
-// A video is watched once this share of it has actually been played.
-const VIDEO_DONE_SHARE = 0.9;
+// A video is watched only when ALL of it has been played (founder 2026-11-02: "adhi compulsory antha watch chestey ne completed"),
+// skipping ahead earns nothing. The last 2 seconds (or 2%, for a very short clip) are allowed for the player's rounding at the end.
+const VIDEO_END_SLACK_SECONDS = 2;
+const videoDoneAt = (duration) => Math.max(duration - VIDEO_END_SLACK_SECONDS, duration * 0.98);
 
 // §14 — A COURSE IS A DRAFT UNTIL THE CHAIN APPROVES PUBLICATION.
 //
@@ -698,7 +700,7 @@ router.post('/materials/:id/view-token', VIEW, async (req, res) => {
 // report is also capped by the wall-clock time since the previous report, so
 // a forged "I watched an hour" posted ten seconds later is worth ten seconds.
 // `secondsWatched` is therefore seconds actually watched, and the video is
-// done at VIDEO_DONE_SHARE of its length.
+// done once all of it was played (videoDoneAt).
 //
 // DOCUMENT / LINK. The viewer reports how long it has been open (same
 // wall-clock cap) and, for a PDF, how many of its pages have been on screen.
@@ -758,7 +760,7 @@ router.post('/materials/:id/progress', VIEW, async (req, res) => {
     if (Number.isFinite(Number(body.position))) {
       data.lastPosition = Math.max(0, Math.min(Math.floor(Number(body.position)), duration || Number.MAX_SAFE_INTEGER));
     }
-    if (duration && credited >= duration * VIDEO_DONE_SHARE) {
+    if (duration && credited >= videoDoneAt(duration)) {
       data.completed = true;
       data.completedAt = now;
     }
@@ -1432,6 +1434,48 @@ router.post('/courses/:id/materials', MANAGE, EDIT_COURSE(byCourseParam), async 
       // Inferred from the file unless the manager said otherwise.
       kind: kindOf(fields.kind, media.kindForMime(stored.mimeType)),
       required: requiredOf(fields.required),
+      approvalStatus: hold ? 'Pending' : 'Approved',
+    },
+  });
+  await logAudit({ userId: req.user.id, actorName: req.user.name, action: 'Course material uploaded', entity: 'Course', entityId: course.id, toValue: title });
+  const out = await settleMaterial(req, course, created, hold);
+  return res.status(out.status).json(out.body);
+});
+
+// BIG FILES IN PIECES (founder 2026-11-02: "video kuda ekkuva GBs tho upload chestaru thisukovali"): start -> one PUT per 8 MB piece ->
+// finish, which creates the material exactly like the one-request upload above (same approval rule). utils/lmsMedia.js checks the type
+// and the size at start, the order of the pieces and the file's first bytes at the end.
+const pieceError = (res, err) => {
+  const status = media.STATUS[err.code] || 400;
+  return res.status(status).json({ error: media.MESSAGE[err.code] || 'Could not store the upload.', code: err.code, received: err.received });
+};
+router.post('/courses/:id/materials/upload-start', MANAGE, EDIT_COURSE(byCourseParam), async (req, res) => {
+  const b = req.body || {};
+  try {
+    return res.json(media.chunkStart({ filename: String(b.fileName || 'material'), contentType: String(b.contentType || ''), size: b.size, userId: req.user.id, courseId: req.course.id }));
+  } catch (err) { return pieceError(res, err); }
+});
+router.put('/material-uploads/:uploadId', MANAGE, async (req, res) => {
+  try {
+    return res.json(await media.chunkAppend(req.params.uploadId, req.user.id, req.query.offset, req));
+  } catch (err) {
+    if (media.STATUS[err.code] === 413) res.set('Connection', 'close');
+    return pieceError(res, err);
+  }
+});
+router.post('/courses/:id/materials/upload-finish', MANAGE, EDIT_COURSE(byCourseParam), async (req, res) => {
+  const { course } = req;
+  const b = req.body || {};
+  let stored;
+  try { stored = media.chunkFinish(b.uploadId, req.user.id); } catch (err) { return pieceError(res, err); }
+  if (stored.courseId !== course.id) { media.remove(stored.storedPath); return res.status(400).json({ error: 'This upload belongs to another course.' }); }
+  const hold = holdsMaterial(req.user, course);
+  const title = b.title ? String(b.title).slice(0, 200) : stored.fileName;
+  const created = await prisma.courseMaterial.create({
+    data: {
+      // sizeBytes is a 32-bit column (shown on the screen only): a file over 2 GB is stored without it
+      courseId: course.id, title, fileName: stored.fileName, storedPath: stored.storedPath, mimeType: stored.mimeType, sizeBytes: stored.sizeBytes <= 2147483647 ? stored.sizeBytes : null,
+      uploadedBy: req.user.name || null, kind: kindOf(b.kind, media.kindForMime(stored.mimeType)), required: requiredOf(b.required),
       approvalStatus: hold ? 'Pending' : 'Approved',
     },
   });

@@ -33,7 +33,9 @@ const attachments = require('./attachments');
 // SIZE CAPS, per kind. A video may be a long screen-cast; a document has no
 // business being bigger than a large slide deck. Both are stated on the
 // Create Course form in the same words the server refuses with.
-const VIDEO_MAX = 300 * 1024 * 1024; // 300 MB — a long screen-cast, not a film
+// VIDEOS OF SEVERAL GB (founder 2026-11-02: "video kuda ekkuva GBs tho upload chestaru thisukovali"): up to 10 GB, sent in 8 MB pieces
+// (chunkStart / chunkAppend / chunkFinish below) so a slow line, a proxy's body limit or a timeout never breaks a long upload.
+const VIDEO_MAX = 10 * 1024 * 1024 * 1024; // 10 GB
 const DOC_MAX = 25 * 1024 * 1024; // 25 MB — documents and pictures
 const MAX_BYTES = VIDEO_MAX; // the largest anything may be (kept for callers)
 const MULTIPART_MAX = 25 * 1024 * 1024; // the buffered form stays small
@@ -349,21 +351,98 @@ function verifyMedia(materialId, token, now = Date.now()) {
   return { ok: true, userId };
 }
 
+// ---- UPLOAD IN PIECES (2026-11-02) -------------------------------------------------------------------------------------------------
+// start: the type and the size are checked BEFORE anything is sent; an empty <name>.part is made and remembered (with who started it).
+// append: one piece at the exact offset already received (a repeated or skipped piece is refused, so the file can never get holes);
+//         a piece is at most CHUNK_MAX. finish: every byte arrived, the first bytes agree with the type, the file gets its real name.
+// Pieces of an upload nobody finished are removed after a day. The record of open uploads lives in memory: a server restart in the
+// middle means the upload is started again.
+const CHUNK_SIZE = 8 * 1024 * 1024;
+const CHUNK_MAX = 16 * 1024 * 1024;
+const open = new Map(); // uploadId -> { tmp, stored, mime, size, received, fileName, userId, courseId, at }
+function sweepOpen() {
+  const old = Date.now() - 24 * 3600 * 1000;
+  for (const [id, u] of open) { if (u.at < old) { try { fs.unlinkSync(u.tmp); } catch { /* gone */ } open.delete(id); } }
+}
+function chunkStart({ filename, contentType, size, userId, courseId }) {
+  sweepOpen();
+  const mime = mimeFor(contentType, filename);
+  const ext = ALLOWED[mime];
+  if (!ext) throw fail('BAD_TYPE');
+  const total = Number(size);
+  if (!Number.isFinite(total) || total <= 0) throw fail('NO_FILE');
+  if (total > capFor(mime)) throw fail(tooLarge(mime));
+  const dir = attachments.uploadDir();
+  const stored = newName(ext);
+  const tmp = path.join(dir, `${stored}.part`);
+  fs.writeFileSync(tmp, Buffer.alloc(0), { mode: 0o600 });
+  const uploadId = crypto.randomBytes(16).toString('hex');
+  open.set(uploadId, { tmp, stored, mime, size: total, received: 0, fileName: attachments.safeDisplayName(filename), userId, courseId, at: Date.now() });
+  return { uploadId, chunkSize: CHUNK_SIZE };
+}
+function chunkOf(uploadId, userId) {
+  const u = open.get(String(uploadId || ''));
+  return u && u.userId === userId ? u : null;
+}
+function chunkAppend(uploadId, userId, offset, req) {
+  const u = chunkOf(uploadId, userId);
+  if (!u) return Promise.reject(fail('UPLOAD_GONE'));
+  if (Number(offset) !== u.received) return Promise.reject(Object.assign(fail('WRONG_OFFSET'), { received: u.received }));
+  return new Promise((resolve, reject) => {
+    const out = fs.createWriteStream(u.tmp, { flags: 'a', mode: 0o600 });
+    let got = 0; let failed = null;
+    const abort = (code) => { if (failed) return; failed = code; req.unpipe(out); out.destroy(); reject(fail(code)); };
+    req.on('data', (c) => {
+      got += c.length;
+      if (got > CHUNK_MAX || u.received + got > u.size) { abort('TOO_LARGE_CHUNK'); setTimeout(() => req.destroy(), 1500).unref(); }
+    });
+    req.on('error', () => abort('NO_FILE'));
+    out.on('error', () => abort('NO_FILE'));
+    out.on('close', () => {
+      if (failed) {
+        // keep only what was received before this piece: the piece is sent again from the same offset
+        try { fs.truncateSync(u.tmp, u.received); } catch { /* the next append checks the offset */ }
+        return;
+      }
+      u.received += got; u.at = Date.now();
+      resolve({ received: u.received, size: u.size });
+    });
+    req.pipe(out);
+  });
+}
+function chunkFinish(uploadId, userId) {
+  const u = chunkOf(uploadId, userId);
+  if (!u) throw fail('UPLOAD_GONE');
+  if (u.received !== u.size) throw fail('UPLOAD_SHORT');
+  const fd = fs.openSync(u.tmp, 'r');
+  const head = Buffer.alloc(512);
+  try { fs.readSync(fd, head, 0, 512, 0); } finally { fs.closeSync(fd); }
+  open.delete(String(uploadId));
+  if (!sniffAgrees(u.mime, head)) { try { fs.unlinkSync(u.tmp); } catch { /* gone */ } throw fail('CONTENT_MISMATCH'); }
+  fs.renameSync(u.tmp, path.join(attachments.uploadDir(), u.stored));
+  return { storedPath: u.stored, fileName: u.fileName, mimeType: u.mime, sizeBytes: u.size, courseId: u.courseId };
+}
+
 const MB = 1024 * 1024;
+const GB_TEXT = (n) => (n >= 1024 * MB ? `${Math.round(n / (1024 * MB))} GB` : `${Math.round(n / MB)} MB`);
 const MESSAGE = {
   NO_FILE: 'Choose a file to upload.',
-  TOO_LARGE: `That file is bigger than ${VIDEO_MAX / MB} MB.`,
-  TOO_LARGE_VIDEO: `This video is bigger than ${VIDEO_MAX / MB} MB. Make it shorter or smaller and try again.`,
+  TOO_LARGE: `That file is bigger than ${GB_TEXT(VIDEO_MAX)}.`,
+  TOO_LARGE_VIDEO: `This video is bigger than ${GB_TEXT(VIDEO_MAX)}. Make it shorter or smaller and try again.`,
+  TOO_LARGE_CHUNK: 'A piece of the upload was too big. Reload the page and try again.',
+  UPLOAD_GONE: 'This upload is no longer open (the server restarted or a day passed). Add the file again.',
+  WRONG_OFFSET: 'A piece of the upload came out of order. It will be sent again.',
+  UPLOAD_SHORT: 'Not every piece of the file arrived. Add the file again.',
   TOO_LARGE_DOC: `This document is bigger than ${DOC_MAX / MB} MB. Make it smaller (for example, save it as PDF) and try again.`,
   BAD_TYPE: 'This kind of file can\'t be added. Videos: MP4, WebM or MOV. Documents: PDF, text or a picture (PNG, JPG). A Word, PowerPoint or Excel file would download instead of opening: save it as PDF first (File > Save As > PDF) and add the PDF.',
   CONTENT_MISMATCH: 'This file doesn\'t match its name — it may be damaged or renamed. Open it, save it again, and upload that copy.',
   NOT_MULTIPART: 'Upload the file as a multipart/form-data request.',
 };
 // HTTP status per refusal: an oversized file is 413, everything else 400.
-const STATUS = { TOO_LARGE: 413, TOO_LARGE_VIDEO: 413, TOO_LARGE_DOC: 413 };
+const STATUS = { TOO_LARGE: 413, TOO_LARGE_VIDEO: 413, TOO_LARGE_DOC: 413, TOO_LARGE_CHUNK: 413, UPLOAD_GONE: 410, WRONG_OFFSET: 409 };
 
 module.exports = {
   MAX_BYTES, VIDEO_MAX, DOC_MAX, MULTIPART_MAX, ALLOWED, MESSAGE, STATUS,
-  mimeFor, kindForMime, receive, storeBuffer, resolve, remove, stream,
+  mimeFor, kindForMime, receive, storeBuffer, resolve, remove, stream, chunkStart, chunkAppend, chunkFinish, CHUNK_SIZE,
   MEDIA_TTL_SECONDS, signMedia, verifyMedia,
 };

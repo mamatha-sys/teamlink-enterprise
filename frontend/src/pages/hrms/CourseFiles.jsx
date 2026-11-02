@@ -11,15 +11,15 @@ import './CourseFiles.css';
 // real gate: it checks the extension AND the declared type, reads the first
 // bytes of the file, stores it under a random server-made name and refuses
 // anything over the cap with a 413. This side only says no earlier, in the
-// same words, so nobody waits for a 300 MB upload that was never going to fit.
+// same words, so nobody waits for a big upload that was never going to fit.
 // ---------------------------------------------------------------------------
 
 const MB = 1024 * 1024;
 export const LIMITS = {
-  Video: { max: 300 * MB, ext: ['mp4', 'webm', 'mov', 'm4v', 'ogv'] },
+  Video: { max: 10 * 1024 * MB, ext: ['mp4', 'webm', 'mov', 'm4v', 'ogv'] },
   Document: { max: 25 * MB, ext: ['pdf', 'txt', 'png', 'jpg', 'jpeg', 'webp'] },
 };
-export const LIMITS_TEXT = 'Videos: MP4, WebM or MOV, up to 300 MB. Documents: PDF, text or a picture, up to 25 MB. Word, PowerPoint or Excel: save as PDF first, so it opens in the browser.';
+export const LIMITS_TEXT = 'Videos: MP4, WebM or MOV, up to 10 GB (a big video is sent in small pieces - keep the window open). Documents: PDF, text or a picture, up to 25 MB. Word, PowerPoint or Excel: save as PDF first, so it opens in the browser.';
 
 const ACCEPT = {
   Video: '.mp4,.webm,.mov,.m4v,.ogv,video/mp4,video/webm,video/quicktime',
@@ -53,7 +53,7 @@ export function checkFile(file, kind) {
   }
   if (!file.size) return 'This file is empty.';
   if (file.size > LIMITS[kind].max) {
-    return kind === 'Video' ? 'This video is bigger than 300 MB.' : 'This document is bigger than 25 MB.';
+    return kind === 'Video' ? 'This video is bigger than 10 GB.' : 'This document is bigger than 25 MB.';
   }
   return '';
 }
@@ -61,8 +61,52 @@ export function checkFile(file, kind) {
 // Uploads one file against a course. STREAMED: the request body is the file
 // itself, so a long video is written to disk as it arrives. Resolves to the
 // material, or rejects with a human sentence.
+// BIG FILES GO IN PIECES (founder 2026-11-02: "video kuda ekkuva GBs tho upload chestaru thisukovali"): anything over 900 KB is sent as
+// 8 MB pieces (900 KB ones when the web server in front refuses bigger bodies - the live site's nginx took about 1 MB on 2-Nov) (POST upload-start -> PUT per piece -> POST upload-finish), each piece tried up to 4 times, so a slow line or a short
+// network drop does not lose a long upload. The server tells the next offset when a piece arrives twice.
+const PIECES_FROM = 900 * 1024;
+const SMALL_PIECE = 900 * 1024;
+const wait = (ms) => new Promise((r) => { setTimeout(r, ms); });
+async function uploadInPieces(courseId, { file, kind, required }, onPct) {
+  const title = file.name.replace(/\.[^.]+$/, '') || file.name;
+  const start = await api.post(`/lms/courses/${courseId}/materials/upload-start`, { fileName: file.name, size: file.size, contentType: file.type || '' });
+  const { uploadId } = start.data;
+  let { chunkSize } = start.data;
+  let offset = 0;
+  while (offset < file.size) {
+    const piece = file.slice(offset, Math.min(offset + chunkSize, file.size));
+    let sent = false;
+    for (let tryNo = 1; tryNo <= 4 && !sent; tryNo += 1) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const r = await api.put(`/lms/material-uploads/${uploadId}`, piece, {
+          params: { offset },
+          headers: { 'Content-Type': 'application/octet-stream' },
+          onUploadProgress: (p) => { if (onPct) onPct(Math.min(99, Math.round(((offset + (p.loaded || 0)) / file.size) * 100))); },
+        });
+        offset = r.data.received;
+        sent = true;
+      } catch (err) {
+        const d = err.response?.data || {};
+        if (d.code === 'WRONG_OFFSET' && Number.isFinite(d.received)) { offset = d.received; sent = true; break; }
+        // 413 from the web server in front (not from TeamLink, which answers with a code): it takes only small bodies, so the
+        // pieces become 900 KB and this one is sent again (live 2026-11-02: nginx took about 1 MB).
+        if (err.response?.status === 413 && !d.code && chunkSize > SMALL_PIECE) { chunkSize = SMALL_PIECE; break; }
+        if (err.response && err.response.status < 500 && err.response.status !== 408) throw err;
+        if (tryNo === 4) throw err;
+        // eslint-disable-next-line no-await-in-loop
+        await wait(1500 * tryNo);
+      }
+    }
+  }
+  const done = await api.post(`/lms/courses/${courseId}/materials/upload-finish`, { uploadId, title, kind, required });
+  if (onPct) onPct(100);
+  return done.data;
+}
+
 export async function uploadMaterial(courseId, { file, kind, required = true }, onPct) {
   try {
+    if (file.size > PIECES_FROM) return await uploadInPieces(courseId, { file, kind, required }, onPct);
     const res = await api.post(`/lms/courses/${courseId}/materials`, file, {
       headers: { 'Content-Type': file.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name) },
       params: { title: file.name.replace(/\.[^.]+$/, '') || file.name, kind, required },
@@ -73,7 +117,7 @@ export async function uploadMaterial(courseId, { file, kind, required = true }, 
     const status = err.response?.status;
     const msg = err.response?.data?.error;
     if (msg) throw new Error(msg);
-    if (status === 413) throw new Error(kind === 'Video' ? 'This video is bigger than 300 MB.' : 'This document is bigger than 25 MB.');
+    if (status === 413) throw new Error(kind === 'Video' ? 'This video is bigger than 10 GB.' : 'This document is bigger than 25 MB.');
     if (status === 403) throw new Error('You are not allowed to add files to this course.');
     throw new Error('The upload stopped before it finished. Check your internet and try again.');
   }

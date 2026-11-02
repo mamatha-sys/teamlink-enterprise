@@ -216,7 +216,7 @@ D. Engineer`}</pre>
 
 // --- Create / edit a course, with its completion rules ----------------------
 const RULES = [
-  ['requireVideos', 'Watch all required videos', 'A video counts once about 90% of it has actually been played — skipping ahead does not count.'],
+  ['requireVideos', 'Watch all required videos', 'A video counts only when ALL of it has been played — skipping ahead does not count.'],
   ['requireDocuments', 'Read all required documents', 'A document or link completes by itself once it has been open for 30 seconds — and, for a PDF, once every page has been on screen. There is no "mark as read".'],
   ['requireAssessment', 'Pass the assessment', 'Opens by itself when the content above is done; the course completes on a score at or above the pass mark.'],
 ];
