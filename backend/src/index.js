@@ -349,6 +349,8 @@ app.use('/api/admin/integration-health', require('./routes/integrationHealth'));
 app.use('/api/admin/logins', require('./routes/adminLogins')); // separate logins on one email: status, existing-logins panel, per-login activation / sign-out (2026-10-21)
 // EXOTEL AI CALLING (2026-10-22): admin settings, recruiter calls, offers, dashboard; /portal/* is the Job Portal's door (routes/aiCalling.js, calling/*).
 app.use('/api/ai-calling', require('./routes/aiCalling'));
+// THE SALES CRM (2026-11-02): leads, accounts & contacts, deals pipeline, activities, follow-ups, dashboard (routes/crm.js, crm/*).
+app.use('/api/crm', require('./routes/crm'));
 app.use('/api/admin', adminRoutes);
 app.use('/api/reports', reportRoutes);
 // ATS -> Reports: the ten recruitment reports, their drill-down and exports.

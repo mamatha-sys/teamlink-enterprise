@@ -203,8 +203,20 @@ export default function Clients() {
   // Links from the BDE workspace: /clients?add=1 opens Add client, ?panel=requests / followups opens that panel.
   const [urlParams, setUrlParams] = useSearchParams();
   const urlPanel = urlParams.get('panel') || '';
+  // From a Won CRM deal ("Add as client", 2026-11-02): /clients?add=1&crmDeal=<id>&name=...&contactName=... opens Add client
+  // filled in; once saved, the deal and its CRM account are linked to the new client and the deal opens again.
+  const [fromCrm, setFromCrm] = useState(null); // { dealId, initial }
   useEffect(() => {
-    if (urlParams.get('add') === '1') { setAdding(true); setUrlParams({}, { replace: true }); }
+    if (urlParams.get('add') === '1') {
+      const dealId = urlParams.get('crmDeal');
+      if (dealId) {
+        const initial = {};
+        ['name', 'industry', 'location', 'website', 'contactName', 'contactDesignation', 'contactPhone', 'contactEmail'].forEach((k) => { const v = urlParams.get(k); if (v) initial[k] = v; });
+        if (initial.contactPhone) initial.contactWhatsApp = initial.contactPhone;
+        setFromCrm({ dealId, initial });
+      }
+      setAdding(true); setUrlParams({}, { replace: true });
+    }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [editing, setEditing] = useState(null);
   const [noteFor, setNoteFor] = useState(null);
@@ -801,11 +813,19 @@ export default function Clients() {
         <AddClientWizard
           user={user}
           meta={meta}
-          onClose={() => setAdding(false)}
+          initial={fromCrm ? fromCrm.initial : undefined}
+          onClose={() => { setAdding(false); setFromCrm(null); }}
           onSaved={(created, warning) => {
             setAdding(false);
             setFlash(warning || `${created.name} added.`);
             load();
+            if (fromCrm && created && created.id) {
+              const dealId = fromCrm.dealId;
+              setFromCrm(null);
+              api.post(`/crm/deals/${dealId}/client`, { clientId: created.id })
+                .then(() => navigate(`/crm/deals?open=deal:${dealId}`))
+                .catch(() => setFlash(`${created.name} added. Linking it to the CRM deal did not work - open the deal and try again.`));
+            }
           }}
         />
       )}

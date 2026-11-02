@@ -14,7 +14,7 @@ import '../crm/crm.css';
 const STATUS_TONE = { New: 'warn', 'Already known': 'draft' };
 const origin = () => (typeof window !== 'undefined' ? window.location.origin : '');
 
-export default function FormsPage({ title = 'Forms' }) { // title: 'CRM Forms' when shown in the TeamLink CRM module (pages/crm/CrmForms.jsx)
+export default function FormsPage({ title = 'Forms' }) {
   const { go, toast, acc } = useOmni();
   const [data, setData] = useState(null);
   const [subs, setSubs] = useState([]);

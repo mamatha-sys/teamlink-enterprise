@@ -283,25 +283,22 @@ export const ACCOUNTS_ITEMS = [
 //     "Administration" group containing that single entry. §15 says that is
 //     wrong. The TL's access did not go away: it moved to where the matrix
 //     puts it, HRMS -> Employees, pointing at the same scoped screen.
-// CRM (founder 2026-11-02: "side bar lo crm ani oka module raavali") - a TeamLink module of its own, with the eight pages of the
-// Omni-Channel CRM, in the founder's order. Open to Super Admin / Admin and the BDE team (BDE, BDE TL), who work with clients;
-// the pages are built one by one (pages/crm/CrmPage.jsx).
+// CRM (founder 2026-11-02: "side bar lo crm ani oka module raavali"; then a real sales CRM in "3 to 4 modules" that cover it
+// all) - a TeamLink module of its own: Dashboard, Leads, Deals, Accounts & Contacts (pages/crm/CrmPage.jsx). Calls, meetings,
+// notes and follow-ups live inside every record and on the Dashboard. Open to Super Admin / Admin, the BDE team (BDE, BDE TL)
+// and the Managers (read only); the server decides what each one sees (backend/src/crm/service.js).
 const crmOpen = (u) => {
   if (!u || isExternalUser(u)) return false;
   const ats = productRole(u, 'ats');
-  if (['SUPER_ADMIN', 'ADMIN'].includes(u.role) || ['SUPER_ADMIN', 'ADMIN', 'BDE'].includes(ats)) return true;
+  if (['SUPER_ADMIN', 'ADMIN', 'BDE'].includes(u.role) || ['SUPER_ADMIN', 'ADMIN', 'BDE', 'MANAGER', 'ASSISTANT_MANAGER'].includes(ats)) return true;
   return ats === 'TL' && String(u.atsDepartment || '').toUpperCase() === 'BDE';
 };
 const crmLeaf = (icon, to, label) => ({ ...leaf(icon, to, label, null), when: crmOpen });
 export const CRM_ITEMS = [
-  crmLeaf('🗒️', '/crm/forms', 'CRM Forms'),
-  crmLeaf('🗄️', '/crm/data-tables', 'Data Tables'),
-  crmLeaf('📋', '/crm/customer-tables', 'Customer Tables'),
-  crmLeaf('🏷️', '/crm/fields', 'CRM Fields'),
-  crmLeaf('💬', '/crm/bot-data', 'WhatsApp Bot Data'),
-  crmLeaf('🛒', '/crm/shopify', 'Shopify'),
-  crmLeaf('🧩', '/crm/meta-catalogs', 'Meta catalogs'),
-  crmLeaf('📨', '/crm/flow-responses', 'WhatsApp Flow Responses'),
+  crmLeaf('📊', '/crm/dashboard', 'Dashboard'),
+  crmLeaf('🎯', '/crm/leads', 'Leads'),
+  crmLeaf('💼', '/crm/deals', 'Deals'),
+  crmLeaf('🏢', '/crm/accounts', 'Accounts & Contacts'),
 ];
 
 export const ADMIN_ITEMS = [

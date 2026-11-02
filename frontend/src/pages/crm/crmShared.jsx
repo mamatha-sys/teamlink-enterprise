@@ -1,0 +1,440 @@
+// ---------------------------------------------------------------------------
+// THE SALES CRM - SHARED PIECES (founder 2026-11-02). The four screens (Dashboard, Leads, Deals, Accounts & Contacts) use:
+//   CrmCtx / useCrm      who I am in the CRM (role, may edit / assign, owners, pick lists) + a small toast
+//   RecordForm           add / edit a lead, account, contact or deal (duplicate warning with "Save anyway")
+//   RecordPanel          one record: details, actions (convert, stage, add as client), timeline and follow-ups
+//   money / ago / ...    small formatters
+// Everything is read from and written to /api/crm (backend/src/crm/service.js holds the rules).
+// ---------------------------------------------------------------------------
+import { createContext, useContext, useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import api from '../../api';
+import Modal from '../../components/Modal.jsx';
+
+export const CrmCtx = createContext(null);
+export const useCrm = () => useContext(CrmCtx);
+
+export const errOf = (e, fb) => (e && e.response && e.response.data && e.response.data.error) || fb;
+// ₹ in Indian grouping; short form in lakhs / crores for the board and the cards
+export const money = (n) => `₹${Math.round(Number(n) || 0).toLocaleString('en-IN')}`;
+export const moneyShort = (n) => {
+  const v = Number(n) || 0;
+  if (v >= 1e7) return `₹${(v / 1e7).toFixed(v >= 1e8 ? 0 : 1)} Cr`;
+  if (v >= 1e5) return `₹${(v / 1e5).toFixed(v >= 1e6 ? 0 : 1)} L`;
+  return money(v);
+};
+export const dateOf = (iso) => { if (!iso) return ''; const d = new Date(iso.length === 10 ? `${iso}T00:00:00` : iso); return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' }); };
+export const dateTimeOf = (iso) => { if (!iso) return ''; const d = new Date(iso); return Number.isNaN(d.getTime()) ? iso : d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); };
+export const istToday = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+export const addDays = (ymd, n) => new Date(Date.parse(`${ymd}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+export const ACT_ICON = { call: '📞', meeting: '🤝', email: '✉️', whatsapp: '💬', note: '📝' };
+export const KIND_PATH = { lead: 'leads', deal: 'deals', account: 'accounts', contact: 'accounts' };
+export const recordLink = (kind, id) => `/crm/${KIND_PATH[kind] || 'dashboard'}?open=${kind}:${id}`;
+const STATUS_CLASS = { New: 'new', Contacted: 'pending', Qualified: 'active', Junk: 'rejected', Converted: 'joined', Won: 'joined', Lost: 'rejected', Prospect: 'new', Client: 'active' };
+export const Pill = ({ v }) => (v ? <span className={`status ${STATUS_CLASS[v] || 'review'}`}>{v}</span> : null);
+
+// ---- the forms -------------------------------------------------------------------------------------------
+function fieldsFor(kind, me) {
+  const L = me.lists;
+  if (kind === 'lead') {
+    return [
+      { k: 'company', label: 'Company *' }, { k: 'contactName', label: 'Contact person' }, { k: 'designation', label: 'Designation' },
+      { k: 'phone', label: 'Phone', type: 'tel' }, { k: 'email', label: 'Email', type: 'email' }, { k: 'industry', label: 'Industry' },
+      { k: 'city', label: 'City' }, { k: 'source', label: 'Source', type: 'select', options: L.sources },
+      { k: 'status', label: 'Status', type: 'select', options: L.leadStatuses.filter((s) => s !== 'Converted'), editOnly: true },
+      { k: 'notes', label: 'Notes', type: 'textarea', wide: true },
+    ];
+  }
+  if (kind === 'account') {
+    return [
+      { k: 'name', label: 'Company name *' }, { k: 'industry', label: 'Industry' }, { k: 'city', label: 'City' }, { k: 'website', label: 'Website' },
+      { k: 'phone', label: 'Phone', type: 'tel' }, { k: 'email', label: 'Email', type: 'email' }, { k: 'source', label: 'Source', type: 'select', options: L.sources },
+      { k: 'notes', label: 'Notes', type: 'textarea', wide: true },
+    ];
+  }
+  if (kind === 'contact') {
+    return [
+      { k: 'name', label: 'Name *' }, { k: 'designation', label: 'Designation' }, { k: 'role', label: 'Role in the deal', type: 'select', options: L.contactRoles },
+      { k: 'phone', label: 'Phone', type: 'tel' }, { k: 'email', label: 'Email', type: 'email' }, { k: 'accountId', label: 'Account', type: 'account' },
+      { k: 'notes', label: 'Notes', type: 'textarea', wide: true },
+    ];
+  }
+  return [
+    { k: 'title', label: 'Deal name *' }, { k: 'accountId', label: 'Account *', type: 'account' }, { k: 'contactId', label: 'Contact', type: 'contact' },
+    { k: 'openings', label: 'Openings', type: 'number' }, { k: 'avgCtc', label: 'Average CTC (₹ a year)', type: 'number' }, { k: 'feePercent', label: 'Our fee (% of CTC)', type: 'number' },
+    { k: 'value', label: 'Deal value (₹)', type: 'number', hint: 'Worked out from openings × CTC × fee when all three are given.' },
+    { k: 'expectedClose', label: 'Expected close', type: 'date' },
+  ];
+}
+
+export function RecordForm({ kind, row, preset, onClose, onSaved }) {
+  const { me, toast } = useCrm();
+  const editing = !!(row && row.id);
+  const [f, setF] = useState(() => ({ ...(preset || {}), ...(row || {}) }));
+  const [accounts, setAccounts] = useState(null);
+  const [contacts, setContacts] = useState([]);
+  const [dups, setDups] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const fields = fieldsFor(kind, me).filter((x) => editing || !x.editOnly);
+  const needsAccounts = fields.some((x) => x.type === 'account');
+  useEffect(() => { if (needsAccounts) api.get('/crm/accounts').then((r) => setAccounts(r.data.rows)).catch(() => setAccounts([])); }, [needsAccounts]);
+  useEffect(() => {
+    if (kind !== 'deal' || !f.accountId) { setContacts([]); return; }
+    api.get('/crm/contacts', { params: { accountId: f.accountId } }).then((r) => setContacts(r.data.rows)).catch(() => setContacts([]));
+  }, [kind, f.accountId]);
+  const set = (k, v) => { setF((x) => ({ ...x, [k]: v })); setErr(''); setDups(null); };
+  const auto = kind === 'deal' && Number(f.openings) && Number(f.avgCtc) && Number(f.feePercent) ? Math.round(Number(f.openings) * Number(f.avgCtc) * (Number(f.feePercent) / 100)) : null;
+
+  async function save(force) {
+    setBusy(true); setErr('');
+    const body = {}; fields.forEach((x) => { body[x.k] = f[x.k] ?? ''; });
+    if (me.canAssign) body.ownerId = f.ownerId || undefined;
+    if (force) body.force = true;
+    try {
+      const r = editing ? await api.put(`/crm/${kind}s/${row.id}`, body) : await api.post(`/crm/${kind}s`, body);
+      toast(editing ? 'Saved.' : `${kind === 'lead' ? 'Lead' : kind === 'deal' ? 'Deal' : kind === 'account' ? 'Account' : 'Contact'} added.`);
+      onSaved(r.data[kind]);
+    } catch (e) {
+      if (e.response && e.response.status === 409) setDups(e.response.data.duplicates || []);
+      setErr(errOf(e, 'This could not be saved.'));
+    } finally { setBusy(false); }
+  }
+
+  const input = (x) => {
+    const v = f[x.k] ?? '';
+    if (x.type === 'select') return <select value={v} onChange={(e) => set(x.k, e.target.value)}><option value="">—</option>{x.options.map((o) => <option key={o} value={o}>{o}</option>)}</select>;
+    if (x.type === 'textarea') return <textarea rows={3} value={v} onChange={(e) => set(x.k, e.target.value)} />;
+    if (x.type === 'account') {
+      return (
+        <select value={v} onChange={(e) => { set(x.k, e.target.value); if (kind === 'deal') set('contactId', ''); }} disabled={accounts == null}>
+          <option value="">{accounts == null ? 'Loading…' : kind === 'contact' ? '— no account —' : '— pick the account —'}</option>
+          {(accounts || []).map((a) => <option key={a.id} value={a.id}>{a.name}{a.city ? ` · ${a.city}` : ''}</option>)}
+        </select>
+      );
+    }
+    if (x.type === 'contact') return <select value={v} onChange={(e) => set(x.k, e.target.value)} disabled={!f.accountId}><option value="">—</option>{contacts.map((c) => <option key={c.id} value={c.id}>{c.name}{c.designation ? ` · ${c.designation}` : ''}</option>)}</select>;
+    return <input type={x.type || 'text'} value={v} min={x.type === 'number' ? 0 : undefined} onChange={(e) => set(x.k, e.target.value)} />;
+  };
+  const title = `${editing ? 'Edit' : 'New'} ${kind}`;
+  return (
+    <Modal
+      title={title.charAt(0).toUpperCase() + title.slice(1)}
+      size="wide"
+      onClose={onClose}
+      foot={(
+        <>
+          <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          {dups && dups.length > 0 && <button type="button" className="btn" disabled={busy} onClick={() => save(true)}>Save anyway</button>}
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => save(false)}>{busy ? 'Saving…' : 'Save'}</button>
+        </>
+      )}
+    >
+      <div className="grid-2">
+        {fields.map((x) => (
+          <div key={x.k} className="field" style={x.wide ? { gridColumn: '1 / -1' } : undefined}>
+            <label>{x.label}</label>
+            {input(x)}
+            {x.k === 'value' && auto != null && <div className="small-muted" style={{ marginTop: 3 }}>{money(auto)} (openings × CTC × fee)</div>}
+            {x.hint && auto == null && <div className="small-muted" style={{ marginTop: 3 }}>{x.hint}</div>}
+          </div>
+        ))}
+        {me.canAssign && (
+          <div className="field">
+            <label>Owner (BDE)</label>
+            <select value={f.ownerId || ''} onChange={(e) => set('ownerId', e.target.value)}>
+              <option value="">{editing ? (row.ownerName || '—') : 'Me'}</option>
+              {me.owners.map((o) => <option key={o.id} value={o.id}>{o.name}{o.tl ? ' · BDE TL' : ''}</option>)}
+            </select>
+          </div>
+        )}
+      </div>
+      {err && <div className="notice" role="alert" style={{ marginTop: 6, color: dups ? undefined : 'var(--red)' }}>{err}</div>}
+      {dups && dups.length > 0 && (
+        <div className="card" style={{ marginTop: 8, padding: 12 }}>
+          <div className="small-muted" style={{ marginBottom: 6 }}>Already in TeamLink — please check before adding again:</div>
+          {dups.map((d) => <div key={`${d.where}${d.id}`} style={{ fontSize: 13, padding: '2px 0' }}><b>{d.name}</b> · {d.where}{d.status ? ` (${d.status})` : ''}{d.owner ? ` · owner ${d.owner}` : ''}</div>)}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ---- log a call / meeting / ... and the next follow-up ---------------------------------------------------
+function LogActivity({ link, onDone }) {
+  const { me, toast } = useCrm();
+  const [kind, setKind] = useState('call');
+  const [subject, setSubject] = useState('');
+  const [note, setNote] = useState('');
+  const [next, setNext] = useState('');
+  const [nextTitle, setNextTitle] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  async function save() {
+    setBusy(true); setErr('');
+    try {
+      await api.post('/crm/activities', { kind, subject, note, ...link, followUp: next ? { dueDate: next, title: nextTitle || undefined } : undefined });
+      setSubject(''); setNote(''); setNext(''); setNextTitle('');
+      toast(next ? 'Logged, with the next follow-up.' : 'Logged.');
+      onDone();
+    } catch (e) { setErr(errOf(e, 'This could not be saved.')); } finally { setBusy(false); }
+  }
+  const today = istToday();
+  return (
+    <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+        {Object.entries(me.lists.activityKinds).map(([k, label]) => (
+          <button key={k} type="button" className={`btn btn-sm${kind === k ? ' btn-primary' : ''}`} onClick={() => setKind(k)}>{ACT_ICON[k]} {label}</button>
+        ))}
+      </div>
+      <input type="text" placeholder={kind === 'note' ? 'Note title' : `What was the ${me.lists.activityKinds[kind].toLowerCase()} about?`} value={subject} onChange={(e) => setSubject(e.target.value)} style={{ marginBottom: 6 }} />
+      <textarea rows={2} placeholder="What happened / what they said" value={note} onChange={(e) => setNote(e.target.value)} />
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
+        <span className="small-muted">Next follow-up:</span>
+        {[['Tomorrow', 1], ['In 3 days', 3], ['Next week', 7]].map(([l, n]) => (
+          <button key={l} type="button" className={`btn btn-sm${next === addDays(today, n) ? ' btn-primary' : ''}`} onClick={() => setNext(addDays(today, n))}>{l}</button>
+        ))}
+        <input type="date" value={next} min={today} onChange={(e) => setNext(e.target.value)} style={{ width: 150 }} aria-label="Follow-up date" />
+        {next && <button type="button" className="btn btn-sm" onClick={() => setNext('')} aria-label="No follow-up">×</button>}
+        {next && <input type="text" placeholder="Follow-up: what to do" value={nextTitle} onChange={(e) => setNextTitle(e.target.value)} style={{ flex: 1, minWidth: 160 }} />}
+        <button type="button" className="btn btn-primary btn-sm" style={{ marginLeft: 'auto' }} disabled={busy || (!subject.trim() && !note.trim())} onClick={save}>{busy ? 'Saving…' : 'Log it'}</button>
+      </div>
+      {err && <div className="small-muted" role="alert" style={{ color: 'var(--red)', marginTop: 6 }}>{err}</div>}
+    </div>
+  );
+}
+
+export function Timeline({ activities }) {
+  if (!activities.length) return <div className="small-muted" style={{ padding: '6px 0' }}>Nothing logged yet. Log the first call, meeting or note above.</div>;
+  return (
+    <div className="timeline">
+      {activities.map((a) => (
+        <div key={a.id} className="timeline-item">
+          <div className="timeline-date">{dateTimeOf(a.at)}{a.byName ? ` · ${a.byName}` : ''}</div>
+          <div className="timeline-label">{ACT_ICON[a.kind] || '•'} {a.subject || (a.kind === 'note' ? 'Note' : a.kind)}</div>
+          {a.note && <div style={{ fontSize: 12.5, color: 'var(--ink-soft)', whiteSpace: 'pre-wrap' }}>{a.note}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Follow-ups of one record (add, done) or of the dashboard (with the record they belong to).
+export function TaskList({ tasks, link, onChanged, showRecord, canEdit = true }) {
+  const { toast } = useCrm();
+  const [title, setTitle] = useState('');
+  const [due, setDue] = useState(istToday());
+  const [busy, setBusy] = useState(false);
+  const today = istToday();
+  async function add() {
+    setBusy(true);
+    try { await api.post('/crm/tasks', { title, dueDate: due, ...link }); setTitle(''); toast('Follow-up added.'); onChanged(); } catch (e) { toast(errOf(e, 'The follow-up could not be added.')); } finally { setBusy(false); }
+  }
+  async function done(t) {
+    try { await api.post(`/crm/tasks/${t.id}/done`, {}); toast('Done.'); onChanged(); } catch (e) { toast(errOf(e, 'This could not be saved.')); }
+  }
+  return (
+    <div>
+      {link && canEdit && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+          <input type="text" placeholder="New follow-up" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <input type="date" value={due} min={today} onChange={(e) => setDue(e.target.value)} style={{ width: 150 }} aria-label="Due date" />
+          <button type="button" className="btn btn-sm" disabled={busy || !title.trim() || !due} onClick={add}>Add</button>
+        </div>
+      )}
+      {!tasks.length && <div className="small-muted">No follow-ups.</div>}
+      {tasks.map((t) => {
+        const late = t.status === 'Open' && t.dueDate < today;
+        return (
+          <div key={t.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '6px 0', borderBottom: '1px solid var(--line-soft)', opacity: t.status === 'Done' ? 0.55 : 1 }}>
+            {t.status === 'Open' && canEdit
+              ? <input type="checkbox" aria-label={`Mark "${t.title}" done`} onChange={() => done(t)} style={{ marginTop: 3, width: 'auto' }} />
+              : <span aria-hidden="true" style={{ width: 13 }}>{t.status === 'Done' ? '✓' : ''}</span>}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, textDecoration: t.status === 'Done' ? 'line-through' : undefined }}>{t.title}</div>
+              <div className="small-muted" style={{ fontSize: 11.5 }}>
+                <span style={{ color: late ? 'var(--red)' : undefined, fontWeight: late ? 600 : undefined }}>{t.dueDate === today ? 'Today' : dateOf(t.dueDate)}{t.dueTime ? ` ${t.dueTime}` : ''}{late ? ' · late' : ''}</span>
+                {showRecord && t.recordName && <> · <Link to={recordLink(t.recordKind, t.recordId)}>{t.recordName}</Link></>}
+                {t.ownerName && showRecord ? ` · ${t.ownerName}` : ''}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---- convert a lead -------------------------------------------------------------------------------------
+function ConvertLead({ lead, onClose, onDone }) {
+  const { toast } = useCrm();
+  const [f, setF] = useState({ dealTitle: `${lead.company} - hiring`, openings: '', avgCtc: '', feePercent: '8.33', value: '', expectedClose: '', createDeal: true });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const auto = Number(f.openings) && Number(f.avgCtc) && Number(f.feePercent) ? Math.round(Number(f.openings) * Number(f.avgCtc) * (Number(f.feePercent) / 100)) : null;
+  async function go() {
+    setBusy(true); setErr('');
+    try { const r = await api.post(`/crm/leads/${lead.id}/convert`, f); toast('Converted: account, contact and deal are ready.'); onDone(r.data); } catch (e) { setErr(errOf(e, 'The lead could not be converted.')); } finally { setBusy(false); }
+  }
+  return (
+    <Modal title={`Convert ${lead.company}`} onClose={onClose} foot={<><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="button" className="btn btn-primary" disabled={busy} onClick={go}>{busy ? 'Converting…' : 'Convert'}</button></>}>
+      <p className="small-muted" style={{ marginTop: 0 }}>This makes an <b>account</b> for {lead.company}{lead.contactName ? <>, a <b>contact</b> ({lead.contactName})</> : null} and a <b>deal</b> on the pipeline. The lead&apos;s calls and follow-ups move with it.</p>
+      <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontWeight: 500, marginBottom: 10 }}><input type="checkbox" checked={f.createDeal} onChange={(e) => set('createDeal', e.target.checked)} style={{ width: 'auto' }} /> Also make a deal</label>
+      {f.createDeal && (
+        <div className="grid-2">
+          <div className="field" style={{ gridColumn: '1 / -1' }}><label>Deal name</label><input type="text" value={f.dealTitle} onChange={(e) => set('dealTitle', e.target.value)} /></div>
+          <div className="field"><label>Openings</label><input type="number" min={0} value={f.openings} onChange={(e) => set('openings', e.target.value)} /></div>
+          <div className="field"><label>Average CTC (₹ a year)</label><input type="number" min={0} value={f.avgCtc} onChange={(e) => set('avgCtc', e.target.value)} /></div>
+          <div className="field"><label>Our fee (% of CTC)</label><input type="number" min={0} value={f.feePercent} onChange={(e) => set('feePercent', e.target.value)} /></div>
+          <div className="field"><label>Deal value (₹)</label>{auto != null ? <div style={{ padding: '8px 0', fontWeight: 600 }}>{money(auto)}</div> : <input type="number" min={0} value={f.value} onChange={(e) => set('value', e.target.value)} />}</div>
+          <div className="field"><label>Expected close</label><input type="date" value={f.expectedClose} onChange={(e) => set('expectedClose', e.target.value)} /></div>
+        </div>
+      )}
+      {err && <div className="small-muted" role="alert" style={{ color: 'var(--red)' }}>{err}</div>}
+    </Modal>
+  );
+}
+
+// ---- move a deal (Lost asks the reason) -------------------------------------------------------------------
+export function useMoveDeal(onMoved) {
+  const { me, toast } = useCrm();
+  const [asking, setAsking] = useState(null); // { deal }
+  const [reason, setReason] = useState('');
+  async function move(deal, stage, lostReason) {
+    if (stage === 'Lost' && !lostReason) { setAsking({ deal }); setReason(''); return; }
+    try {
+      const r = await api.post(`/crm/deals/${deal.id}/stage`, { stage, lostReason });
+      toast(stage === 'Won' ? '🎉 Won! Add it as a client when you are ready.' : `Moved to ${stage}.`);
+      onMoved(r.data.deal);
+    } catch (e) { toast(errOf(e, 'The deal could not be moved.')); }
+  }
+  const dialog = asking && (
+    <Modal title={`Why was "${asking.deal.title}" lost?`} onClose={() => setAsking(null)} foot={<><button type="button" className="btn" onClick={() => setAsking(null)}>Cancel</button><button type="button" className="btn btn-danger" disabled={!reason} onClick={() => { const d = asking.deal; setAsking(null); move(d, 'Lost', reason); }}>Mark lost</button></>}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {me.lists.lostReasons.map((r) => <button key={r} type="button" className={`btn btn-sm${reason === r ? ' btn-primary' : ''}`} onClick={() => setReason(r)}>{r}</button>)}
+      </div>
+    </Modal>
+  );
+  return { move, dialog };
+}
+
+// ---- one record ---------------------------------------------------------------------------------------------
+export function RecordPanel({ kind, id, onClose, onChanged }) {
+  const { me } = useCrm();
+  const navigate = useNavigate();
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState('');
+  const [editing, setEditing] = useState(null); // { kind, row, preset }
+  const [converting, setConverting] = useState(false);
+  const load = () => api.get(`/crm/${kind}s/${id}`).then((r) => setD(r.data)).catch((e) => setErr(errOf(e, 'This record could not be opened.')));
+  useEffect(() => { setD(null); setErr(''); load(); }, [kind, id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const changed = () => { load(); if (onChanged) onChanged(); };
+  const { move, dialog } = useMoveDeal(changed);
+  const row = d && d[kind];
+  const name = row ? (row.company || row.name || row.title) : '';
+  const link = row ? { [`${kind}Id`]: row.id } : null;
+
+  function addAsClient() {
+    const acc = d.account || {}; const ct = d.contact || (d.contacts || [])[0] || {};
+    const q = new URLSearchParams({ add: '1', crmDeal: row.id, name: acc.name || '', industry: acc.industry || '', location: acc.city || '', website: acc.website || '', contactName: ct.name || '', contactDesignation: ct.designation || '', contactPhone: ct.phone || acc.phone || '', contactEmail: ct.email || acc.email || '' });
+    navigate(`/clients?${q.toString()}`);
+  }
+
+  let body = null;
+  if (err) body = <div className="notice" role="alert">{err}</div>;
+  else if (!d) body = <div className="small-muted">Loading…</div>;
+  else {
+    const facts = kind === 'lead'
+      ? [['Contact', [row.contactName, row.designation].filter(Boolean).join(' · ')], ['Phone', row.phone], ['Email', row.email], ['Industry', row.industry], ['City', row.city], ['Source', row.source]]
+      : kind === 'deal'
+        ? [['Account', d.account ? <Link to={recordLink('account', d.account.id)}>{d.account.name}</Link> : '—'], ['Contact', d.contact ? `${d.contact.name}${d.contact.phone ? ` · ${d.contact.phone}` : ''}` : ''], ['Value', money(row.value)], ['Probability', `${row.probability}%`],
+          ['Openings × CTC × fee', row.openings ? `${row.openings} × ${money(row.avgCtc)} × ${row.feePercent || 0}%` : ''], ['Expected close', dateOf(row.expectedClose)], ...(row.stage === 'Lost' ? [['Lost because', row.lostReason]] : [])]
+        : [['Type', <Pill v={row.kind} />], ['Industry', row.industry], ['City', row.city], ['Phone', row.phone], ['Email', row.email], ['Website', row.website], ['Source', row.source],
+          ...(d.client ? [['TeamLink client', <Link to={`/clients/${d.client.id}`}>{d.client.name} ↗</Link>]] : [])];
+    body = (
+      <>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+          {kind === 'lead' && <Pill v={row.status} />}
+          {kind === 'deal' && <Pill v={['Won', 'Lost'].includes(row.stage) ? row.stage : null} />}
+          <span className="small-muted">Owner: {row.ownerName || '—'}</span>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {d.canEdit && <button type="button" className="btn btn-sm" onClick={() => setEditing({ kind, row })}>Edit</button>}
+            {d.canEdit && kind === 'lead' && row.status !== 'Converted' && <button type="button" className="btn btn-primary btn-sm" onClick={() => setConverting(true)}>Convert to deal</button>}
+            {kind === 'lead' && row.status === 'Converted' && row.dealId && <Link className="btn btn-sm" to={recordLink('deal', row.dealId)}>Open the deal</Link>}
+            {d.canEdit && kind === 'deal' && row.stage === 'Won' && !row.clientId && <button type="button" className="btn btn-primary btn-sm" onClick={addAsClient}>Add as client</button>}
+            {kind === 'deal' && row.clientId && <Link className="btn btn-sm" to={`/clients/${row.clientId}`}>Open the client ↗</Link>}
+            {d.canEdit && kind === 'account' && <button type="button" className="btn btn-sm" onClick={() => setEditing({ kind: 'contact', preset: { accountId: row.id } })}>+ Contact</button>}
+            {d.canEdit && kind === 'account' && <button type="button" className="btn btn-primary btn-sm" onClick={() => setEditing({ kind: 'deal', preset: { accountId: row.id, title: `${row.name} - hiring`, feePercent: '8.33' } })}>+ Deal</button>}
+          </div>
+        </div>
+        {kind === 'deal' && (
+          <div className="crm-stages" role="group" aria-label="Deal stage">
+            {me.lists.stages.map((s) => (
+              <button key={s} type="button" disabled={!d.canEdit || s === row.stage} className={`crm-stage${s === row.stage ? ' on' : ''}${s === 'Won' ? ' won' : ''}${s === 'Lost' ? ' lost' : ''}`} onClick={() => move(row, s)}>{s}</button>
+            ))}
+          </div>
+        )}
+        <div className="grid-3" style={{ marginBottom: 12 }}>
+          {facts.filter(([, v]) => v).map(([l, v]) => <div key={l}><div className="small-muted" style={{ fontSize: 11 }}>{l}</div><div style={{ fontSize: 13 }}>{v}</div></div>)}
+        </div>
+        {row.notes && <div className="card" style={{ padding: 10, marginBottom: 12, whiteSpace: 'pre-wrap', fontSize: 13 }}>{row.notes}</div>}
+        {kind === 'account' && (
+          <div className="grid-2" style={{ marginBottom: 12 }}>
+            <div className="card" style={{ padding: 12 }}>
+              <div className="section-label" style={{ marginTop: 0 }}>Contacts ({d.contacts.length})</div>
+              {!d.contacts.length && <div className="small-muted">No contacts yet.</div>}
+              {d.contacts.map((c) => (
+                <div key={c.id} style={{ padding: '5px 0', borderBottom: '1px solid var(--line-soft)', fontSize: 13, display: 'flex', gap: 6 }}>
+                  <div style={{ flex: 1 }}><b>{c.name}</b>{c.designation ? ` · ${c.designation}` : ''}{c.role ? <span className="small-muted"> · {c.role}</span> : null}<div className="small-muted">{[c.phone, c.email].filter(Boolean).join(' · ')}</div></div>
+                  {d.canEdit && <button type="button" className="btn btn-sm" onClick={() => setEditing({ kind: 'contact', row: c })}>Edit</button>}
+                </div>
+              ))}
+            </div>
+            <div className="card" style={{ padding: 12 }}>
+              <div className="section-label" style={{ marginTop: 0 }}>Deals ({d.deals.length})</div>
+              {!d.deals.length && <div className="small-muted">No deals yet.</div>}
+              {d.deals.map((x) => (
+                <div key={x.id} style={{ padding: '5px 0', borderBottom: '1px solid var(--line-soft)', fontSize: 13 }}>
+                  <Link to={recordLink('deal', x.id)}>{x.title}</Link> <span className="small-muted">· {x.stage} · {moneyShort(x.value)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="crm-two">
+          <div>
+            <div className="section-label" style={{ marginTop: 0 }}>Timeline</div>
+            {d.canEdit && <LogActivity link={link} onDone={changed} />}
+            <Timeline activities={d.activities || []} />
+          </div>
+          <div>
+            <div className="section-label" style={{ marginTop: 0 }}>Follow-ups</div>
+            <TaskList tasks={d.tasks || []} link={link} onChanged={changed} canEdit={d.canEdit} />
+          </div>
+        </div>
+      </>
+    );
+  }
+  return (
+    <>
+      <Modal title={name || 'CRM'} note={kind === 'lead' ? 'Lead' : kind === 'deal' ? (row ? row.stage : 'Deal') : 'Account'} size="xwide" onClose={onClose}>{body}</Modal>
+      {editing && <RecordForm kind={editing.kind} row={editing.row} preset={editing.preset} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); changed(); }} />}
+      {converting && row && <ConvertLead lead={row} onClose={() => setConverting(false)} onDone={(out) => { setConverting(false); changed(); if (out.deal) navigate(recordLink('deal', out.deal.id)); }} />}
+      {dialog}
+    </>
+  );
+}
+
+// ?open=kind:id in the address opens that record (links from the dashboard, the bell, an email)
+export function useOpenParam(searchParams, setSearchParams) {
+  const raw = searchParams.get('open') || '';
+  const [kind, id] = raw.split(':');
+  const open = kind && id ? { kind, id } : null;
+  const setOpen = (o) => {
+    const next = new URLSearchParams(searchParams);
+    if (o) next.set('open', `${o.kind}:${o.id}`); else next.delete('open');
+    setSearchParams(next, { replace: !o });
+  };
+  return [open, setOpen];
+}

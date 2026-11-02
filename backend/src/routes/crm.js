@@ -1,0 +1,69 @@
+// ---------------------------------------------------------------------------
+// THE SALES CRM API (founder 2026-11-02) - the rules and data are in crm/service.js.
+//
+//   GET    /crm/me                         my CRM role, the owner list, the pick lists (stages, sources ...)
+//   GET    /crm/dashboard[?mine=1]         pipeline, won / lost this month, follow-ups due, lead sources, closing soon
+//   GET    /crm/leads|accounts|contacts|deals[?q=&status=&kind=&owner=&accountId=]
+//   POST   /crm/leads|accounts|contacts|deals          {fields, ownerId?, force?}   (409 + duplicates when already in TeamLink)
+//   GET    /crm/leads|accounts|contacts|deals/:id      the record with its timeline and follow-ups
+//   PUT    /crm/leads|accounts|contacts|deals/:id      {fields, ownerId?}
+//   POST   /crm/leads/:id/convert          {dealTitle, openings, avgCtc, feePercent, value, expectedClose, createDeal, accountId}
+//   POST   /crm/deals/:id/stage            {stage, lostReason}
+//   POST   /crm/deals/:id/client           {clientId}   after "Add as client" in ATS > Clients
+//   GET    /crm/client-options             TeamLink clients I may add as an account;  POST /crm/accounts/from-client {clientId}
+//   POST   /crm/duplicates                 {company, phone, email}
+//   POST   /crm/activities                 {kind, subject, note, at, leadId|dealId|accountId|contactId, followUp: {title, dueDate, dueTime}}
+//   GET    /crm/tasks?when=overdue|today|upcoming|open|done[&mine=1]
+//   POST   /crm/tasks                      {title, dueDate, dueTime, leadId|dealId|accountId, ownerId?}
+//   POST   /crm/tasks/:id/done             {note}
+//   DELETE /crm/:kind/:id                  Admin / BDE TL (a BDE: their own activity / follow-up)
+// ---------------------------------------------------------------------------
+const express = require('express');
+const { requireAuth } = require('../middleware/auth');
+const CRM = require('../crm/service');
+
+const router = express.Router();
+router.use(requireAuth);
+router.use((req, res, next) => {
+  if (!CRM.roleOf(req.user)) return res.status(403).json({ error: 'The CRM is for the BDE team, the BDE TL, Managers and Admins.' });
+  return next();
+});
+
+const send = (res, out) => res.status(out.status).json(out.body);
+const wrap = (fn) => async (req, res, next) => { try { return send(res, await fn(req)); } catch (e) { return next(e); } };
+const KIND = { leads: 'lead', accounts: 'account', contacts: 'contact', deals: 'deal' };
+const kindOf = (req) => KIND[req.params.kind];
+
+router.get('/me', wrap((req) => CRM.me(req.user)));
+router.get('/dashboard', wrap((req) => CRM.dashboard(req.user, { mine: String(req.query.mine || '') === '1' })));
+router.post('/duplicates', wrap(async (req) => ({ status: 200, body: { duplicates: await CRM.duplicatesOf(req.body || {}, { exceptLeadId: req.body && req.body.exceptLeadId }) } })));
+
+router.get('/tasks', wrap(async (req) => {
+  await CRM.remind({ userId: req.user.id }).catch(() => 0);
+  return { status: 200, body: { tasks: await CRM.tasks(req.user, { when: String(req.query.when || 'open'), mine: String(req.query.mine || '') === '1' }) } };
+}));
+router.post('/tasks', wrap((req) => CRM.addTask(req.user, req.body || {})));
+router.post('/tasks/:id/done', wrap((req) => CRM.finishTask(req.user, req.params.id, req.body && req.body.note)));
+router.post('/activities', wrap((req) => CRM.addActivity(req.user, req.body || {})));
+
+router.get('/client-options', wrap(async (req) => ({ status: 200, body: { clients: (await CRM.clientOptions(req.user)).map((c) => ({ id: c.id, name: c.name, city: c.location, owner: c.bdeOwner })) } })));
+router.post('/accounts/from-client', wrap((req) => CRM.accountFromClient(req.user, req.body && req.body.clientId)));
+router.post('/leads/:id/convert', wrap((req) => CRM.convertLead(req.user, req.params.id, req.body || {})));
+router.post('/deals/:id/stage', wrap((req) => CRM.moveDeal(req.user, req.params.id, req.body || {})));
+router.post('/deals/:id/client', wrap((req) => CRM.linkClient(req.user, req.params.id, req.body && req.body.clientId)));
+
+router.get('/:kind(leads|accounts|contacts|deals)', wrap(async (req) => ({ status: 200, body: { rows: await CRM.list(req.user, kindOf(req), req.query || {}) } })));
+router.post('/:kind(leads|accounts|contacts|deals)', wrap((req) => CRM.create(req.user, kindOf(req), req.body || {})));
+router.get('/:kind(leads|accounts|contacts|deals)/:id', wrap((req) => CRM.detail(req.user, kindOf(req), req.params.id)));
+router.put('/:kind(leads|accounts|contacts|deals)/:id', wrap((req) => CRM.edit(req.user, kindOf(req), req.params.id, req.body || {})));
+router.delete('/:kind(lead|account|contact|deal|activity|task)/:id', wrap((req) => CRM.remove(req.user, req.params.kind, req.params.id)));
+
+// Follow-up reminders for everybody, once an hour between 9 am and 8 pm India time (a bell notice + one email a day per owner).
+if (!process.env.TEST_MODE && process.env.NODE_ENV !== 'test') {
+  setInterval(() => {
+    const h = new Date(Date.now() + 5.5 * 3600 * 1000).getUTCHours();
+    if (h >= 9 && h < 20) CRM.remind().catch((e) => console.error('[crm] reminders:', e.message)); // eslint-disable-line no-console
+  }, 60 * 60 * 1000).unref();
+}
+
+module.exports = router;

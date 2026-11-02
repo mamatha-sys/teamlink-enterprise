@@ -46,7 +46,7 @@ import OrgStructure from './pages/admin/OrgStructure.jsx';
 import Invoices from './pages/Invoices.jsx';
 import InvoiceDetail from './pages/InvoiceDetail.jsx';
 import Bank from './pages/Bank.jsx';
-import CrmPage from './pages/crm/CrmPage.jsx'; // the CRM module (2026-11-02): eight pages, built one by one
+import CrmPage from './pages/crm/CrmPage.jsx'; // the sales CRM (2026-11-02): Dashboard, Leads, Deals, Accounts & Contacts
 import Office from './pages/Office.jsx';
 import JournalLedger from './pages/accounts/JournalLedger.jsx';
 
@@ -314,7 +314,7 @@ export default function App() {
         <Route path="ats/job-portal" element={<Integrations />} />
 
         {/* CRM (2026-11-02) */}
-        <Route path="crm" element={<Navigate to="/crm/forms" replace />} />
+        <Route path="crm" element={<Navigate to="/crm/dashboard" replace />} />
         <Route path="crm/:page" element={<CrmPage />} />
 
         {/* Accounts */}

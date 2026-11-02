@@ -36,11 +36,12 @@ import './addClientModal.css';
 // ---------------------------------------------------------------------------
 const OPEN_FIRST = { basic: true, contact: true, owner: true, commercial: true };
 
-export default function AddClientWizard({ user, meta, onClose, onSaved }) {
+export default function AddClientWizard({ user, meta, onClose, onSaved, initial }) {
   const navigate = useNavigate();
   const ownerLocked = meta?.ownerLocked || null;
   const [defaults, setDefaults] = useState(null);
-  const [form, setForm] = useState(() => emptyClientForm(user, ownerLocked, null));
+  // initial: details brought from a Won CRM deal ("Add as client", 2026-11-02) - company, city, main contact
+  const [form, setForm] = useState(() => ({ ...emptyClientForm(user, ownerLocked, null), ...(initial || {}) }));
   const touched = useRef(new Set());
   const [open, setOpen] = useState(OPEN_FIRST);
   const [errors, setErrors] = useState({});
