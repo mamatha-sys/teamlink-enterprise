@@ -14,7 +14,7 @@ import '../crm/crm.css';
 const STATUS_TONE = { New: 'warn', 'Already known': 'draft' };
 const origin = () => (typeof window !== 'undefined' ? window.location.origin : '');
 
-export default function FormsPage() {
+export default function FormsPage({ title = 'Forms' }) { // title: 'CRM Forms' when shown in the TeamLink CRM module (pages/crm/CrmForms.jsx)
   const { go, toast, acc } = useOmni();
   const [data, setData] = useState(null);
   const [subs, setSubs] = useState([]);
@@ -40,7 +40,7 @@ export default function FormsPage() {
   const copy = async (text, ok) => { try { await navigator.clipboard.writeText(text); toast(ok); } catch { toast('Select the text and copy it by hand.'); } };
   return (
     <div id="forms">
-      <PageHead eyebrow="Lead capture" title="Forms" lead="Manage templates and custom fields for your customers.">
+      <PageHead eyebrow="Lead capture" title={title} lead="Manage templates and custom fields for your customers.">
         {data && data.canCreate && <Btn primary onClick={() => setModal({ kind: 'edit', form: null })}>＋ New Form</Btn>}
       </PageHead>
       {err && <Banner tone="error">{err}</Banner>}

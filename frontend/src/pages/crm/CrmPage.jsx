@@ -5,6 +5,7 @@
 // (no made-up data). The list of pages lives in nav.js (CRM_ITEMS) and here (PAGES), keyed by the address.
 // ---------------------------------------------------------------------------
 import { useParams, Link } from 'react-router-dom';
+import CrmForms from './CrmForms.jsx';
 
 export const CRM_PAGES = {
   forms: { icon: '🗒️', title: 'CRM Forms', what: 'Forms that collect leads and details from clients and candidates - on your website, in a link, or in WhatsApp - and save every answer straight into the CRM.' },
@@ -19,6 +20,7 @@ export const CRM_PAGES = {
 
 export default function CrmPage() {
   const { page } = useParams();
+  if (page === 'forms') return <CrmForms />; // built (2026-11-02): the Omni-Channel Web Forms, inside the CRM module
   const p = CRM_PAGES[page];
   if (!p) {
     return (
