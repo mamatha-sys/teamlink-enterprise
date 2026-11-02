@@ -9,8 +9,10 @@
 #   2. the running TeamLink (pm2): whether pm2 holds its OWN RCS_* values (they win over .env), and whether .env changed AFTER the
 #      last restart (then the app still uses the old values);
 #   3. a LOGIN TEST straight to rcssms.in with the values in .env and a template id that does not exist ("zz-login-check"), so NO
-#      message can go out and no credit is used. Answer 018 (template not found) = the username + password are RIGHT.
+#      message can go out and no credit is used. Answer 031 or 018 (template not found) = the username + password are RIGHT.
 #      022 = rcssms.in does not accept this username + password. 021 = the username does not exist.
+#   4. (2026-11-02) the same login on the TEMPLATE API (rcscreatetemplate.jsp, what "Send to rcssms.in for approval" uses), with a
+#      request that cannot make a template (type "ZZCHECK", no text): 022 = this API refuses the login; anything else = accepted.
 # ---------------------------------------------------------------------------
 $ErrorActionPreference = 'Stop'
 $VpsHost = 'root@72.61.233.104'
@@ -63,10 +65,23 @@ console.log("== 3. login test to rcssms.in (template zz-login-check does not exi
     for (const s of [body.password, body.username]) if (s && s.length >= 3) t = t.split(s).join("***");
     console.log(`  rcssms.in answered: HTTP ${r.status} ${t.replace(/\s+/g, " ").slice(0, 300)}`);
     const code = (/ErrorCode"\s*:\s*"?0*(\d+)/i.exec(t) || [])[1];
-    if (code === "18") console.log("  => LOGIN IS RIGHT (only the fake template was refused). If Send test RCS still says 022, the running app uses other values: see part 2.");
+    if (code === "18" || code === "31") console.log("  => LOGIN IS RIGHT (only the fake template was refused). If Send test RCS still says 022, the running app uses other values: see part 2.");
     else if (code === "22") console.log("  => rcssms.in does NOT accept this username + password. Ask rcssms.in support for the API password of this username (the one 'shared at account creation'), then run .\\set-rcs-credentials-on-vps.ps1 again.");
     else if (code === "21") console.log("  => the USERNAME does not exist at rcssms.in. Check RCS_USERNAME (the API username, not an email or mobile).");
     else console.log("  => another answer: send these lines to Claude.");
+  } catch (e) { console.log("  could not reach rcssms.in: " + String(e.message).slice(0, 150)); }
+  console.log("== 4. the same login on the TEMPLATE API (type ZZCHECK + no text: no template can be made)");
+  try {
+    const tb = { username: body.username, password: body.password, rcstype: "ZZCHECK", rcsid: body.rcsid, cname: "zz_login_check", description: "" };
+    const r = await fetch(`${base}/rcsapi/rcscreatetemplate.jsp`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(tb), signal: AbortSignal.timeout(20000) });
+    let t = await r.text();
+    for (const s of [body.password, body.username]) if (s && s.length >= 3) t = t.split(s).join("***");
+    console.log(`  rcssms.in answered: HTTP ${r.status} ${t.replace(/\s+/g, " ").slice(0, 300)}`);
+    const code = (/ErrorCode"\s*:\s*"?0*(\d+)/i.exec(t) || [])[1];
+    if (/templateid/i.test(t)) console.log("  => rcssms.in MADE a template from this (zz_login_check): delete it in the rcssms.in panel. The login works on the template API.");
+    else if (code === "22") console.log("  => the TEMPLATE API refuses this login although sending accepts it: ask rcssms.in support to enable template creation (API) for this account.");
+    else if (code === "21") console.log("  => the TEMPLATE API does not know this username: ask rcssms.in support.");
+    else console.log("  => the login is ACCEPTED on the template API (only the deliberately wrong request was refused). Submit a real template again in TeamLink.");
   } catch (e) { console.log("  could not reach rcssms.in: " + String(e.message).slice(0, 150)); }
 })();
 EOF_NODE

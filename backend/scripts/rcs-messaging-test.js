@@ -85,14 +85,15 @@ const until = async (fn, ms = 15000) => { const t0 = Date.now(); for (;;) { cons
     MODE = 'ok';
     Z.check('A5 every documented error code -> not sent, its plain words; the login never appears in the error or the provider answer',
       Object.entries(codes).every(([c, x]) => !x.ok && x.errorCode === c && x.error === S.ERRORS[c] && !`${x.error}${x.said}`.includes(PASS) && !`${x.error}${x.said}`.includes(USER)), Object.fromEntries(Object.entries(codes).map(([c, x]) => [c, [x.errorCode, x.error, x.said]])));
-    for (const [padded, code] of [['022', '22'], ['023', '23'], ['030', '30']]) {
+    for (const [padded, code] of [['022', '22'], ['023', '23'], ['030', '30'], ['031', '31']]) {
       MODE = `live:${padded}`;
       const x = await S.sendChunk({ rcstype: 'BASIC', templateid: 'T1', numbers: ['919876543210'], variables: {} }); // eslint-disable-line no-await-in-loop
       codes[`live${code}`] = x;
     }
     MODE = 'ok';
-    Z.check('A5b the live answer {Error:{ErrorCode:"022"}}: padded codes read as 22 / 23 / 30 (so 023 pauses the queue and 030 renews the token)',
-      ['22', '23', '30'].every((c) => codes[`live${c}`].errorCode === c && !codes[`live${c}`].ok) && codes.live22.error === S.ERRORS['22'], Object.fromEntries(['22', '23', '30'].map((c) => [c, [codes[`live${c}`].errorCode, codes[`live${c}`].error]])));
+    Z.check('A5b the live answer {Error:{ErrorCode:"022"}}: padded codes read as 22 / 23 / 30 / 31 (023 pauses the queue, 030 renews the token, 031 = template id not found)',
+      ['22', '23', '30', '31'].every((c) => codes[`live${c}`].errorCode === c && !codes[`live${c}`].ok) && codes.live22.error === S.ERRORS['22']
+      && codes.live31.error === S.ERRORS['31'] && /not found/.test(codes.live31.error), Object.fromEntries(['22', '23', '30'].map((c) => [c, [codes[`live${c}`].errorCode, codes[`live${c}`].error]])));
     MODE = 'noid';
     r = await S.sendChunk({ rcstype: 'BASIC', templateid: 'T1', numbers: ['919876543210'], variables: {} });
     MODE = 'ok';

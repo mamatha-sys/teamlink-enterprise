@@ -41,6 +41,8 @@ const ERRORS = {
   23: 'Not enough RCS credit. Sending is paused until credit is added on rcssms.in.',
   24: 'The number list is not correct.',
   18: 'This template id was not found on rcssms.in.',
+  // rcssms.in's live answer (2026-11-02) for an unknown template id, "template id not found or incorrect": the login was accepted
+  31: 'This template id was not found on rcssms.in (or it is not approved there yet). Check the template id.',
   30: 'The RCS login token expired.',
 };
 const friendly = (code, fallback) => ERRORS[String(code)] || fallback || `rcssms.in refused it${code ? ` (code ${code})` : ''}.`;
