@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// THE CRM MODULE (redeployed from main 2026-11-02 after a local copy without it replaced the live site) - a real sales CRM (founder 2026-11-02: "oka sales dhani kosam, crm lo em em vundalo ... take the actual
+// THE CRM MODULE (redeployed from main 2026-11-02, twice, after local copies without it replaced the live site) - a real sales CRM (founder 2026-11-02: "oka sales dhani kosam, crm lo em em vundalo ... take the actual
 // official crm"; then "3 to 4 modules chaalu ... ahh 3 to 4 modules lo ney, motham crm cover ayyeylaaga chudu").
 // Four screens cover the whole CRM; activities (calls, meetings, emails, WhatsApp, notes) and follow-ups live inside every
 // record and on the Dashboard:

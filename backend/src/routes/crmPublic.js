@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// CRM - PUBLIC PAGES (no login, 2026-11-02; redeployed from main the same day after a local copy without the CRM replaced live). Only the unsubscribe link at the foot of a CRM campaign email:
+// CRM - PUBLIC PAGES (no login, 2026-11-02; redeployed from main the same day, twice, after local copies without the CRM replaced live). Only the unsubscribe link at the foot of a CRM campaign email:
 //   GET /api/crm-public/unsubscribe?t=<signed token>   adds the address to CrmOptOut (no more campaign emails) and says so.
 // The token is the email signed with the server secret (crm/campaigns.js), so a link cannot be made for somebody else.
 // ---------------------------------------------------------------------------
