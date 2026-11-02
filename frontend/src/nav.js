@@ -34,7 +34,7 @@ import { can, canModule, productRole } from './permissions';
 
 export const SECTION_LABEL = {
   dashboard: 'Dashboard', hrms: 'HRMS', ats: 'ATS',
-  accounts: 'Accounts', admin: 'Administration', reports: 'Reports', omni: 'Omni-Channel',
+  accounts: 'Accounts', admin: 'Administration', reports: 'Reports', omni: 'Omni-Channel', crm: 'CRM',
 };
 
 // ---------------------------------------------------------------------------
@@ -95,6 +95,7 @@ export function mayRenderSection(user, pathname) {
     // Administration proper — Users, Role Catalog, Employee Management and the
     // rest — is never an outsider's screen.
     case 'admin': return false;
+    case 'crm': return false; // the CRM is a staff module
     default: return true;
   }
 }
@@ -123,7 +124,7 @@ const leaf = (icon, to, label, perms, product, unless) => ({
 // The group headings, and the standalone Dashboard entry above them.
 export const SECTION_ICON = {
   dashboard: '🏠', hrms: '👥', ats: '🎯',
-  accounts: '💰', reports: '📊', admin: '⚙️',
+  accounts: '💰', reports: '📊', admin: '⚙️', crm: '🤝',
 };
 
 export const HRMS_ITEMS = [
@@ -282,6 +283,27 @@ export const ACCOUNTS_ITEMS = [
 //     "Administration" group containing that single entry. §15 says that is
 //     wrong. The TL's access did not go away: it moved to where the matrix
 //     puts it, HRMS -> Employees, pointing at the same scoped screen.
+// CRM (founder 2026-11-02: "side bar lo crm ani oka module raavali") - a TeamLink module of its own, with the eight pages of the
+// Omni-Channel CRM, in the founder's order. Open to Super Admin / Admin and the BDE team (BDE, BDE TL), who work with clients;
+// the pages are built one by one (pages/crm/CrmPage.jsx).
+const crmOpen = (u) => {
+  if (!u || isExternalUser(u)) return false;
+  const ats = productRole(u, 'ats');
+  if (['SUPER_ADMIN', 'ADMIN'].includes(u.role) || ['SUPER_ADMIN', 'ADMIN', 'BDE'].includes(ats)) return true;
+  return ats === 'TL' && String(u.atsDepartment || '').toUpperCase() === 'BDE';
+};
+const crmLeaf = (icon, to, label) => ({ ...leaf(icon, to, label, null), when: crmOpen });
+export const CRM_ITEMS = [
+  crmLeaf('🗒️', '/crm/forms', 'CRM Forms'),
+  crmLeaf('🗄️', '/crm/data-tables', 'Data Tables'),
+  crmLeaf('📋', '/crm/customer-tables', 'Customer Tables'),
+  crmLeaf('🏷️', '/crm/fields', 'CRM Fields'),
+  crmLeaf('💬', '/crm/bot-data', 'WhatsApp Bot Data'),
+  crmLeaf('🛒', '/crm/shopify', 'Shopify'),
+  crmLeaf('🧩', '/crm/meta-catalogs', 'Meta catalogs'),
+  crmLeaf('📨', '/crm/flow-responses', 'WhatsApp Flow Responses'),
+];
+
 export const ADMIN_ITEMS = [
   leaf('🏢', '/admin/company', 'Company Setup', [['administration', 'Company Setup', 'view']]),
   leaf('🗂️', '/admin/departments', 'Departments & Teams', [['administration', 'Departments & Teams', 'view']]),
@@ -461,6 +483,7 @@ export function groupsForUser(user) {
   add('hrms', sectionLabel('hrms', user), HRMS_ITEMS);
   add('ats', sectionLabel('ats', user), atsItemsFor(user));
   add('accounts', sectionLabel('accounts', user), ACCOUNTS_ITEMS);
+  add('crm', sectionLabel('crm', user), CRM_ITEMS);
   // No separate Reports group (user, 2026-10-03): ATS reports are in ATS →
   // Reports & Team, Accounts reports in Accounts → Reports.
   add('admin', sectionLabel('admin', user), ADMIN_ITEMS);
@@ -480,6 +503,7 @@ export function flattenGroups(groups) {
 // Which sidebar section a URL belongs to, so the group opens and the topbar
 // title / breadcrumb name the right section.
 const SECTION_OF_PATH = [
+  [/^\/crm(\/|$)/, 'crm'],
   [/^\/omni(-channel(-native)?)?(\/|$)/, 'omni'], // Omni-Channel (Green Start at /omni-channel, the native pages at /omni-channel-native); /omni is the old address
   // /employees is the employee list. It is an HRMS screen for the leads who
   // reach it from HRMS -> Employees, and the same screen for an admin who
