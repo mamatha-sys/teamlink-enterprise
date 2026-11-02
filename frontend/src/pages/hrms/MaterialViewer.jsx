@@ -75,6 +75,7 @@ const REPORT_MS = 10000;
 export function SecureVideo({ material, startAt = 0, track = false, onProgress }) {
   const { src, error, refresh } = useViewSrc(material.id);
   useBlockSaveKeys();
+  const [playError, setPlayError] = useState('');
   const ref = useRef(null);
   const segs = useRef([]);     // closed stretches not yet reported
   const cur = useRef(null);    // the stretch playing now: { from, last }
@@ -149,9 +150,26 @@ export function SecureVideo({ material, startAt = 0, track = false, onProgress }
 
   // The signed link expired (or the network dropped): get a fresh one and
   // carry on from the same second. Bounded, so a real 403 (unassigned) stops.
+  // A BLANK PLAYER SAYS WHY (founder 2026-11-02: the video stayed at 0:00 with no word). After the two silent retries, the server is
+  // asked for the first bytes: its own refusal is shown as it is (expired link, file not on the server, not assigned); when the file
+  // comes back fine, the browser cannot play its format (e.g. an H.265 / HEVC file), and the screen says how to fix it.
+  async function explain() {
+    try {
+      const r = await fetch(src, { headers: { Range: 'bytes=0-1' }, credentials: 'same-origin' });
+      if (!r.ok) {
+        const j = await r.json().catch(() => null);
+        setPlayError((j && j.error) || `The video could not be loaded (the server answered ${r.status}).`);
+        return;
+      }
+      setPlayError('This video is on the server, but the browser cannot play its format. Save it as MP4 with H.264 video (for example with HandBrake, preset "Fast 1080p30") and upload it again.');
+    } catch {
+      setPlayError('The video could not be loaded. Check the internet connection and open it again.');
+    }
+  }
+
   function onError() {
     const v = ref.current;
-    if (retries.current >= 2) return;
+    if (retries.current >= 2) { explain(); return; }
     retries.current += 1;
     close();
     resumeAt.current = v ? Math.floor(v.currentTime || resumeAt.current || 0) : resumeAt.current;
@@ -196,6 +214,7 @@ export function SecureVideo({ material, startAt = 0, track = false, onProgress }
         onRateChange={(e) => { if (e.currentTarget.playbackRate !== 1) e.currentTarget.playbackRate = 1; }}
         className="lms-video"
       />
+      {playError && <div className="error-text" role="alert" style={{ marginTop: 6 }}>{playError}</div>}
       {reportError && <div className="small-muted" style={{ marginTop: 6 }}>{reportError}</div>}
     </div>
   );

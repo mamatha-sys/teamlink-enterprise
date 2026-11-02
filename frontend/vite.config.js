@@ -43,6 +43,16 @@ function jobPortalRoute() {
 
 export default defineConfig({
   plugins: [react(), jobPortalRoute()],
+  // THE PDF VIEWER'S WORKER is a .mjs file. The live nginx serves .mjs as application/octet-stream, and a browser refuses to load a
+  // module with that type ("Setting up fake worker failed: Failed to fetch dynamically imported module ... pdf.worker.min-*.mjs",
+  // founder 2026-11-02 - every LMS PDF stayed blank). Emitted as .js it is served as JavaScript everywhere.
+  build: {
+    rollupOptions: {
+      output: {
+        assetFileNames: (info) => (info.name && info.name.endsWith('.mjs') ? 'assets/[name]-[hash].js' : 'assets/[name]-[hash][extname]'),
+      },
+    },
+  },
   server: {
     port: 5183,
     // Defaults to the backend's own default port; override with API_PROXY when
