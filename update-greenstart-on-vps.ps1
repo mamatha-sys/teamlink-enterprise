@@ -8,7 +8,8 @@
 #
 # What goes live: Green Start "release" d2f52bce (30 Oct, the owner's fully tested version) + SEO -> Keyword Research (live since 31 Oct)
 # + SEO -> Search Console phase 1 (2 Nov: stored history, daily + Sync now, comparisons, TeamLink keyword groups, CSV / Excel)
-# + Manage Templates -> RCS (2 Nov: Save draft, phone preview, Failed submission, Edit and submit again, SMSTAKE's reason; founder:
+# + Manage Templates -> RCS (2 Nov: Save draft, phone preview, Failed submission, Edit and submit again, SMSTAKE's reason) and
+#   Communication -> RCS listing the connected RCS account (it always said "No RCS accounts connected") (founder:
 #   "keyword research and rcs renduu live kii vellalii", "search console kuda live kii pampouu").
 # The archive: Desktop\TeamLink-GreenStart-VPS\green-start-update-20261102-kr-sc-rcs.tar.gz (code only: no .env, no packages, no data;
 # built from git branch claude/live-kr-sc-rcs = claude/search-console-on-live (the 31 Oct live code + the Search Console commits) + the
