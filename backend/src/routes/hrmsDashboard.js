@@ -62,7 +62,7 @@ function matchesFilters(e, q) {
     if (!String(q.q).toLowerCase().split(/s+/).filter(Boolean).every((t) => hay.includes(t))) return false;
   }
   if (q.status && hrStatusOf(e.employmentStatus, e.user && e.user.status) !== q.status) return false;
-  if (q.manager && e.reportingManagerId !== q.manager) return false;
+  if (q.manager && managerIdOf(e) !== q.manager) return false;
   return true;
 }
 
@@ -244,10 +244,14 @@ async function buildDashboard(req, period) {
       const dept = keep(tally(without('department'), (e) => e.department), req.query.department);
       const loc = keep(tally(without('location'), (e) => e.location), req.query.location);
       const stat = tally(without('status'), (e) => hrStatusOf(e.employmentStatus, e.user && e.user.status));
-      const forMgr = without('manager');
-      const mgr = tally(forMgr, (e) => e.reportingManagerId);
+      // REPORTING MANAGER COUNTS THE PEOPLE UNDER THEM NOW (founder 2026-11-02: "reporting manager dropdown medha click chestey valla employee
+      // epudu unnava vallu active and notice period kanipinchali, count thapu chupistundhi"): with no Status picked, only Active (and
+      // Probation) + Notice Period are counted, and a manager with nobody working under them is not offered; a Status picked counts that status.
+      const WORKING_UNDER = ['Active', 'Probation', 'Notice Period'];
+      const forMgr = req.query.status ? without('manager') : without('manager').filter((e) => WORKING_UNDER.includes(e.employmentStatus));
+      const mgr = tally(forMgr, (e) => managerIdOf(e));
       // Spec item 7 — every reporting manager of the people on this dashboard.
-      const mgrName = new Map(allEmployees.filter((e) => e.reportingManager).map((e) => [e.reportingManagerId, e.reportingManager.name]));
+      const mgrName = new Map(allEmployees.filter((e) => e.dashManager).map((e) => [e.dashManager.id, e.dashManager.name]));
       if (req.query.manager && !mgr.has(req.query.manager)) mgr.set(req.query.manager, 0);
       // DESIGNATIONS COUNT THE PEOPLE WORKING NOW (founder 2026-10-27): "Employee 325" counted the 297 who left. With no Status picked the
       // list is the working people only; a Status picked (e.g. Relieved) counts that status, so the left can still be found.
@@ -432,12 +436,44 @@ async function exitApprovalsLine(user, today) {
   } catch { return null; }
 }
 
+// WHO SOMEONE REPORTS TO ON THIS DASHBOARD (founder 2026-11-02: the Reporting manager counts were wrong). The HRMS seats know the teams
+// (MFG-1..5 report to the MFG-TL seat), while Employee.reportingManagerId is filled in for only some people. So: the person holding the seat
+// this person's seat reports to (who has not left); without one, the Reporting manager on the employee record; without that, the TL
+// named on the employee record (when that TL is still working here).
+const managerIdOf = (e) => (e.dashManager ? e.dashManager.id : e.reportingManagerId);
+async function attachManagers(list) {
+  const seats = await prisma.position.findMany({
+    where: { active: true },
+    select: { id: true, reportsToId: true, assignments: { where: { toDate: null }, select: { employeeId: true, employee: { select: { id: true, name: true, employmentStatus: true } } } } },
+  });
+  const byId = new Map(seats.map((x) => [x.id, x]));
+  const holderOf = (seatId) => {
+    const seat = byId.get(seatId);
+    const a = seat && seat.assignments.find((x) => x.employee && !D.LEFT_EMPLOYMENT.includes(x.employee.employmentStatus));
+    return a ? { id: a.employee.id, name: a.employee.name } : null;
+  };
+  const seatOf = new Map();
+  seats.forEach((x) => x.assignments.forEach((a) => { if (!seatOf.has(a.employeeId)) seatOf.set(a.employeeId, x); }));
+  const working = new Map();
+  list.forEach((e) => { if (!D.LEFT_EMPLOYMENT.includes(e.employmentStatus)) working.set(String(e.name || '').trim().toLowerCase(), e); });
+  list.forEach((e) => {
+    const seat = seatOf.get(e.id);
+    const boss = seat && seat.reportsToId ? holderOf(seat.reportsToId) : null;
+    const tl = e.tl ? working.get(String(e.tl).trim().toLowerCase()) : null;
+    if (boss && boss.id !== e.id) e.dashManager = boss;
+    else if (e.reportingManager) e.dashManager = { id: e.reportingManagerId, name: e.reportingManager.name };
+    else if (tl && tl.id !== e.id) e.dashManager = { id: tl.id, name: tl.name };
+    else e.dashManager = null;
+  });
+}
+
 async function loadBase(req) {
   const allEmployees = await prisma.employee.findMany({
     where: withoutSystemAccounts(employeeWhere(req.user)), // Super Admin is a system account, not headcount
     include: { reportingManager: true, user: { select: { status: true } } },
     orderBy: { name: 'asc' },
   });
+  await attachManagers(allEmployees);
   const employees = allEmployees.filter((e) => matchesFilters(e, req.query));
   return { allEmployees, employees, ids: employees.map((e) => e.id) };
 }
@@ -625,7 +661,7 @@ function peopleRows(emps, extras, more = () => ({})) {
     status: e.employmentStatus || '',
     joined: dstr(e.dateOfJoining),
     lastWorkingDay: extras.lwd.get(e.id) || '',
-    manager: e.reportingManager ? e.reportingManager.name : '',
+    manager: e.dashManager ? e.dashManager.name : (e.reportingManager ? e.reportingManager.name : ''),
     ...more(e),
   }));
 }

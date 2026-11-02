@@ -8,32 +8,26 @@ import Modal from '../Modal.jsx';
 const red = '#b42318';
 const green = '#1c7c4a';
 
-export default function Vacancies() {
+// the numbers (null until loaded, or when this login may not see them)
+export function useVacancies() {
   const [d, setD] = useState(null);
-  const [show, setShow] = useState(false); // the table (opens from the card)
-  const [open, setOpen] = useState({}); // "group|role" -> names shown
-  const [edit, setEdit] = useState(null); // the plan being changed
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-
   useEffect(() => {
     let alive = true;
     api.get('/dashboard/vacancies').then((r) => { if (alive) setD(r.data); }).catch(() => {});
     return () => { alive = false; };
   }, []);
+  return [d, setD];
+}
+
+// the small card (the Super Admin / Admin home); the HRMS dashboard shows the same number as a tile in its Attendance row
+export default function Vacancies() {
+  const [d, setD] = useVacancies();
+  const [show, setShow] = useState(false);
   if (!d) return null;
-
-  async function save() {
-    setBusy(true); setErr('');
-    try { const r = await api.put('/dashboard/vacancies/plan', { plan: edit }); setD(r.data); setEdit(null); } catch (e) { setErr(e.response?.data?.error || 'It could not be saved.'); } finally { setBusy(false); }
-  }
-  const setNum = (gi, role, v) => setEdit(edit.map((g, i) => (i !== gi ? g : { ...g, rows: g.rows.map((r) => (r.role === role ? { ...r, planned: v === '' ? '' : Number(v) } : r)) })));
-
   const t = d.totals;
-  const close = () => { setShow(false); setEdit(null); setErr(''); };
   return (
     <>
-      {/* the small card on the dashboard (founder 2026-11-02: "vacancies okka card evvu dani medha click chestey ahh table open avali") */}
+      {/* founder 2026-11-02: "vacancies okka card evvu dani medha click chestey ahh table open avali" */}
       <button
         type="button" className="card" onClick={() => setShow(true)} aria-label={`Vacancies: ${t.vacant}. Open the table`}
         style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4, padding: '14px 18px', margin: '16px 0', minWidth: 220, textAlign: 'left', cursor: 'pointer', border: '1px solid var(--line, #e5e7eb)' }}
@@ -43,8 +37,25 @@ export default function Vacancies() {
         <span className="small-muted" style={{ fontSize: 12 }}>Should have {t.planned} · Working {t.filled}</span>
         <span style={{ fontSize: 12, color: 'var(--primary, #1a56db)' }}>See by department →</span>
       </button>
-      {show ? (
-        <Modal title={`Vacancies: ${t.vacant}`} size="wide" onClose={close}>
+      {show ? <VacanciesPopup d={d} setD={setD} onClose={() => setShow(false)} /> : null}
+    </>
+  );
+}
+
+// the table by department and role, in a popup; the Super Admin changes the numbers here
+export function VacanciesPopup({ d, setD, onClose }) {
+  const [open, setOpen] = useState({}); // "group|role" -> names shown
+  const [edit, setEdit] = useState(null); // the plan being changed
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  async function save() {
+    setBusy(true); setErr('');
+    try { const r = await api.put('/dashboard/vacancies/plan', { plan: edit }); setD(r.data); setEdit(null); } catch (e) { setErr(e.response?.data?.error || 'It could not be saved.'); } finally { setBusy(false); }
+  }
+  const setNum = (gi, role, v) => setEdit(edit.map((g, i) => (i !== gi ? g : { ...g, rows: g.rows.map((r) => (r.role === role ? { ...r, planned: v === '' ? '' : Number(v) } : r)) })));
+  const t = d.totals;
+  return (
+    <Modal title={`Vacancies: ${t.vacant}`} size="wide" onClose={onClose}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <span className="small-muted">Should have {t.planned} · Working now {t.filled}{t.leaving ? ` · ${t.leaving} leaving (notice period)` : ''}</span>
         <span style={{ flex: 1 }} />
@@ -94,8 +105,6 @@ export default function Vacancies() {
           }))}</tbody>
         </table></div>
       )}
-        </Modal>
-      ) : null}
-    </>
+    </Modal>
   );
 }

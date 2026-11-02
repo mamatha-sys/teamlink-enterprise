@@ -11,7 +11,7 @@ import FilterChips from '../../components/FilterChips.jsx';
 import DateRangePicker, { useDateRange, rangeParams } from '../../components/DateRangePicker.jsx';
 import { Tiles, DrillPanel } from './DashboardDrill.jsx';
 import TodayDeptChart from './TodayDeptChart.jsx';
-import Vacancies from '../../components/dashboard/Vacancies.jsx'; // vacancies per department (2026-11-02)
+import { useVacancies, VacanciesPopup } from '../../components/dashboard/Vacancies.jsx'; // vacancies per department (2026-11-02), a tile in the Attendance row
 // Recruiter joinings (2026-10-05): Super Admin's month-end popup + a recruiter's own figure.
 import NewItems from '../../components/dashboard/NewItems.jsx'; // the New button (2026-10-13), HRMS lines only (2026-10-24)
 import RecruiterJoiningsPopup from '../../components/recruiterJoinings/RecruiterJoiningsPopup.jsx';
@@ -36,6 +36,9 @@ function HrDashboard() {
   const [error, setError] = useState('');
   // The tile whose list is open under its row: { section, tile, part, scope, expected }.
   const [drill, setDrill] = useState(null);
+  // Vacancies (founder 2026-11-02: "vancies card attadance lo undali separate ga kadhu"): a tile in the Attendance row, its table in a popup
+  const [vac, setVac] = useVacancies();
+  const [vacOpen, setVacOpen] = useState(false);
   // The employee search box: typed here, sent to the server a moment after typing stops.
   const [qText, setQText] = useState('');
   useEffect(() => {
@@ -149,7 +152,6 @@ function HrDashboard() {
           { key: 'manager', label: 'Reporting manager', value: filters.manager ? ((o.managers.find((m) => String(m.id) === String(filters.manager)) || {}).name || filters.manager) : '', onRemove: () => set('manager', '') },
         ]}
       />
-      <Vacancies />
 
       {error && <div className="notice red">{error}</div>}
 
@@ -157,8 +159,34 @@ function HrDashboard() {
         <ScopeNote>No employee records match these filters — the counts below are genuinely zero, not placeholders.</ScopeNote>
       )}
 
-      {/* THE LAYOUT (founder 2026-10-28: "dashboard clear ga"): today's attendance first, its one chart under it, then what is
-          waiting for a decision, then leave, then the employee counts; the lists and calendars stay at the end. */}
+      {/* founder 2026-11-02: "employee overview dashboard filters tarvatha adhey undali dani kindha attendance and leave" */}
+      <SectionLabel>Employee Overview</SectionLabel>
+      <Tiles section="emp" drill={drill} onPick={pick} cells={[
+        { id: 'total', tile: 'total', value: eo.total, label: now('Total Employees'), help: `Active ${eo.active} + Notice period ${eo.servingNotice} + Exit process ${eo.exitProcess} + Left ${eo.left} (Relieved ${eo.relieved}, Exited ${eo.exited})${eo.other ? ` + Other ${eo.other}` : ''} = ${eo.total}. The system Super Admin account is not counted.` },
+        { id: 'headcount', tile: 'empHeadcount', value: eo.headcount, label: now('Headcount'), help: 'The people working here now: everybody who has not left (Active + Serving notice + Exit process).' },
+        { id: 'active', tile: 'active', value: eo.active, label: now('Active') },
+        { id: 'notice', tile: 'notice', value: eo.servingNotice, label: now('Serving Notice') },
+        { id: 'exit', tile: 'exitProcess', value: eo.exitProcess, label: now('Exit Process') },
+        { id: 'left', tile: 'left', value: eo.left, label: now('Left'), parts: [{ label: 'Relieved', n: eo.relieved, part: 'relieved' }, { label: 'Exited', n: eo.exited, part: 'exited' }] },
+        ...(eo.other ? [{ id: 'other', tile: 'other', value: eo.other, label: now('Other Status'), sub: (eo.otherStatuses || []).join(', ') }] : []),
+      ]} />
+      <div className="hd-subhead">{`For ${p.name}`}</div>
+      <Tiles section="emp" drill={drill} onPick={pick} cells={[
+        { id: 'new', tile: 'newJoiners', value: eo.newJoiners, label: inP('New Joiners') },
+        {
+          id: 'leave', tile: 'onLeave', value: eo.onLeave, label: 'Leave approved for this date',
+          sub: p.days > 1 ? `any day in ${p.name}` : p.label,
+          help: 'People with an APPROVED leave request that covers the date (or any day of the range) picked above. This is not the same as On Leave in the attendance row below: someone on approved leave on a week-off or holiday is counted here but shown under Week-off / Holiday there, and someone on half-day leave who worked the other half is shown under Half Day.',
+        },
+      ]} />
+      {drill && drill.section === 'emp' && (
+        <DrillPanel drill={drill} expected={drill.expected} params={params} onClose={() => setDrill(null)} moreTo="/employees" moreLabel="Open Employee Management"
+          switches={drill.tile === 'left' ? [{ label: 'All who left', part: '', n: eo.left }, { label: 'Relieved', part: 'relieved', n: eo.relieved }, { label: 'Exited', part: 'exited', n: eo.exited }] : null}
+          onSwitch={(x) => setDrill((d) => ({ ...d, part: x.part, expected: x.n }))} />
+      )}
+
+      {/* THE LAYOUT: Employee Overview (above), today's attendance with its one chart, then leave, then what is waiting for a decision;
+          the lists and calendars stay at the end. */}
       {/* PEOPLE ON ONE DAY, not person-days: the range's last day (today when
           the range runs on past it), out of the people on the rolls that day.
           The buckets add up to the headcount, and match the Attendance
@@ -167,7 +195,7 @@ function HrDashboard() {
       {/* THE TILE SET (user, 2026-10-09): Present / Absent / Half day / On leave / Week off-Holiday
           always add up to the Headcount. Present = everyone who came to work, so Late, Early
           logout, Missing check-in and Missing check-out are only small notes INSIDE it. */}
-      <Tiles section="att" drill={drill} onPick={pick} cells={[
+      <Tiles section="att" drill={drill} onPick={(sec, c, v) => (c.tile === 'vacancies' ? setVacOpen(true) : pick(sec, c, v))} cells={[
         { id: 'headcount', tile: 'headcount', value: ao.headcount, label: 'Headcount on the rolls', help: 'Present + Absent + Half day + On leave + Week off / Holiday (+ Not checked in yet) = Headcount. Late, early logout and missing punches are already inside Present.', sub: headcountNote,
           help: 'Everyone on the company rolls on this date: joined on or before it and not yet left. The five tiles beside it add up to this number.' },
         {
@@ -214,16 +242,35 @@ function HrDashboard() {
         ...(ao.noRecord ? [{ id: 'norec', tile: 'noRecord', value: ao.noRecord, label: 'No device data' }] : []),
         ...(ao.notYet ? [{ id: 'notyet', tile: 'notYet', value: ao.notYet, label: 'Not checked in yet' }] : []),
         ...(ao.upcoming ? [{ id: 'upc', tile: 'upcoming', value: ao.upcoming, label: 'Upcoming day' }] : []),
+        ...(vac ? [{ id: 'vac', tile: 'vacancies', value: vac.totals.vacant, label: 'Vacancies', sub: `Should have ${vac.totals.planned} · Working ${vac.totals.filled}`, help: 'How many people each department should have (STL / TL / Employee) minus who is working now. Click to see it by department.' }] : []),
         // Regularization Pending (now) was the same figure as "Attendance
         // Regularization" under Pending Tasks & Approvals — shown there once.
       ]} />
       {drill && drill.section === 'att' && (
         <DrillPanel drill={drill} expected={drill.expected} params={params} onClose={() => setDrill(null)} moreTo="/attendance" moreLabel="Open the full Attendance page" />
       )}
+      {vacOpen && vac ? <VacanciesPopup d={vac} setD={setVac} onClose={() => setVacOpen(false)} /> : null}
 
       {/* THE ONE CHART (founder 2026-10-28: "HRMS dashboard clear ga, clarity ga, okka bar graph"): who came to work on the
           attendance date, per department - the same people as the cards above. Clicking a department filters the dashboard to it. */}
       <TodayDeptChart rows={ao.byDepartment} date={ao.asOf} onPickDept={(d) => set('department', d)} />
+
+      <SectionLabel>{`Leave — ${p.name}`}</SectionLabel>
+      <Tiles section="leave" drill={drill} onPick={pick} cells={[
+        { id: 'total', tile: 'leaveTotal', value: lo.total, label: 'Leave Requests', help: 'Every leave request that overlaps the period: Pending + Approved + Rejected + Cancelled. It counts requests; the attendance cards count people.' },
+        { id: 'pending', tile: 'leavePending', value: lo.pending, label: 'Pending Approvals', sub: 'Only leave dated in this range' },
+        {
+          id: 'approved', tile: 'leaveApproved', value: lo.approved, label: 'Approved', sub: `${lo.approvedFullDay || 0} full day · ${lo.approvedHalfDay || 0} half day · ${lo.approvedPeople || 0} ${lo.approvedPeople === 1 ? 'person' : 'people'}`,
+          parts: lvChips,
+        },
+        { id: 'rejected', tile: 'leaveRejected', value: lo.rejected, label: 'Rejected' },
+        { id: 'cancelled', tile: 'leaveCancelled', value: lo.cancelled, label: 'Cancelled' },
+        ...(lo.cancellationRequests ? [{ id: 'asked', tile: 'leaveCancelAsked', value: lo.cancellationRequests, label: 'Cancellation Asked' }] : []),
+        { id: 'upcoming', tile: 'leaveUpcoming', value: lo.upcoming, label: 'Upcoming Leaves (from today)', sub: 'Approved, starting after today. Not part of the total.' },
+      ]} />
+      {drill && drill.section === 'leave' && (
+        <DrillPanel drill={drill} expected={drill.expected} params={params} onClose={() => setDrill(null)} moreTo="/leave" moreLabel="Open Leave Requests" />
+      )}
       <div style={{ marginTop: 16 }}>
         <PanelPad>
           <h3 style={{ marginBottom: 12, fontSize: 14 }}>Pending Tasks &amp; Approvals (now)</h3>
@@ -244,47 +291,7 @@ function HrDashboard() {
       </div>
 
 
-      <SectionLabel>{`Leave — ${p.name}`}</SectionLabel>
-      <Tiles section="leave" drill={drill} onPick={pick} cells={[
-        { id: 'total', tile: 'leaveTotal', value: lo.total, label: 'Leave Requests', help: 'Every leave request that overlaps the period: Pending + Approved + Rejected + Cancelled. It counts requests; the attendance cards count people.' },
-        { id: 'pending', tile: 'leavePending', value: lo.pending, label: 'Pending Approvals', sub: 'Only leave dated in this range' },
-        {
-          id: 'approved', tile: 'leaveApproved', value: lo.approved, label: 'Approved', sub: `${lo.approvedFullDay || 0} full day · ${lo.approvedHalfDay || 0} half day · ${lo.approvedPeople || 0} ${lo.approvedPeople === 1 ? 'person' : 'people'}`,
-          parts: lvChips,
-        },
-        { id: 'rejected', tile: 'leaveRejected', value: lo.rejected, label: 'Rejected' },
-        { id: 'cancelled', tile: 'leaveCancelled', value: lo.cancelled, label: 'Cancelled' },
-        ...(lo.cancellationRequests ? [{ id: 'asked', tile: 'leaveCancelAsked', value: lo.cancellationRequests, label: 'Cancellation Asked' }] : []),
-        { id: 'upcoming', tile: 'leaveUpcoming', value: lo.upcoming, label: 'Upcoming Leaves (from today)', sub: 'Approved, starting after today. Not part of the total.' },
-      ]} />
-      {drill && drill.section === 'leave' && (
-        <DrillPanel drill={drill} expected={drill.expected} params={params} onClose={() => setDrill(null)} moreTo="/leave" moreLabel="Open Leave Requests" />
-      )}
 
-      <SectionLabel>Employee Overview</SectionLabel>
-      <Tiles section="emp" drill={drill} onPick={pick} cells={[
-        { id: 'total', tile: 'total', value: eo.total, label: now('Total Employees'), help: `Active ${eo.active} + Notice period ${eo.servingNotice} + Exit process ${eo.exitProcess} + Left ${eo.left} (Relieved ${eo.relieved}, Exited ${eo.exited})${eo.other ? ` + Other ${eo.other}` : ''} = ${eo.total}. The system Super Admin account is not counted.` },
-        { id: 'headcount', tile: 'empHeadcount', value: eo.headcount, label: now('Headcount'), help: 'The people working here now: everybody who has not left (Active + Serving notice + Exit process).' },
-        { id: 'active', tile: 'active', value: eo.active, label: now('Active') },
-        { id: 'notice', tile: 'notice', value: eo.servingNotice, label: now('Serving Notice') },
-        { id: 'exit', tile: 'exitProcess', value: eo.exitProcess, label: now('Exit Process') },
-        { id: 'left', tile: 'left', value: eo.left, label: now('Left'), parts: [{ label: 'Relieved', n: eo.relieved, part: 'relieved' }, { label: 'Exited', n: eo.exited, part: 'exited' }] },
-        ...(eo.other ? [{ id: 'other', tile: 'other', value: eo.other, label: now('Other Status'), sub: (eo.otherStatuses || []).join(', ') }] : []),
-      ]} />
-      <div className="hd-subhead">{`For ${p.name}`}</div>
-      <Tiles section="emp" drill={drill} onPick={pick} cells={[
-        { id: 'new', tile: 'newJoiners', value: eo.newJoiners, label: inP('New Joiners') },
-        {
-          id: 'leave', tile: 'onLeave', value: eo.onLeave, label: 'Leave approved for this date',
-          sub: p.days > 1 ? `any day in ${p.name}` : p.label,
-          help: 'People with an APPROVED leave request that covers the date (or any day of the range) picked above. This is not the same as On Leave in the attendance row below: someone on approved leave on a week-off or holiday is counted here but shown under Week-off / Holiday there, and someone on half-day leave who worked the other half is shown under Half Day.',
-        },
-      ]} />
-      {drill && drill.section === 'emp' && (
-        <DrillPanel drill={drill} expected={drill.expected} params={params} onClose={() => setDrill(null)} moreTo="/employees" moreLabel="Open Employee Management"
-          switches={drill.tile === 'left' ? [{ label: 'All who left', part: '', n: eo.left }, { label: 'Relieved', part: 'relieved', n: eo.relieved }, { label: 'Exited', part: 'exited', n: eo.exited }] : null}
-          onSwitch={(x) => setDrill((d) => ({ ...d, part: x.part, expected: x.n }))} />
-      )}
 
       <TwoCol>
         <Panel>
