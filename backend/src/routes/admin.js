@@ -1822,6 +1822,15 @@ router.post('/social-accounts/threads', requirePerm(null, 'administration', 'Int
   await logAudit({ userId: req.user.id, action: 'Threads connected', entity: 'Integration', entityId: 'social', toValue: r.account.name });
   res.json({ accounts: await SA.list(), message: `Threads ${r.account.name} connected.${r.makeDefault ? ' It is the default: Omni-Channel gets it in a few seconds.' : ''}` });
 });
+// X (2026-11-02, "x kuda automatic cheyyi"): the app's four permanent keys (utils/xKeys.js), checked with X; the default X account
+// reaches Omni-Channel by itself (utils/greenStartIntegrations.js -> Green Start POST /social/twitter/connect-keys).
+router.post('/social-accounts/x', requirePerm(null, 'administration', 'Integrations', 'configure'), async (req, res) => {
+  const r = await SA.addX(req.user, req.body || {});
+  if (r.error) return res.status(r.status || 400).json({ error: r.error, field: r.field || null });
+  GSI.schedule('x connected');
+  await logAudit({ userId: req.user.id, action: 'X connected', entity: 'Integration', entityId: 'social', toValue: r.account.name });
+  res.json({ accounts: await SA.list(), message: `X ${r.account.name} connected.${r.makeDefault ? ' It is the default: Omni-Channel gets it in a few seconds.' : ''}` });
+});
 router.post('/social-accounts/:id/default', requirePerm(null, 'administration', 'Integrations', 'configure'), async (req, res) => {
   const r = await SA.setDefault(req.user, req.params.id, { saveFacebook: saveFacebookDefault });
   if (r.error) return res.status(r.status || 400).json({ error: r.error });

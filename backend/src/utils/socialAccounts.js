@@ -17,7 +17,7 @@ const { encryptSecret, decryptSecret } = require('./secrets');
 const { readConfig, writeValues } = require('./integrationStore');
 
 const KEY = 'social.accounts';
-const PLATFORMS = ['facebook', 'instagram', 'threads', 'linkedin', 'youtube'];
+const PLATFORMS = ['facebook', 'instagram', 'threads', 'linkedin', 'youtube', 'x'];
 const graphBase = () => String(process.env.TL_FACEBOOK_GRAPH_BASE || 'https://graph.facebook.com/v19.0').replace(/\/+$/, '');
 const threadsBase = () => String(process.env.TL_THREADS_GRAPH_BASE || 'https://graph.threads.net/v1.0').replace(/\/+$/, '');
 
@@ -169,6 +169,29 @@ async function addThreads(user, token) {
   return { ok: true, account: shape(acc), makeDefault };
 }
 
+// X (2026-11-02, "x kuda automatic cheyyi"): an X account from the app's four permanent keys (utils/xKeys.js), checked with X first.
+// The keys are kept as one encrypted JSON (the account's token); the default X account goes to Omni-Channel (utils/greenStartIntegrations.js).
+async function addX(user, body) {
+  const XK = require('./xKeys'); // eslint-disable-line global-require
+  const r = XK.readKeys(body || {});
+  if (r.error) return { error: r.error, field: r.field, status: 400 };
+  let me;
+  try { me = await XK.whoAmI(r.keys); } catch (err) { return { error: `X did not accept these keys: ${err.message}`, status: 422 }; }
+  const all = await readAll();
+  await adoptLegacy(all);
+  const acc = upsert(all, { platform: 'x', externalId: me.id, name: me.username ? `@${me.username}` : (me.name || me.id), username: me.username }, JSON.stringify(r.keys), user);
+  const makeDefault = !all.some((a) => a.platform === 'x' && a.isDefault && a.id !== acc.id);
+  if (makeDefault) acc.isDefault = true;
+  await writeAll(all);
+  return { ok: true, account: shape(acc), makeDefault };
+}
+// the default X account's four keys ({ apiKey, apiSecret, accessToken, accessSecret }), or null
+async function defaultXKeys() {
+  const a = (await readAll()).find((x) => x.platform === 'x' && x.isDefault && x.status !== 'Removed');
+  if (!a) return null;
+  try { const k = JSON.parse(tokenOf(a)); return k && k.apiKey && k.apiSecret && k.accessToken && k.accessSecret ? { keys: k, name: a.name } : null; } catch { return null; }
+}
+
 // Threads default -> the Social Media channel's Threads fields (what utils/greenStartIntegrations.js gives Omni-Channel)
 async function writeThreadsChannel(token, profile) {
   const w = await writeValues('social', { 'Threads access token': token || '-', 'Threads profile': profile || '' });
@@ -247,4 +270,4 @@ async function edit(user, id, { name, token } = {}, { saveFacebook } = {}) {
   return { ok: !result || result.ok !== false, account: shape(acc), tokenChanged: !!t, result };
 }
 
-module.exports = { edit, list, addFacebookPages, refreshInstagram, addThreads, addLinkedin, addYoutube, tokenOf, setDefault, remove, writeThreadsChannel, readAll, PLATFORMS };
+module.exports = { addX, defaultXKeys, edit, list, addFacebookPages, refreshInstagram, addThreads, addLinkedin, addYoutube, tokenOf, setDefault, remove, writeThreadsChannel, readAll, PLATFORMS };

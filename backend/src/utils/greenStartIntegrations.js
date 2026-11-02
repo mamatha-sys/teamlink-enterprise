@@ -153,13 +153,19 @@ async function teamlinkChannels() {
     else if (c.mode === 'token') out.rcs = { body: { secret: c.clientSecret, settings: { username: c.user, rcsId: c.rcsId, authMode: 'api_key' }, label: LABEL } };
     else out.rcs = { body: { secret: c.pass, settings: { username: c.user, rcsId: c.rcsId, authMode: 'login' }, label: LABEL } };
   } catch (err) { out.rcs = { none: `RCS could not be read: ${err.message}` }; }
+  // X (2026-11-02, "x kuda automatic cheyyi"): the default X account of Social Media > X - the app's four permanent keys (utils/xKeys.js)
+  try {
+    const x = await require('./socialAccounts').defaultXKeys(); // eslint-disable-line global-require
+    if (!x) out.x = { none: 'X is not connected in TeamLink (Administration > Integrations > Social Media > X).' };
+    else out.x = { body: { ...x.keys }, name: x.name };
+  } catch (err) { out.x = { none: `X could not be read: ${err.message}` }; }
   return out;
 }
 
 // ---- one channel into one workspace -----------------------------------------------
-const NAME = { email: 'Email', sms: 'SMS', whatsapp: 'WhatsApp', facebook: 'Facebook', threads: 'Threads', rcs: 'RCS' };
-const ONE_ROW = ['whatsapp', 'facebook', 'threads', 'rcs']; // channels that are one row in Green Start's integration list (removed by that row's id)
-const PROVIDER = { rcs: 'smstake_rcs' }; // Green Start's provider name where it is not the channel's
+const NAME = { email: 'Email', sms: 'SMS', whatsapp: 'WhatsApp', facebook: 'Facebook', threads: 'Threads', rcs: 'RCS', x: 'X (Twitter)' };
+const ONE_ROW = ['whatsapp', 'facebook', 'threads', 'rcs', 'x']; // channels that are one row in Green Start's integration list (removed by that row's id)
+const PROVIDER = { rcs: 'smstake_rcs', x: 'twitter' }; // Green Start's provider name where it is not the channel's
 const GONE = ['NOT_CONNECTED', 'DISCONNECTED'];
 async function pushOne(token, ws, channel, want, prev, force) {
   if (want.none) {
@@ -219,6 +225,22 @@ async function pushOne(token, ws, channel, want, prev, force) {
       }
       await call('POST', '/integrations/smstake_rcs/api-credentials', { token, ws: ws.id, body: want.body });
       return { state: 'sent', words: `Same rcssms.in account as TeamLink now (RCS ID ${want.body.settings.rcsId})`, fp };
+    }
+    if (channel === 'x') {
+      // the same rule as Facebook: an X connection made inside Omni-Channel itself (its own X sign-in) is never replaced
+      if (!prev) {
+        const list = await call('GET', '/integrations', { token, ws: ws.id });
+        if ((list || []).some((x) => x.provider === 'twitter' && x.status && !GONE.includes(x.status))) {
+          return { state: 'skipped', words: 'Omni-Channel already has its own X connection, so TeamLink left it as it is.' };
+        }
+      }
+      try {
+        await call('POST', '/social/twitter/connect-keys', { token, ws: ws.id, body: want.body });
+      } catch (err) {
+        if (/404|cannot post|not found/i.test(err.message)) return { state: 'failed', words: 'Omni-Channel does not take X keys yet: its X update (Green Start branch claude/x-token-connect) is not installed on this server.', fp: prev };
+        throw err;
+      }
+      return { state: 'sent', words: `Same X account as TeamLink now${want.name ? ` (${want.name})` : ''}`, fp };
     }
     if (channel === 'email') await call('PUT', '/integrations/email', { token, ws: ws.id, body: want.body });
     else if (channel === 'sms') await call('PUT', '/integrations/sms', { token, ws: ws.id, body: want.body });
@@ -347,7 +369,7 @@ async function sync({ force = false, why = 'manual', by = null } = {}) {
       }
       for (const [i, ws] of wss.entries()) {
         const one = { id: ws.id, name: ws.name, main: i === 0, channels: {} };
-        for (const ch of ['email', 'sms', 'whatsapp', 'facebook', 'threads', 'rcs']) {
+        for (const ch of ['email', 'sms', 'whatsapp', 'facebook', 'threads', 'rcs', 'x']) {
           const k = `${ws.id}:${ch}`;
           let r;
           if (ch === 'whatsapp' && mapped && ws.waDone) r = ws.waDone;
@@ -355,6 +377,7 @@ async function sync({ force = false, why = 'manual', by = null } = {}) {
           else if (ch === 'whatsapp' && i > 0) r = { state: 'skipped', words: `One WhatsApp number can belong to one workspace only: it is in "${wss[0].name}".` };
           else if (ch === 'threads' && i > 0) r = { state: 'skipped', words: `Threads is given to the main workspace only: "${wss[0].name}".` };
           else if (ch === 'facebook' && i > 0) r = { state: 'skipped', words: `The Facebook Page is given to the main workspace only: "${wss[0].name}".` };
+          else if (ch === 'x' && i > 0) r = { state: 'skipped', words: `X is given to the main workspace only: "${wss[0].name}".` };
           else r = await pushOne(token, ws, ch, want[ch], fps[k] || null, force); // eslint-disable-line no-await-in-loop
           if (r.fp) fps[k] = r.fp; else if (r.fp === null) delete fps[k];
           one.channels[ch] = { state: r.state, words: r.words };
@@ -367,7 +390,7 @@ async function sync({ force = false, why = 'manual', by = null } = {}) {
       const waDead = result.workspaces.map((w) => w.channels.whatsapp).find((c) => c && c.state === 'failed' && TOKEN_DEAD.test(c.words || ''));
       if (waDead) await markWhatsappTokenRejected(waDead.words);
       result.ok = !bad.length;
-      result.words = bad.length ? `Not everything reached Omni-Channel: ${bad.join(' | ')}` : 'Omni-Channel uses the same Email, SMS, WhatsApp, Facebook and RCS as TeamLink.';
+      result.words = bad.length ? `Not everything reached Omni-Channel: ${bad.join(' | ')}` : 'Omni-Channel uses the same Email, SMS, WhatsApp, Facebook, Instagram, Threads, RCS and X as TeamLink.';
     } catch (err) {
       result.words = err.message;
       result.down = !!err.down;
@@ -431,4 +454,4 @@ function start() {
 }
 async function lastResult() { return (await readState()).last || null; }
 
-module.exports = { sync, connections, schedule, start, lastResult, teamlinkChannels, waMapView, saveWaMap, templatesToOmni, STATE_KEY, TOKEN_DEAD, markWhatsappTokenRejected };
+module.exports = { sync, connections, schedule, start, lastResult, teamlinkChannels, waMapView, saveWaMap, templatesToOmni, STATE_KEY, TOKEN_DEAD, markWhatsappTokenRejected, pushOne };

@@ -9,7 +9,9 @@ import Modal from '../../components/Modal.jsx';
 // the default (*): job posts and Omni-Channel use the default. Server: /admin/social-accounts (utils/socialAccounts.js). No token is shown.
 // + LinkedIn (2026-10-31): job posts also go to LinkedIn (a post on the profile or Company Page, official LinkedIn API).
 // + YouTube (2026-10-31, founder: "youtube ki kuda inko tab pettu"): channels through Google's own sign-in (utils/youtubeConnect.js).
-const SUBS = [['facebook', 'Facebook'], ['instagram', 'Instagram'], ['threads', 'Threads'], ['linkedin', 'LinkedIn'], ['youtube', 'YouTube']];
+// + X (2026-11-02, founder: "x kuda automatic cheyyi"): the X app's four permanent keys; the default X account goes to Omni-Channel by itself.
+const SUBS = [['facebook', 'Facebook'], ['instagram', 'Instagram'], ['threads', 'Threads'], ['x', 'X (Twitter)'], ['linkedin', 'LinkedIn'], ['youtube', 'YouTube']];
+const X_FIELDS = [['apiKey', 'API Key'], ['apiSecret', 'API Key Secret'], ['accessToken', 'Access Token'], ['accessSecret', 'Access Token Secret']];
 
 function AccountList({ rows, noun, onDefault, onRemove, onEdit, busy, extra }) {
   if (!rows.length) return <div className="small-muted" style={{ padding: '6px 0' }}>No {noun} connected yet.</div>;
@@ -39,6 +41,7 @@ export default function SocialMedia({ initialSub = 'facebook', reloadKey = 0 }) 
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [thToken, setThToken] = useState('');
+  const [xKeys, setXKeys] = useState({ apiKey: '', apiSecret: '', accessToken: '', accessSecret: '' });
   const [showSetup, setShowSetup] = useState(false);
   const [editing, setEditing] = useState(null); // { a, name, token } - the Edit box
   const [li, setLi] = useState(null); // LinkedIn app: { hasApp, clientId, hasSecret, redirectUri }
@@ -113,7 +116,7 @@ export default function SocialMedia({ initialSub = 'facebook', reloadKey = 0 }) 
   }
 
   if (!acc) return <div className="small-muted">{err || 'Loading…'}</div>;
-  const counts = { facebook: acc.facebook.length, instagram: acc.instagram.length, threads: acc.threads.length, linkedin: (acc.linkedin || []).length, youtube: (acc.youtube || []).length };
+  const counts = { facebook: acc.facebook.length, instagram: acc.instagram.length, threads: acc.threads.length, x: (acc.x || []).length, linkedin: (acc.linkedin || []).length, youtube: (acc.youtube || []).length };
 
   const NAMES = { facebook: 'Page access token', instagram: 'Page access token (of the Page it comes with)', threads: 'Threads access token' };
   return (
@@ -205,6 +208,32 @@ export default function SocialMedia({ initialSub = 'facebook', reloadKey = 0 }) 
             {busy ? 'Checking with Threads…' : 'Connect Threads'}
           </button>
           <div className="small-muted" style={{ fontSize: 12.5, marginTop: 8 }}>The <b>★ default</b> Threads profile is the one Omni-Channel uses.</div>
+        </div>
+      )}
+
+      {sub === 'x' && (
+        <div className="card" style={{ padding: 16 }}>
+          <b style={{ fontSize: 15 }}>X (Twitter) accounts</b>
+          <div style={{ margin: '10px 0' }}><AccountList rows={acc.x || []} noun="X accounts" onDefault={makeDefault} onRemove={removeOne} busy={busy} extra={(a) => `X ID ${a.externalId}`} /></div>
+          <b>＋ Connect an X account</b> (once - these keys do not expire, and Omni-Channel gets the same account by itself):
+          <ol style={{ margin: '6px 0 0', paddingLeft: 18, lineHeight: 1.7, fontSize: 13.5 }}>
+            <li>Sign in at <b>developer.x.com</b> with the X account posts should come from → <b>Projects &amp; Apps</b> → your app.</li>
+            <li><b>User authentication settings → Edit</b>: App permissions <b>Read and write</b> → Save.</li>
+            <li><b>Keys and tokens</b>: copy the <b>API Key</b> and <b>API Key Secret</b>; under <b>Access Token and Secret</b> press <b>Generate</b> (after the Read and write change) and copy both.</li>
+            <li>Paste the four below and press <b>Connect X</b>. We check them with X first.</li>
+          </ol>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8, marginTop: 8 }}>
+            {X_FIELDS.map(([k, label]) => (
+              <label key={k} className="field" style={{ margin: 0 }}><span>{label}</span>
+                <input type="password" autoComplete="off" value={xKeys[k]} onChange={(e) => setXKeys((v) => ({ ...v, [k]: e.target.value.replace(/\s/g, '') }))} placeholder={label} style={{ fontFamily: 'monospace', fontSize: 12 }} />
+              </label>
+            ))}
+          </div>
+          <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 8 }} disabled={busy || X_FIELDS.some(([k]) => xKeys[k].length < 10)}
+            onClick={() => act(async () => { const r = await api.post('/admin/social-accounts/x', xKeys); setXKeys({ apiKey: '', apiSecret: '', accessToken: '', accessSecret: '' }); return r; })}>
+            {busy ? 'Checking with X…' : 'Connect X'}
+          </button>
+          <div className="small-muted" style={{ fontSize: 12.5, marginTop: 8 }}>The <b>★ default</b> X account is the one Omni-Channel uses. The keys are kept encrypted and never shown again.</div>
         </div>
       )}
 
