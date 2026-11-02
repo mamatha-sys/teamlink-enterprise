@@ -18,7 +18,7 @@
 //   forward()      rcssms.in posts template approvals and delivery reports to ONE address: TeamLink's public /api/webhooks/rcs. Green
 //                  Start's own webhook sits behind the TeamLink gate (no pass = 401), so TeamLink hands the same payload to Green Start
 //                  on this server (127.0.0.1, its /api/v1/webhooks/smstake-rcs/<GREENSTART_RCS_WEBHOOK_SECRET>), then pulls templates.
-// Every hour and on "Get templates from Omni-Channel" (Integrations > RCS > Templates). Nothing here can stop TeamLink; failures become
+// Every 10 minutes, right after a template is made in TeamLink, after each approval and on "Get from Omni-Channel" (Integrations > RCS > Templates). Nothing here can stop TeamLink; failures become
 // words in the last result. No token or secret is ever logged, stored or returned.
 // ---------------------------------------------------------------------------
 const prisma = require('../db');
@@ -43,6 +43,7 @@ function pasteBodyOf(t) {
   return {
     name: gsName(t.name, t.templateId), templateId: t.templateId, category: b.promotional ? 'Marketing' : 'Utility',
     ...(description ? { description } : {}), shape: { kind, cards, dynamicImage: kind === 'rich' && !!b.imageLink },
+    ...(t.status === 'PENDING' ? { status: 'pending' } : {}),
   };
 }
 const enabled = () => String(process.env.GREENSTART_ENABLED || 'true').toLowerCase() !== 'false';
@@ -120,7 +121,9 @@ async function pull({ why = 'manual' } = {}) {
       const wss = await workspacesOf(token);
       result.workspaces = wss.length;
       // TeamLink's own approved templates (made here or added by hand), to be offered to every workspace
-      const mine = (await prisma.rcsTemplate.findMany({ where: { status: 'APPROVED' } })).filter((t) => parse(t.bodyJson, {}).source !== 'omnichannel');
+      // approved AND waiting ones (founder 2 Nov: "ekkada create chesina anni vatilo ravali"): a waiting one is added there as waiting
+      // and rcssms.in's approval (the webhook TeamLink hands to Omni-Channel) approves it in both places
+      const mine = (await prisma.rcsTemplate.findMany({ where: { status: { in: ['APPROVED', 'PENDING'] } } })).filter((t) => parse(t.bodyJson, {}).source !== 'omnichannel');
       for (const ws of wss) {
         const there = new Set(); // rcssms.in ids this workspace already has
         const names = new Set();
@@ -177,13 +180,16 @@ async function pull({ why = 'manual' } = {}) {
             there.add(t.templateId); names.add(body.name);
           } catch (err) {
             if (/TEMPLATE_ID_EXISTS|already added/i.test(String(err.message))) continue; // eslint-disable-line no-continue
+            // an older Omni-Channel takes approved ids only: the waiting one goes once rcssms.in approves it
+            if (t.status === 'PENDING' && err.status === 400) { result.waitingLater = (result.waitingLater || 0) + 1; continue; } // eslint-disable-line no-continue
             result.sendProblems.push(`${t.name} -> ${ws.name}: ${String(err.message).slice(0, 120)}`);
           }
         }
       }
       result.ok = true;
       result.words = `${result.seen} RCS template${result.seen === 1 ? '' : 's'} in Omni-Channel: ${result.added} new here, ${result.updated} updated, ${result.alreadyHere} already in TeamLink${result.resubmitted ? ` (${result.resubmitted} submitted again with a new rcssms.in id)` : ''}${result.removedHere ? `, ${result.removedHere} removed here by an Admin` : ''}.`
-        + `${result.sentToOmni ? ` ${result.sentToOmni} approved TeamLink template${result.sentToOmni === 1 ? '' : 's'} added in Omni-Channel.` : ''}`
+        + `${result.sentToOmni ? ` ${result.sentToOmni} TeamLink template${result.sentToOmni === 1 ? '' : 's'} added in Omni-Channel.` : ''}`
+        + `${result.waitingLater ? ` ${result.waitingLater} waiting one${result.waitingLater === 1 ? '' : 's'} go${result.waitingLater === 1 ? 'es' : ''} to Omni-Channel when rcssms.in approves (its Omni-Channel is older).` : ''}`
         + `${result.sendProblems.length ? ` Not added in Omni-Channel: ${result.sendProblems.slice(0, 3).join(' | ')}${result.sendProblems.length > 3 ? ' ...' : ''}` : ''}`;
     } catch (err) {
       result.words = String((err && err.message) || err).slice(0, 300);
@@ -228,7 +234,8 @@ function pullAfterApproval() {
 let timer = null;
 function start() {
   if (require('./sandbox').isSandbox() || timer) return; // eslint-disable-line global-require
-  timer = setInterval(() => { pull({ why: 'hourly' }).catch(() => {}); }, 60 * 60 * 1000);
+  // every 10 minutes (was hourly): a template made in Omni-Channel shows in TeamLink soon, with its status
+  timer = setInterval(() => { pull({ why: 'every 10 minutes' }).catch(() => {}); }, 10 * 60 * 1000);
   if (timer.unref) timer.unref();
   const first = setTimeout(() => { pull({ why: 'start' }).catch(() => {}); }, 90 * 1000);
   if (first.unref) first.unref();

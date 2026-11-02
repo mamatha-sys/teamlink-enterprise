@@ -283,7 +283,7 @@ function TemplatesTab() {
           <button type="button" className="btn btn-primary" onClick={() => setForm('new')}>New template</button>
         </div>
       </div>
-      <div className="cm-help">Only <b>Approved</b> templates can be sent. A new one is sent to rcssms.in and waits for their approval. Templates made and sent for approval in <b>Omni-Channel &gt; Templates &gt; RCS</b> come here by themselves every hour and after each approval (or press &quot;Get from Omni-Channel&quot;). Approved templates made here appear in Omni-Channel too (bulk campaigns run there): one template id, both places.</div>
+      <div className="cm-help">Only <b>Approved</b> templates can be sent. A new one is sent to rcssms.in and waits for their approval. Templates made and sent for approval in <b>Omni-Channel &gt; Templates &gt; RCS</b> come here by themselves within 10 minutes (or press &quot;Get from Omni-Channel&quot;), and templates made here appear in Omni-Channel at once, waiting or approved. Make a template in ONE place: rcssms.in approves it once, and both places show the same template id and status (bulk campaigns run from Omni-Channel).</div>
       {omni && <div className={omni.ok ? 'cm-help' : 'error-text'}>Omni-Channel{omni.at ? ` (${fmt(omni.at)})` : ''}: {omni.words}</div>}
       {fwd && (fwd.set ? (fwd.at && <div className={fwd.ok ? 'cm-help' : 'error-text'}>Last rcssms.in answer passed to Omni-Channel ({fmt(fwd.at)}): {fwd.ok ? 'received' : fwd.error}</div>)
         : <div className="cm-help">rcssms.in answers are not passed to Omni-Channel yet (GREENSTART_RCS_WEBHOOK_SECRET is not set on the server: run .\link-rcs-templates-omni-on-vps.ps1).</div>)}

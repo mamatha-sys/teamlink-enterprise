@@ -169,6 +169,7 @@ router.post('/templates', adminOnly, wrap(async (req, res) => {
     update: { name: r.fields.cname, rcsType: type, bodyJson: JSON.stringify(body), status: r.status, module: cleanModule(b.module) },
   });
   await logAudit({ userId: req.user.id, actorName: req.user.name, action: 'RCS template sent for approval', entity: 'RcsTemplate', entityId: row.id, toValue: `${row.name} (${type}) - rcssms.in id ${row.templateId}, ${row.status}` });
+  require('../utils/rcsOmniSync').pull({ why: 'template made in TeamLink' }).catch(() => {}); // eslint-disable-line global-require -- shows in Omni-Channel at once
   return res.status(201).json(shapeTemplate(row));
 }));
 
@@ -185,6 +186,7 @@ router.post('/templates/register', adminOnly, wrap(async (req, res) => {
   if (await prisma.rcsTemplate.findUnique({ where: { templateId } })) return res.status(409).json({ error: 'This template id is already in the list.' });
   const row = await prisma.rcsTemplate.create({ data: { templateId, name: name.slice(0, 100), rcsType: type, bodyJson: JSON.stringify(extras.body), status, module: cleanModule(b.module), createdById: req.user.id } });
   await logAudit({ userId: req.user.id, actorName: req.user.name, action: 'RCS template added from rcssms.in', entity: 'RcsTemplate', entityId: row.id, toValue: `${row.name} (${type}) id ${templateId}, ${status}${status === 'APPROVED' ? ' (Admin saw it approved on rcssms.in)' : ''}` });
+  require('../utils/rcsOmniSync').pull({ why: 'template made in TeamLink' }).catch(() => {}); // eslint-disable-line global-require -- shows in Omni-Channel at once
   return res.status(201).json(shapeTemplate(row));
 }));
 

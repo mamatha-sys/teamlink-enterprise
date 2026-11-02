@@ -50,7 +50,7 @@ const stub = http.createServer((req, res) => {
       const b = JSON.parse(raw);
       PASTED.push(b);
       if (TPLS.some((t) => t.providerTemplateId === b.templateId)) return json({ success: false, error: { code: 'TEMPLATE_ID_EXISTS', message: 'This SMSTAKE RCS template ID is already added in this workspace.' } }, 409);
-      TPLS.push({ id: `gs-p${PASTED.length}`, name: b.name, status: 'approved', providerTemplateId: b.templateId, rcsCarrier: { templateId: b.templateId, kind: b.shape.kind, source: 'pasted', shape: b.shape } });
+      TPLS.push({ id: `gs-p${PASTED.length}`, name: b.name, status: b.status === 'pending' ? 'pending' : 'approved', providerTemplateId: b.templateId, rcsCarrier: { templateId: b.templateId, kind: b.shape.kind, source: 'pasted', shape: b.shape } });
       return json({ success: true, data: TPLS[TPLS.length - 1] }, 201);
     }
     // the RCS account: Green Start's integration list and its SMSTAKE RCS connect
@@ -170,19 +170,23 @@ const hooks = (from) => GOT.slice(from).filter((g) => g.url.startsWith('/api/v1/
     const e1 = await Z.call('POST', '/api/rcs/templates/omni/pull', sTok);
     const sent = PASTED.slice(n0);
     const pa = sent.find((x) => x.templateId === 'ZZTLAPP1');
-    Z.check('E1 an APPROVED TeamLink template is added in Omni-Channel by its rcssms.in id (Green Start name rule, its blanks, Marketing when promotional); the waiting one is not',
+    const pw = sent.find((x) => x.templateId === 'ZZTLPEND');
+    Z.check('E1 TeamLink templates are added in Omni-Channel by their rcssms.in id (Green Start name rule, blanks, Marketing when promotional): approved as approved, the waiting one AS WAITING',
       e1.body.ok && pa && pa.name === 'zztest_rcsomni_job_alert' && pa.category === 'Marketing' && JSON.stringify(pa.shape) === JSON.stringify({ kind: 'basic', cards: [{ variables: ['var1', 'var2'], urlButtons: 0 }], dynamicImage: false })
-      && !sent.some((x) => x.templateId === 'ZZTLPEND') && e1.body.sentToOmni >= 1 && /added in Omni-Channel/.test(e1.body.words), [e1.body, sent]);
+      && !pa.status && pw && pw.status === 'pending' && pw.shape.kind === 'rich' && pw.shape.dynamicImage === true && pw.shape.cards[0].urlButtons === 1
+      && e1.body.sentToOmni >= 2 && /added in Omni-Channel/.test(e1.body.words), [e1.body, sent]);
     Z.check('E2 a template that came FROM Omni-Channel is never sent back', !PASTED.some((x) => /^ZZOMNI/.test(x.templateId)));
     const n1 = PASTED.length;
     const e3 = await Z.call('POST', '/api/rcs/templates/omni/pull', sTok);
     const appRows = await prisma.rcsTemplate.findMany({ where: { templateId: 'ZZTLAPP1' } });
     Z.check('E3 next run: not added twice; reading it back from Omni-Channel makes no second TeamLink row and keeps it as a TeamLink template',
       e3.body.ok && !PASTED.slice(n1).some((x) => x.templateId === 'ZZTLAPP1') && appRows.length === 1 && appRows[0].id === tlApp.id && JSON.parse(appRows[0].bodyJson).source === 'teamlink', [PASTED.slice(n1), appRows.length]);
-    // rcssms.in approves the waiting one: TeamLink's webhook applies it, then it goes to Omni-Channel by itself
+    // rcssms.in approves the waiting one: TeamLink applies it (and hands the same answer to Omni-Channel); nothing is added twice
+    const nBefore = PASTED.length;
     await Z.call('POST', `/api/webhooks/rcs?token=${HOOK}`, null, { templateid: 'ZZTLPEND', status: 'APPROVED' });
-    const went = await until(() => PASTED.find((x) => x.templateId === 'ZZTLPEND'), 10000);
-    Z.check('E4 approved through the webhook -> added in Omni-Channel by itself (rich: dynamic image, a link button)',
+    await until(async () => { const s = await prisma.appSetting.findUnique({ where: { key: 'rcs.omniSync' } }); return s && JSON.parse(s.value).why === 'approval'; }, 10000);
+    const went = PASTED.slice(nBefore).some((x) => x.templateId === 'ZZTLPEND') ? null : pw;
+    Z.check('E4 approved through the webhook: Approved in TeamLink, and NOT added to Omni-Channel a second time (it is there, waiting -> approved by the same answer)',
       went && (await prisma.rcsTemplate.findUnique({ where: { id: tlPend.id } })).status === 'APPROVED' && went.shape.kind === 'rich' && went.shape.dynamicImage === true && went.shape.cards[0].urlButtons === 1, went);
     // the RCS account: TeamLink's own rcssms.in login (server settings) into the Omni-Channel workspace
     await prisma.appSetting.deleteMany({ where: { key: 'omni.gs.integrationSync' } });
