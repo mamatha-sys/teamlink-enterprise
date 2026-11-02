@@ -6,20 +6,22 @@
 #   .\update-greenstart-on-vps.ps1 -Apply    does it: database backup, build next to live, a SHORT stop (switch + database changes),
 #                                            start, health check. If the health check fails it switches back to the old code by itself.
 #
-# What goes live: Green Start "release" d2f52bce (30 Oct, the owner's fully tested version) + SEO -> Keyword Research (live since 31 Oct)
-# + SEO -> Search Console phase 1 (2 Nov: stored history, daily + Sync now, comparisons, TeamLink keyword groups, CSV / Excel)
-# + Manage Templates -> RCS (2 Nov: Save draft, phone preview, Failed submission, Edit and submit again, SMSTAKE's reason) and
-#   Communication -> RCS listing the connected RCS account (it always said "No RCS accounts connected") (founder:
-#   "keyword research and rcs renduu live kii vellalii", "search console kuda live kii pampouu").
-# The archive: Desktop\TeamLink-GreenStart-VPS\green-start-update-20261102-kr-sc-rcs.tar.gz (code only: no .env, no packages, no data;
-# built from git branch claude/live-kr-sc-rcs = claude/search-console-on-live (the 31 Oct live code + the Search Console commits) + the
-# RCS template commit, tested on that base: API/web tsc, unit + screen tests, RCS and Keyword Research e2e on a throwaway database).
-# Earlier packages can still be passed with -Archive: green-start-update-20261102-search-console.tar.gz (without RCS), the 31 Oct one.
+# What goes live (2 Nov, second package): Green Start MAIN (0b7702b6: has Keyword Research merged, Site Audit, multiple social accounts)
+# + SEO -> Search Console phase 1 (stored history, daily + Sync now, comparisons, TeamLink keyword groups, CSV / Excel)
+# + Manage Templates -> RCS (Save draft, phone preview, Failed submission, Edit and submit again, SMSTAKE's reason) and
+#   Communication -> RCS listing the connected RCS account (founder: "keyword research and rcs renduu live kii vellalii",
+#   "search console kuda live kii pampouu").
+# Why main: the first dry run (2 Nov) STOPPED because live's database already has 20261030120000_multiple_social_accounts and
+# 20261031120000_seo_site_audit, which the "31 Oct live code" (d2f52bce + Keyword Research) does not have; GitHub main has both.
+# The archive: Desktop\TeamLink-GreenStart-VPS\green-start-update-20261102-main-kr-sc-rcs.tar.gz (code only: no .env, no packages, no
+# data; git branch claude/live-main-sc-rcs = main + the 2 RCS commits + the 3 Search Console commits of claude/search-console-full,
+# list conflicts with Keyword Research resolved by keeping both; tested: API/web tsc, unit + screen tests, e2e on a throwaway database).
+# Earlier packages can still be passed with -Archive (they stop on today's live: see above).
 # Kept as they are: gs-api/.env (secrets), green-start-web/.env.production, /opt/green-start/uploads, run/ (gate etc.), the database
-# (only NEW tables are added: on today's live only 20261102100000_gsc_history, 7 Search Console tables). The old code stays in /opt/green-start/.old-<time>.
+# (only NEW tables are added: the dry run lists them; expected 20261102100000_gsc_history, and 20261031140000_seo_keyword_research if live does not have it yet). The old code stays in /opt/green-start/.old-<time>.
 # TeamLink (pm2, port 4010) is not touched. Do not click inside this window while it runs.
 # ---------------------------------------------------------------------------
-param([switch]$Apply, [string]$Archive = (Join-Path $env:USERPROFILE 'Desktop\TeamLink-GreenStart-VPS\green-start-update-20261102-kr-sc-rcs.tar.gz'))
+param([switch]$Apply, [string]$Archive = (Join-Path $env:USERPROFILE 'Desktop\TeamLink-GreenStart-VPS\green-start-update-20261102-main-kr-sc-rcs.tar.gz'))
 $ErrorActionPreference = 'Stop'
 $VpsHost = 'root@72.61.233.104'
 if (-not (Test-Path $Archive)) { throw "The update archive is not here: $Archive" }
@@ -51,7 +53,7 @@ as_gs "cd '$NEW/gs-api' && nice -n 10 npm ci --no-audit --no-fund --loglevel=err
 as_gs "cd '$NEW/green-start-web' && nice -n 10 npm ci --no-audit --no-fund --loglevel=error && nice -n 10 npm run build" >> /root/gs-update-build-$T.log 2>&1 || { echo "WEB BUILD FAILED (log /root/gs-update-build-$T.log). Live was not touched."; tail -30 /root/gs-update-build-$T.log; exit 1; }
 [ -f "$NEW/gs-api/dist/main.js" ] && [ -f "$NEW/green-start-web/dist/index.html" ] || { echo "BUILD OUTPUT MISSING. Live was not touched."; exit 1; }
 say "build ok"
-say "database changes waiting (should be only what this package adds: 20261102100000_gsc_history):"
+say "database changes waiting (expected: 20261102100000_gsc_history, maybe 20261031140000_seo_keyword_research):"
 MS=$(as_gs "cd '$NEW/gs-api' && set -a && . ./.env && set +a && npx prisma migrate status" 2>&1 || true)
 echo "$MS" | grep -E "^20|following|up to date|not yet been applied|not found locally|have not been found" || true
 # GUARD (2026-10-31): live already shows Reviews / Site Audit, so it may run a NEWER Green Start than this package. If the live
