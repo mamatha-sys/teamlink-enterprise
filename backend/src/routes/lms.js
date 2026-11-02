@@ -671,6 +671,25 @@ router.get('/my/courses/:id', VIEW, async (req, res) => {
 // Issued only to somebody assigned to the course, or its author (preview).
 // The response carries the signed stream path and its expiry — never the
 // file's name on disk or any storage location.
+// OFFICE FILES OPEN AS PDF (founder 2026-11-02: "word, pdf anni document format upload cheyochu"). An upload is turned into a PDF at
+// once when the converter is on the server (utils/officeToPdf.js); one stored before it was there is turned into a PDF the first time
+// anybody opens it. A failed conversion keeps the Office file (the viewer says it is being prepared) and never stops the upload.
+async function toPdfSafe(stored) {
+  try { return await media.officeToPdf(stored); } catch (e) { console.error('[lms] office -> pdf:', e.message); return stored; } // eslint-disable-line no-console
+}
+const converting = new Map(); // materialId -> promise, so two viewers never convert the same file twice
+async function pdfNow(m) {
+  if (!require('../utils/officeToPdf').isOffice(m.mimeType)) return m; // eslint-disable-line global-require
+  if (!converting.has(m.id)) {
+    converting.set(m.id, (async () => {
+      const out = await toPdfSafe({ storedPath: m.storedPath, mimeType: m.mimeType, fileName: m.fileName, sizeBytes: m.sizeBytes });
+      if (out.storedPath === m.storedPath) return m;
+      return prisma.courseMaterial.update({ where: { id: m.id }, data: { storedPath: out.storedPath, mimeType: out.mimeType, sizeBytes: out.sizeBytes <= 2147483647 ? out.sizeBytes : null }, include: { course: true } });
+    })().finally(() => converting.delete(m.id)));
+  }
+  return converting.get(m.id);
+}
+
 router.post('/materials/:id/view-token', VIEW, async (req, res) => {
   const m = await prisma.courseMaterial.findUnique({ where: { id: req.params.id }, include: { course: true } });
   if (!m) return res.status(404).json({ error: 'Material not found' });
@@ -683,13 +702,14 @@ router.post('/materials/:id/view-token', VIEW, async (req, res) => {
     ? await prisma.courseAssignment.findUnique({ where: { courseId_employeeId: { courseId: m.courseId, employeeId: me.id } } })
     : null;
   if (a) await touch(a);
+  const shown = await pdfNow(m);
   const { token, expiresAt } = media.signMedia(m.id, req.user.id);
   return res.json({
     src: `/api/lms/media/${m.id}?t=${encodeURIComponent(token)}`,
     expiresAt,
     ttlSeconds: media.MEDIA_TTL_SECONDS,
-    kind: materialKind(m),
-    mimeType: m.mimeType,
+    kind: materialKind(shown),
+    mimeType: shown.mimeType,
   });
 });
 
@@ -1418,6 +1438,7 @@ router.post('/courses/:id/materials', MANAGE, EDIT_COURSE(byCourseParam), async 
       fields = req.query || {};
       stored = await media.receive(req, { filename, contentType: req.headers['content-type'] });
     }
+    stored = await toPdfSafe(stored);
   } catch (err) {
     // 413 for a file over its cap (the screen says "This video is bigger than
     // 300 MB."); the connection is closed so the rest of the body is not read.
@@ -1472,6 +1493,7 @@ router.post('/courses/:id/materials/upload-finish', MANAGE, EDIT_COURSE(byCourse
   const b = req.body || {};
   let stored;
   try { stored = media.chunkFinish(b.uploadId, req.user.id); } catch (err) { return pieceError(res, err); }
+  stored = { ...(await toPdfSafe(stored)), courseId: stored.courseId };
   if (stored.courseId !== course.id) { media.remove(stored.storedPath); return res.status(400).json({ error: 'This upload belongs to another course.' }); }
   const hold = holdsMaterial(req.user, course);
   const title = b.title ? String(b.title).slice(0, 200) : stored.fileName;

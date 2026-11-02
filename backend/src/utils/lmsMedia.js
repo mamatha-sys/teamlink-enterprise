@@ -42,10 +42,17 @@ const MULTIPART_MAX = 25 * 1024 * 1024; // the buffered form stays small
 
 const OOXML = 'application/vnd.openxmlformats-officedocument';
 // MIME -> extension. This map IS the LMS allow-list; anything absent is refused.
-// WORD / POWERPOINT / EXCEL ARE NOT TAKEN ANY MORE (founder 2026-11-02: "open document antey akkade open avali download avakudadhu"):
-// no browser can show them inside a page, so opening one always saved it to the learner's device. Save them as PDF and add the PDF.
+// WORD / POWERPOINT / EXCEL ARE TAKEN AND TURNED INTO PDF (founder 2026-11-02: "word, pdf anni document format upload cheyochu" +
+// "open document antey akkade open avali download avakudadhu"): no browser shows them inside a page, so officeToPdf() below stores a
+// PDF made by LibreOffice (utils/officeToPdf.js) and the learner sees it in the in-app viewer; the Office file itself is never served.
 const ALLOWED = {
   'application/pdf': 'pdf',
+  'application/msword': 'doc',
+  [`${OOXML}.wordprocessingml.document`]: 'docx',
+  'application/vnd.ms-powerpoint': 'ppt',
+  [`${OOXML}.presentationml.presentation`]: 'pptx',
+  'application/vnd.ms-excel': 'xls',
+  [`${OOXML}.spreadsheetml.sheet`]: 'xlsx',
   'text/plain': 'txt',
   'image/png': 'png',
   'image/jpeg': 'jpg',
@@ -63,7 +70,9 @@ const ALLOWED = {
 const BY_EXT = {
   pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
   webp: 'image/webp', mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', ogv: 'video/ogg',
-  mov: 'video/quicktime', txt: 'text/plain',
+  mov: 'video/quicktime', doc: 'application/msword', docx: `${OOXML}.wordprocessingml.document`,
+  ppt: 'application/vnd.ms-powerpoint', pptx: `${OOXML}.presentationml.presentation`,
+  xls: 'application/vnd.ms-excel', xlsx: `${OOXML}.spreadsheetml.sheet`, txt: 'text/plain',
 };
 // Other declared types a browser / OS really sends for these extensions.
 const ZIPPISH = ['application/zip', 'application/x-zip-compressed'];
@@ -423,6 +432,24 @@ function chunkFinish(uploadId, userId) {
   return { storedPath: u.stored, fileName: u.fileName, mimeType: u.mime, sizeBytes: u.size, courseId: u.courseId };
 }
 
+// An Office file just stored -> the PDF the viewer shows (same columns, mimeType application/pdf; the file name keeps the original
+// name so people recognise it). Without the converter the Office file is kept as it is and converted when first opened later.
+async function officeToPdf(stored) {
+  const O = require('./officeToPdf'); // eslint-disable-line global-require
+  if (!stored || !O.isOffice(stored.mimeType) || !O.available()) return stored;
+  const full = resolve(stored.storedPath);
+  if (!full) return stored;
+  const ext = ALLOWED[stored.mimeType];
+  const out = await O.convert(full, ext);
+  try {
+    const name = newName('pdf');
+    fs.copyFileSync(out.pdf, path.join(attachments.uploadDir(), name));
+    const size = fs.statSync(path.join(attachments.uploadDir(), name)).size;
+    remove(stored.storedPath);
+    return { ...stored, storedPath: name, mimeType: 'application/pdf', sizeBytes: size };
+  } finally { out.cleanup(); }
+}
+
 const MB = 1024 * 1024;
 const GB_TEXT = (n) => (n >= 1024 * MB ? `${Math.round(n / (1024 * MB))} GB` : `${Math.round(n / MB)} MB`);
 const MESSAGE = {
@@ -434,7 +461,7 @@ const MESSAGE = {
   WRONG_OFFSET: 'A piece of the upload came out of order. It will be sent again.',
   UPLOAD_SHORT: 'Not every piece of the file arrived. Add the file again.',
   TOO_LARGE_DOC: `This document is bigger than ${DOC_MAX / MB} MB. Make it smaller (for example, save it as PDF) and try again.`,
-  BAD_TYPE: 'This kind of file can\'t be added. Videos: MP4, WebM or MOV. Documents: PDF, text or a picture (PNG, JPG). A Word, PowerPoint or Excel file would download instead of opening: save it as PDF first (File > Save As > PDF) and add the PDF.',
+  BAD_TYPE: 'This kind of file can\'t be added. Videos: MP4, WebM or MOV. Documents: PDF, Word, PowerPoint, Excel, text or a picture (PNG, JPG).',
   CONTENT_MISMATCH: 'This file doesn\'t match its name — it may be damaged or renamed. Open it, save it again, and upload that copy.',
   NOT_MULTIPART: 'Upload the file as a multipart/form-data request.',
 };
@@ -443,6 +470,6 @@ const STATUS = { TOO_LARGE: 413, TOO_LARGE_VIDEO: 413, TOO_LARGE_DOC: 413, TOO_L
 
 module.exports = {
   MAX_BYTES, VIDEO_MAX, DOC_MAX, MULTIPART_MAX, ALLOWED, MESSAGE, STATUS,
-  mimeFor, kindForMime, receive, storeBuffer, resolve, remove, stream, chunkStart, chunkAppend, chunkFinish, CHUNK_SIZE,
+  mimeFor, kindForMime, receive, storeBuffer, resolve, remove, stream, chunkStart, chunkAppend, chunkFinish, CHUNK_SIZE, officeToPdf,
   MEDIA_TTL_SECONDS, signMedia, verifyMedia,
 };

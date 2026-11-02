@@ -49,18 +49,19 @@ function useBlockSaveKeys() {
 // Fetches a signed stream URL for one material; refresh() gets a new one.
 function useViewSrc(materialId) {
   const [src, setSrc] = useState(null);
+  const [mime, setMime] = useState(null); // the type the server will send now (an Office file may have just become a PDF)
   const [error, setError] = useState('');
   const [nonce, setNonce] = useState(0);
   useEffect(() => {
     let live = true;
     setError('');
     api.post(`/lms/materials/${materialId}/view-token`)
-      .then((res) => { if (live) setSrc(res.data.src); })
+      .then((res) => { if (live) { setMime(res.data.mimeType || null); setSrc(res.data.src); } })
       .catch((err) => { if (live) setError(err.response?.data?.error || 'Could not open this material.'); });
     return () => { live = false; };
   }, [materialId, nonce]);
   const refresh = useCallback(() => setNonce((n) => n + 1), []);
-  return { src, error, refresh };
+  return { src, mime, error, refresh };
 }
 
 // THE VIDEO PLAYER, with watch tracking when `track` is on.
@@ -344,9 +345,8 @@ function TextViewer({ src }) {
   return <pre className="lms-text">{state.text}</pre>;
 }
 
-// Word / PowerPoint / Excel added before 2026-11-02: no browser can show these inside a page, and opening one saved it to the
-// device. Nothing is downloaded any more (founder 2026-11-02: "open document antey akkade open avali download avakudadhu"): the
-// screen says it must be added again as a PDF. New uploads of these types are refused.
+// Word / PowerPoint / Excel: the server turns them into a PDF (utils/officeToPdf.js) and the PDF opens in the viewer below. This note
+// shows only while that has not happened yet (no converter on the server). Nothing is ever downloaded (founder 2026-11-02).
 const OFFICE_NAME = {
   'application/msword': 'Word', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word',
   'application/vnd.ms-powerpoint': 'PowerPoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PowerPoint',
@@ -359,7 +359,7 @@ function OfficeFile({ material }) {
       <div className="lms-office-icon" aria-hidden="true">📄</div>
       <div>
         <b>{material.fileName || material.title}</b>
-        <div className="small-muted">This is a {app} file, which can&apos;t open inside the app. Ask HR or your TL to add it again as a PDF — then it opens right here.</div>
+        <div className="small-muted">This {app} file is being prepared to open here. Open it again in a little while. If it stays like this, the document converter is not on the server yet — tell the admin.</div>
       </div>
     </div>
   );
@@ -369,13 +369,14 @@ function OfficeFile({ material }) {
 // undraggable; text is drawn as text. `onPages` hears ({ pageCount,
 // pagesViewed }) for a PDF.
 export function SecureDocument({ material, onPages }) {
-  const { src, error } = useViewSrc(material.id);
+  const { src, mime: liveMime, error } = useViewSrc(material.id);
   useBlockSaveKeys();
   if (error) return <div className="error-text">{error}</div>;
-  if (!src) return <div className="small-muted">Loading document…</div>;
-  if (OFFICE_NAME[material.mimeType]) return <OfficeFile material={material} />;
-  const isPdf = material.mimeType === 'application/pdf';
-  const isText = material.mimeType === 'text/plain';
+  if (!src) return <div className="small-muted">Opening the document…</div>;
+  const mime = liveMime || material.mimeType;
+  if (OFFICE_NAME[mime]) return <OfficeFile material={{ ...material, mimeType: mime }} />;
+  const isPdf = mime === 'application/pdf';
+  const isText = mime === 'text/plain';
   return (
     <div
       className="lms-secure lms-doc"

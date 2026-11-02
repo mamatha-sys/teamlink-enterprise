@@ -907,7 +907,7 @@ export default function CourseManage({ courseId, onBack }) {
           </label>
           {note && <div className="small-muted" style={{ marginTop: 6, color: '#15803d' }}>{note}</div>}
           <div className="small-muted" style={{ marginTop: 6 }}>
-            PDFs, pictures, text and videos open inside the app only (view-only, never downloaded). Word, PowerPoint and Excel files are not taken — save them as PDF first.
+            PDFs, Word, PowerPoint, Excel, pictures, text and videos open inside the app only (view-only, never downloaded). Word, PowerPoint and Excel are shown as PDF.
           </div>
         </PanelPad>
 
