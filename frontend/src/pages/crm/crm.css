@@ -125,3 +125,13 @@
 .crm-ask-msg.err{background:var(--red-tint);color:var(--red)}
 .crm-ask-foot{display:flex;gap:6px;padding:10px 12px;border-top:1px solid var(--line)}
 .crm-support-line{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:14px;padding:10px 12px;border-radius:10px;background:var(--line-soft);color:var(--ink);text-decoration:none;font-size:13px}
+
+/* everything opens in place (2026-11-02): record names and rows are buttons that open the record on this page */
+.crm-reclink{background:none;border:none;padding:0;font:inherit;color:var(--crm-blue,#2f6fed);cursor:pointer;text-align:left}
+.crm-reclink:hover{text-decoration:underline}
+button.crm-deal-row{width:100%;background:none;border:none;border-bottom:1px solid var(--line-soft);font:inherit;text-align:left;cursor:pointer}
+button.crm-deal-row:hover{text-decoration:none;background:var(--line-soft)}
+button.crm-deal-row .n{color:var(--ink)}
+button.crm-flow-step{font:inherit;cursor:pointer;width:100%}
+button.crm-support-line{width:100%;border:none;font:inherit;text-align:left;cursor:pointer}
+button.crm-support-line:hover{background:color-mix(in srgb,var(--crm-blue,#2f6fed) 8%,var(--line-soft))}

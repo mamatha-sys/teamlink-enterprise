@@ -4,12 +4,12 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../../api';
-import { useCrm, errOf, money, moneyShort, dateOf, istToday, RecordForm, RecordPanel, useOpenParam, useMoveDeal, staleDays, download } from './crmShared.jsx';
+import { useCrm, errOf, money, moneyShort, dateOf, istToday, RecordForm, useMoveDeal, staleDays, download } from './crmShared.jsx';
 
 export default function CrmDeals() {
-  const { me, toast } = useCrm();
+  const { me, toast, openRecord, version } = useCrm();
   const [sp, setSp] = useSearchParams();
-  const [open, setOpen] = useOpenParam(sp, setSp);
+  const setOpen = (o) => openRecord(o.kind, o.id);
   const [adding, setAdding] = useState(sp.get('add') === '1');
   const [rows, setRows] = useState(null);
   const [err, setErr] = useState('');
@@ -20,7 +20,7 @@ export default function CrmDeals() {
   const [over, setOver] = useState(null);
   const load = () => api.get('/crm/deals', { params: { q: q || undefined, owner: owner || undefined } })
     .then((r) => { setRows(r.data.rows); setErr(''); }).catch((e) => setErr(errOf(e, 'The deals could not be read.')));
-  useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [q, owner]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [q, owner, version]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (sp.get('add') === '1') { const n = new URLSearchParams(sp); n.delete('add'); setSp(n, { replace: true }); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const { move, dialog } = useMoveDeal(() => load());
   const today = istToday();
@@ -115,7 +115,6 @@ export default function CrmDeals() {
         </div>
       )}
       {adding && <RecordForm kind="deal" preset={{ feePercent: '8.33' }} onClose={() => setAdding(false)} onSaved={(row) => { setAdding(false); load(); setOpen({ kind: 'deal', id: row.id }); }} />}
-      {open && <RecordPanel kind={open.kind} id={open.id} onClose={() => setOpen(null)} onChanged={load} />}
       {dialog}
     </div>
   );

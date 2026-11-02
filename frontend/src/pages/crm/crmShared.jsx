@@ -7,9 +7,10 @@
 // Everything is read from and written to /api/crm (backend/src/crm/service.js holds the rules).
 // ---------------------------------------------------------------------------
 import { createContext, useContext, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
 import api from '../../api';
 import Modal from '../../components/Modal.jsx';
+import AddClientWizard from '../../components/clients/AddClientWizard.jsx';
+import { useAuth } from '../../context/AuthContext.jsx';
 import { TicketList } from './CrmSupport.jsx'; // eslint-disable-line import/no-cycle
 
 export const CrmCtx = createContext(null);
@@ -38,6 +39,70 @@ export function staleDays(deal, lastActivity, limit) {
 export const ACT_ICON = { call: '📞', meeting: '🤝', email: '✉️', whatsapp: '💬', note: '📝' };
 export const KIND_PATH = { lead: 'leads', deal: 'deals', account: 'accounts', contact: 'accounts' };
 export const recordLink = (kind, id) => `/crm/${KIND_PATH[kind] || 'dashboard'}?open=${kind}:${id}`;
+// EVERYTHING OPENS IN PLACE (founder 2026-11-02: "ey module lo vundi click chesthey, akkade display avvali, vere modules loki
+// vellakudadhu"): a record named anywhere in the CRM opens as a panel on top of the page you are on (CrmPage keeps the stack),
+// never by going to another page or module.
+export function RecLink({ kind, id, children, className, style, title }) {
+  const { openRecord } = useCrm();
+  return (
+    <button type="button" className={`crm-reclink${className ? ` ${className}` : ''}`} style={style} title={title} onClick={(e) => { e.stopPropagation(); openRecord(kind, id); }}>
+      {children}
+    </button>
+  );
+}
+
+// The TeamLink client behind a won deal, shown here (no trip to ATS > Clients)
+export function ClientSummary({ id, onClose }) {
+  const [c, setC] = useState(null);
+  const [err, setErr] = useState('');
+  useEffect(() => { api.get(`/clients/${id}`).then((r) => setC(r.data.client || r.data)).catch((e) => setErr(errOf(e, 'This client could not be read.'))); }, [id]);
+  const rows = c ? [
+    ['Client', c.name], ['Status', c.status], ['Agreement', c.agreementStatus], ['Type', c.clientType], ['Industry', c.industry], ['Location', c.location],
+    ['Owner (BDE)', c.bdeOwner], ['Contact', [c.contactName, c.contactDesignation].filter(Boolean).join(' · ')], ['Phone', c.contactPhone], ['Email', c.contactEmail],
+    ['Fee', c.agreementFeePercent != null ? `${c.agreementFeePercent}%` : null], ['Added', c.createdAt ? dateOf(c.createdAt) : null],
+  ].filter(([, v]) => v) : [];
+  return (
+    <Modal title="TeamLink client" onClose={onClose}>
+      {err && <div className="notice" role="alert">{err}</div>}
+      {!c && !err && <div className="small-muted">Loading…</div>}
+      {c && (
+        <div className="crm-rec-info" style={{ gridTemplateColumns: '1fr', borderTop: 'none' }}>
+          {rows.map(([k, v]) => <div key={k}><span className="k">{k}</span><span>{v}</span></div>)}
+          <div className="small-muted" style={{ fontSize: 12 }}>Requirements, candidates and the agreement for this client are worked in ATS.</div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// "Add as client" for a won deal: the ATS Add client form, opened right here with the deal's details; once saved, the deal and
+// its account are linked to the new client.
+function AddClientHere({ deal, account, contact, onClose, onDone }) {
+  const { user } = useAuth();
+  const { toast } = useCrm();
+  const [meta, setMeta] = useState(undefined);
+  useEffect(() => { api.get('/clients/meta').then((r) => setMeta(r.data)).catch(() => setMeta(null)); }, []);
+  if (meta === undefined) return null;
+  const acc = account || {}; const ct = contact || {};
+  const initial = {};
+  [['name', acc.name], ['industry', acc.industry], ['location', acc.city], ['website', acc.website], ['contactName', ct.name], ['contactDesignation', ct.designation], ['contactPhone', ct.phone || acc.phone], ['contactEmail', ct.email || acc.email]]
+    .forEach(([k, v]) => { if (v) initial[k] = String(v).replace(/^Sample · /, ''); });
+  if (initial.contactPhone) initial.contactWhatsApp = initial.contactPhone;
+  return (
+    <AddClientWizard
+      user={user}
+      meta={meta}
+      initial={initial}
+      onClose={onClose}
+      onSaved={(created, warning) => {
+        if (!created || !created.id) { onClose(); return; }
+        api.post(`/crm/deals/${deal.id}/client`, { clientId: created.id })
+          .then(() => { toast(warning || `${created.name} added as a TeamLink client and linked to this deal.`); onDone(); })
+          .catch(() => { toast(`${created.name} added. Linking it to the deal did not work - try "Add as client" again.`); onDone(); });
+      }}
+    />
+  );
+}
 const STATUS_CLASS = { Draft: 'review', Sent: 'pending', Accepted: 'joined', Declined: 'rejected', Hot: 'overdue', Warm: 'pending', Cold: 'new', New: 'new', Contacted: 'pending', Qualified: 'active', Junk: 'rejected', Converted: 'joined', Won: 'joined', Lost: 'rejected', Prospect: 'new', Client: 'active' };
 // a file from the API (CSV, PDF) with the login's token: opened (PDF) or saved (CSV)
 export async function download(url, name, { open } = {}) {
@@ -285,7 +350,7 @@ export function TaskList({ tasks, link, onChanged, showRecord, canEdit = true })
               <div style={{ fontSize: 13, textDecoration: t.status === 'Done' ? 'line-through' : undefined }}>{t.title}</div>
               <div className="small-muted" style={{ fontSize: 11.5 }}>
                 <span style={{ color: late ? 'var(--red)' : undefined, fontWeight: late ? 600 : undefined }}>{t.dueDate === today ? 'Today' : dateOf(t.dueDate)}{t.dueTime ? ` ${t.dueTime}` : ''}{late ? ' · late' : ''}</span>
-                {showRecord && t.recordName && <> · <Link to={recordLink(t.recordKind, t.recordId)}>{t.recordName}</Link></>}
+                {showRecord && t.recordName && <> · <RecLink kind={t.recordKind} id={t.recordId}>{t.recordName}</RecLink></>}
                 {t.ownerName && showRecord ? ` · ${t.ownerName}` : ''}
               </div>
             </div>
@@ -534,8 +599,9 @@ export function AskAi() {
 
 // ---- one record ---------------------------------------------------------------------------------------------
 export function RecordPanel({ kind, id, onClose, onChanged }) {
-  const { me, toast } = useCrm();
-  const navigate = useNavigate();
+  const { me, toast, openRecord } = useCrm();
+  const [addingClient, setAddingClient] = useState(false);
+  const [showClient, setShowClient] = useState(null);
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
   const [editing, setEditing] = useState(null); // { kind, row, preset }
@@ -558,11 +624,7 @@ export function RecordPanel({ kind, id, onClose, onChanged }) {
     try { await api.put(`/crm/${kind}s/${row.id}`, { notes }); toast('Notes saved.'); setNotes(null); changed(); } catch (e) { toast(errOf(e, 'The notes could not be saved.')); }
   }
 
-  function addAsClient() {
-    const acc = d.account || {}; const ct = d.contact || (d.contacts || [])[0] || {};
-    const q = new URLSearchParams({ add: '1', crmDeal: row.id, name: acc.name || '', industry: acc.industry || '', location: acc.city || '', website: acc.website || '', contactName: ct.name || '', contactDesignation: ct.designation || '', contactPhone: ct.phone || acc.phone || '', contactEmail: ct.email || acc.email || '' });
-    navigate(`/clients?${q.toString()}`);
-  }
+  const addAsClient = () => setAddingClient(true); // the ATS Add client form, here (AddClientHere)
 
   let body = null;
   if (err) body = <div className="notice" role="alert">{err}</div>;
@@ -583,9 +645,9 @@ export function RecordPanel({ kind, id, onClose, onChanged }) {
     const about = kind === 'lead'
       ? [['Lead source', row.source], ['Industry', row.industry], ['Rating', row.rating && <Pill v={row.rating} />]]
       : kind === 'deal'
-        ? [['Account', d.account ? <Link to={recordLink('account', d.account.id)}>{d.account.name}</Link> : '—'], ['Deal value', <b>{money(row.value)}</b>], ['Probability', `${row.probability}%`],
+        ? [['Account', d.account ? <RecLink kind="account" id={d.account.id}>{d.account.name}</RecLink> : '—'], ['Deal value', <b>{money(row.value)}</b>], ['Probability', `${row.probability}%`],
           ['Openings × CTC × fee', row.openings ? `${row.openings} × ${money(row.avgCtc)} × ${row.feePercent || 0}%` : ''], ['Expected close', dateOf(row.expectedClose)], ['Next step', row.nextStep], ...(row.stage === 'Lost' ? [['Lost because', row.lostReason]] : [])]
-        : [['Industry', row.industry], ['Website', row.website], ['Source', row.source], ...(d.client ? [['TeamLink client', <Link to={`/clients/${d.client.id}`}>{d.client.name} ↗</Link>]] : [])];
+        : [['Industry', row.industry], ['Website', row.website], ['Source', row.source], ...(d.client ? [['TeamLink client', <button type="button" className="crm-reclink" onClick={() => setShowClient(d.client.id)}>{d.client.name}</button>]] : [])];
     const info = [
       ...about,
       ['Next follow-up', nextTask ? <span style={{ color: nextTask.dueDate < today ? 'var(--red)' : undefined, fontWeight: nextTask.dueDate <= today ? 600 : undefined }}>{nextTask.dueDate === today ? 'Today' : dateOf(nextTask.dueDate)} · {nextTask.title}</span> : 'None set'],
@@ -617,9 +679,9 @@ export function RecordPanel({ kind, id, onClose, onChanged }) {
             <QuickContact phone={contactLine && contactLine.phone ? contactLine.phone : row.phone} email={contactLine && contactLine.email ? contactLine.email : row.email} />
             {d.canEdit && <button type="button" className="btn btn-sm" onClick={() => setEditing({ kind, row })}>Edit</button>}
             {d.canEdit && kind === 'lead' && row.status !== 'Converted' && <button type="button" className="btn btn-primary btn-sm" onClick={() => setConverting(true)}>Convert to deal</button>}
-            {kind === 'lead' && row.status === 'Converted' && row.dealId && <Link className="btn btn-sm" to={recordLink('deal', row.dealId)}>Open the deal</Link>}
+            {kind === 'lead' && row.status === 'Converted' && row.dealId && <button type="button" className="btn btn-sm" onClick={() => openRecord('deal', row.dealId)}>Open the deal</button>}
             {d.canEdit && kind === 'deal' && row.stage === 'Won' && !row.clientId && <button type="button" className="btn btn-primary btn-sm" onClick={addAsClient}>Add as client</button>}
-            {kind === 'deal' && row.clientId && <Link className="btn btn-sm" to={`/clients/${row.clientId}`}>Open the client ↗</Link>}
+            {kind === 'deal' && row.clientId && <button type="button" className="btn btn-sm" onClick={() => setShowClient(row.clientId)}>TeamLink client</button>}
             {d.canEdit && kind === 'account' && <button type="button" className="btn btn-sm" onClick={() => setEditing({ kind: 'contact', preset: { accountId: row.id } })}>+ Contact</button>}
             {d.canEdit && kind === 'account' && <button type="button" className="btn btn-primary btn-sm" onClick={() => setEditing({ kind: 'deal', preset: { accountId: row.id, title: `${row.name} - hiring`, feePercent: '8.33' } })}>+ Deal</button>}
           </div>
@@ -663,7 +725,7 @@ export function RecordPanel({ kind, id, onClose, onChanged }) {
                   {!d.deals.length && <div className="small-muted">No deals yet.</div>}
                   {d.deals.map((x) => (
                     <div key={x.id} style={{ padding: '5px 0', borderBottom: '1px solid var(--line-soft)', fontSize: 13 }}>
-                      <Link to={recordLink('deal', x.id)}>{x.title}</Link> <span className="small-muted">· {x.stage} · {moneyShort(x.value)}</span>
+                      <RecLink kind="deal" id={x.id}>{x.title}</RecLink> <span className="small-muted">· {x.stage} · {moneyShort(x.value)}</span>
                     </div>
                   ))}
                 </div>
@@ -717,7 +779,9 @@ export function RecordPanel({ kind, id, onClose, onChanged }) {
     <>
       <Modal title={kind === 'lead' ? 'Lead record' : kind === 'deal' ? 'Deal record' : 'Customer record'} size="xwide" onClose={onClose}>{body}</Modal>
       {editing && <RecordForm kind={editing.kind} row={editing.row} preset={editing.preset} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); changed(); }} />}
-      {converting && row && <ConvertLead lead={row} onClose={() => setConverting(false)} onDone={(out) => { setConverting(false); changed(); if (out.deal) navigate(recordLink('deal', out.deal.id)); }} />}
+      {converting && row && <ConvertLead lead={row} onClose={() => setConverting(false)} onDone={(out) => { setConverting(false); changed(); if (out.deal) openRecord('deal', out.deal.id); }} />}
+      {addingClient && row && <AddClientHere deal={row} account={d.account} contact={d.contact || (d.contacts || [])[0]} onClose={() => setAddingClient(false)} onDone={() => { setAddingClient(false); changed(); }} />}
+      {showClient && <ClientSummary id={showClient} onClose={() => setShowClient(null)} />}
       {dialog}
     </>
   );

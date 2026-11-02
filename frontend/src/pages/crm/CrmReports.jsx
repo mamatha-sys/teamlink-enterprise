@@ -5,10 +5,9 @@
 //                   this month's leads, and the deals going cold (nothing logged for N days)
 //   CrmSettings     lead sources, lost reasons, the probability of each stage, the "going cold" days, proposal validity
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import api from '../../api';
 import Modal from '../../components/Modal.jsx';
-import { useCrm, errOf, money, moneyShort, dateOf, recordLink, istToday } from './crmShared.jsx';
+import { useCrm, errOf, money, moneyShort, dateOf, RecLink, istToday } from './crmShared.jsx';
 
 const monthLabel = (ym) => new Date(`${ym}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 const shift = (ym, n) => { const [y, m] = ym.split('-').map(Number); const d = new Date(Date.UTC(y, m - 1 + n, 1)); return d.toISOString().slice(0, 7); };
@@ -154,7 +153,7 @@ export function ForecastFunnel() {
         {d.stale.map((x) => (
           <div key={x.id} style={{ display: 'flex', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--line-soft)', fontSize: 13 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <Link to={recordLink('deal', x.id)}>{x.title}</Link>
+              <RecLink kind="deal" id={x.id}>{x.title}</RecLink>
               <div className="small-muted" style={{ fontSize: 11.5 }}>{[x.accountName, x.stage, me.seesAll ? x.ownerName : null].filter(Boolean).join(' · ')}</div>
             </div>
             <div style={{ textAlign: 'right' }}>

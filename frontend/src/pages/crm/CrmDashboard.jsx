@@ -7,10 +7,66 @@
 // A salesperson sees their own; a sales manager / Admin / Manager see the whole team, or "Only mine". Period: this month,
 // last month, this quarter, this year.
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import api from '../../api';
-import { useCrm, errOf, money, moneyShort, dateOf, dateTimeOf, TaskList, recordLink, ACT_ICON, RecordPanel, useOpenParam, download, istToday } from './crmShared.jsx';
+import Modal from '../../components/Modal.jsx';
+import { useCrm, errOf, money, moneyShort, dateOf, dateTimeOf, TaskList, ACT_ICON, RecLink, RecordForm, Pill, download, istToday } from './crmShared.jsx';
 import { TeamTargets, ForecastFunnel, CrmSettings } from './CrmReports.jsx';
+import { TicketList } from './CrmSupport.jsx';
+
+// EVERYTHING OPENS HERE (founder 2026-11-02: "ey buttons meedha click chesina, cards meedha click chesina, akkade display
+// avvali, vere modules loki vellakudadhu"): a card, a flow step or "View all" opens its list in a window on this page, and a
+// row opens the record on top (CrmPage's stack). Nothing on the dashboard goes to another page.
+// what: { title, source: leads | deals | accounts | tasks | tickets, params, keep(row) }
+function ListWindow({ what, onClose }) {
+  const { version } = useCrm();
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    if (what.source === 'tickets') return;
+    const get = what.source === 'tasks'
+      ? Promise.all(['overdue', 'today'].map((w) => api.get('/crm/tasks', { params: { when: w } }).then((r) => r.data.tasks))).then((a) => a.flat())
+      : api.get(`/crm/${what.source}`, { params: what.params || {} }).then((r) => r.data.rows);
+    get.then((r) => setRows(what.keep ? r.filter(what.keep) : r)).catch(() => setRows([]));
+  }, [what, version]);
+  const today = istToday();
+  return (
+    <Modal title={what.title} size="xwide" onClose={onClose} note={rows ? `${rows.length}` : ''}>
+      {what.source === 'tickets' && <TicketList />}
+      {what.source !== 'tickets' && !rows && <div className="small-muted">Loading…</div>}
+      {rows && !rows.length && <div className="empty"><h3>Nothing here</h3>No {what.source} match.</div>}
+      {rows && rows.length > 0 && (
+        <div className="tbl-wrap">
+          <table>
+            {what.source === 'leads' && (
+              <>
+                <thead><tr><th>Company</th><th>Contact</th><th>Source</th><th>Rating</th><th>Status</th><th>Owner</th></tr></thead>
+                <tbody>{rows.map((l) => <tr key={l.id}><td><RecLink kind="lead" id={l.id}><b>{l.company}</b></RecLink><div className="small-muted" style={{ fontSize: 11.5 }}>{[l.industry, l.city].filter(Boolean).join(' · ')}</div></td><td>{l.contactName || '—'}</td><td>{l.source || '—'}</td><td><Pill v={l.rating} /></td><td><Pill v={l.status} /></td><td>{l.ownerName || '—'}</td></tr>)}</tbody>
+              </>
+            )}
+            {what.source === 'deals' && (
+              <>
+                <thead><tr><th>Deal</th><th>Account</th><th>Stage</th><th style={{ textAlign: 'right' }}>Value</th><th>Close</th><th>Owner</th></tr></thead>
+                <tbody>{rows.map((x) => <tr key={x.id}><td><RecLink kind="deal" id={x.id}><b>{x.title}</b></RecLink></td><td>{x.accountName || '—'}</td><td><Pill v={x.stage} /></td><td style={{ textAlign: 'right' }}>{money(x.value)}</td><td style={{ color: x.expectedClose && x.expectedClose < today && !['Won', 'Lost'].includes(x.stage) ? 'var(--red)' : undefined }}>{x.expectedClose ? dateOf(x.expectedClose) : '—'}</td><td>{x.ownerName || '—'}</td></tr>)}</tbody>
+              </>
+            )}
+            {what.source === 'accounts' && (
+              <>
+                <thead><tr><th>Company</th><th>Type</th><th>Contacts</th><th>Open deals</th><th>Owner</th></tr></thead>
+                <tbody>{rows.map((a) => <tr key={a.id}><td><RecLink kind="account" id={a.id}><b>{a.name}</b></RecLink><div className="small-muted" style={{ fontSize: 11.5 }}>{[a.industry, a.city].filter(Boolean).join(' · ')}</div></td><td><Pill v={a.kind} /></td><td>{a.contacts}</td><td>{a.openDeals ? `${a.openDeals} · ${moneyShort(a.openValue)}` : '—'}</td><td>{a.ownerName || '—'}</td></tr>)}</tbody>
+              </>
+            )}
+            {what.source === 'tasks' && (
+              <>
+                <thead><tr><th>Follow-up</th><th>On</th><th>Due</th><th>Owner</th></tr></thead>
+                <tbody>{rows.map((t) => <tr key={t.id}><td>{t.title}</td><td>{t.recordName ? <RecLink kind={t.recordKind} id={t.recordId}>{t.recordName}</RecLink> : '—'}</td><td style={{ color: t.dueDate < today ? 'var(--red)' : undefined, fontWeight: 600 }}>{t.dueDate === today ? 'Today' : `${dateOf(t.dueDate)} · late`}{t.dueTime ? ` ${t.dueTime}` : ''}</td><td>{t.ownerName || '—'}</td></tr>)}</tbody>
+              </>
+            )}
+          </table>
+        </div>
+      )}
+    </Modal>
+  );
+}
 
 // small line icons for the cards and lists (currentColor)
 const I = {
@@ -29,10 +85,9 @@ function Delta({ v }) {
   return <span className={`crm-delta${v < 0 ? ' down' : ''}`}>{v >= 0 ? '↑' : '↓'} {Math.abs(v)}%</span>;
 }
 
-function Kpi({ icon, color, label, value, children, to }) {
-  const navigate = useNavigate();
+function Kpi({ icon, color, label, value, children, onOpen }) {
   return (
-    <div className="crm-kpi" role={to ? 'link' : undefined} tabIndex={to ? 0 : undefined} onClick={to ? () => navigate(to) : undefined} onKeyDown={to ? (e) => { if (e.key === 'Enter') navigate(to); } : undefined}>
+    <div className="crm-kpi" role={onOpen ? 'button' : undefined} tabIndex={onOpen ? 0 : undefined} onClick={onOpen} onKeyDown={onOpen ? (e) => { if (e.key === 'Enter') onOpen(); } : undefined}>
       <div className="ic" style={{ background: color }}><Icon name={icon} /></div>
       <div style={{ minWidth: 0, flex: 1 }}>
         <div className="l">{label}</div>
@@ -59,10 +114,9 @@ function Bars({ rows, value, label = (r) => r.name, right }) {
   );
 }
 
-const Head = ({ title, to, onClick, link = 'View all' }) => (
+const Head = ({ title, onClick, link = 'View all' }) => (
   <div className="crm-card-head">
     <h3>{title}</h3>
-    {to && <Link to={to}>{link} →</Link>}
     {onClick && <button type="button" className="crm-linkbtn" onClick={onClick}>{link} →</button>}
   </div>
 );
@@ -70,7 +124,8 @@ const Head = ({ title, to, onClick, link = 'View all' }) => (
 const FUNNEL_COLORS = ['var(--crm-blue)', 'var(--crm-green)', 'var(--crm-orange)', 'var(--crm-violet)', 'var(--crm-navy)'];
 
 function Overview({ mine, period, onTab }) {
-  const { me } = useCrm();
+  const { me, version } = useCrm();
+  const [win, setWin] = useState(null); // the list window open on this page
   const [o, setO] = useState(null);
   const [d, setD] = useState(null);
   const [sup, setSup] = useState(null);
@@ -81,7 +136,23 @@ function Overview({ mine, period, onTab }) {
     api.get('/crm/overview', { params: { ...params, period } }).then((r) => { setO(r.data); setErr(''); }).catch((e) => setErr(errOf(e, 'The dashboard could not be read.')));
     api.get('/crm/dashboard', { params }).then((r) => setD(r.data)).catch(() => {});
   };
-  useEffect(() => { load(); }, [mine, period]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [mine, period, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  const own = mine ? { owner: me.userId } : {};
+  const W = {
+    leads: { title: 'Leads (newest first)', source: 'leads', params: { status: 'all', ...own } },
+    customers: { title: 'Customers (TeamLink clients)', source: 'accounts', params: { kind: 'Client', ...own } },
+    won: { title: 'Won deals', source: 'deals', params: own, keep: (x) => x.stage === 'Won' },
+    open: { title: 'Open deals', source: 'deals', params: own, keep: (x) => !['Won', 'Lost'].includes(x.stage) },
+    deals: { title: 'All deals (closed: last 90 days)', source: 'deals', params: own },
+    tasks: { title: 'Follow-ups due (late and today)', source: 'tasks' },
+    tickets: { title: 'Customer support tickets', source: 'tickets' },
+    flow_leads: { title: 'Lead generation: new and contacted leads', source: 'leads', params: own, keep: (l) => ['New', 'Contacted'].includes(l.status) },
+    flow_qualified: { title: 'Qualified leads', source: 'leads', params: { status: 'Qualified', ...own } },
+    flow_convert: { title: 'Converted leads', source: 'leads', params: { status: 'Converted', ...own } },
+    flow_pipeline: { title: 'Sales pipeline: open deals', source: 'deals', params: own, keep: (x) => !['Won', 'Lost'].includes(x.stage) },
+    flow_customer: { title: 'Customers (won accounts)', source: 'accounts', params: { kind: 'Client', ...own } },
+    sources: { title: 'Open leads', source: 'leads', params: own },
+  };
   if (err) return <div className="notice" role="alert">{err}</div>;
   if (!o) return <div className="small-muted">Loading…</div>;
   const c = o.cards;
@@ -90,10 +161,10 @@ function Overview({ mine, period, onTab }) {
   return (
     <>
       <div className="crm-kpis">
-        <Kpi icon="users" color="var(--crm-blue)" label="Total leads" value={c.leads.value.toLocaleString('en-IN')} to="/crm/leads"><Delta v={c.leads.delta} /> <span className="crm-sub">{c.leads.open} open</span></Kpi>
-        <Kpi icon="hand" color="var(--crm-green)" label="Total customers" value={c.customers.value.toLocaleString('en-IN')} to="/crm/accounts"><span className="crm-sub">+{c.customers.newInPeriod} won {o.periodLabel.toLowerCase()}</span></Kpi>
-        <Kpi icon="rupee" color="var(--crm-violet)" label="Revenue (won)" value={moneyShort(c.revenue.value)} to="/crm/deals"><Delta v={c.revenue.delta} /> <span className="crm-sub">{c.revenue.deals} deal{c.revenue.deals === 1 ? '' : 's'}</span></Kpi>
-        <Kpi icon="target" color="var(--crm-orange)" label="Sales target" value={c.target.value ? moneyShort(c.target.value) : 'Not set'} to="/crm/dashboard?tab=team">
+        <Kpi icon="users" color="var(--crm-blue)" label="Total leads" value={c.leads.value.toLocaleString('en-IN')} onOpen={() => setWin(W.leads)}><Delta v={c.leads.delta} /> <span className="crm-sub">{c.leads.open} open</span></Kpi>
+        <Kpi icon="hand" color="var(--crm-green)" label="Total customers" value={c.customers.value.toLocaleString('en-IN')} onOpen={() => setWin(W.customers)}><span className="crm-sub">+{c.customers.newInPeriod} won {o.periodLabel.toLowerCase()}</span></Kpi>
+        <Kpi icon="rupee" color="var(--crm-violet)" label="Revenue (won)" value={moneyShort(c.revenue.value)} onOpen={() => setWin(W.won)}><Delta v={c.revenue.delta} /> <span className="crm-sub">{c.revenue.deals} deal{c.revenue.deals === 1 ? '' : 's'}</span></Kpi>
+        <Kpi icon="target" color="var(--crm-orange)" label="Sales target" value={c.target.value ? moneyShort(c.target.value) : 'Not set'} onOpen={() => onTab('team')}>
           {c.target.value ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
               <div className="crm-progress"><span style={{ width: `${Math.min(100, c.target.pct || 0)}%` }} /></div>
@@ -101,14 +172,14 @@ function Overview({ mine, period, onTab }) {
             </div>
           ) : <span className="crm-sub">{me.canAssign ? 'Set it in Team & targets' : 'Your sales manager sets it'}</span>}
         </Kpi>
-        <Kpi icon="check" color="var(--crm-teal)" label="Follow-ups due" value={c.followUps.today + c.followUps.late} to="/crm/dashboard?tab=overview">
+        <Kpi icon="check" color="var(--crm-teal)" label="Follow-ups due" value={c.followUps.today + c.followUps.late} onOpen={() => setWin(W.tasks)}>
           {c.followUps.late ? <span className="crm-delta down">{c.followUps.late} late</span> : <span className="crm-sub">all on time</span>}
         </Kpi>
       </div>
 
       <div className="crm-grid3">
         <div className="crm-card">
-          <Head title="Sales pipeline" to="/crm/deals" link="View deals" />
+          <Head title="Sales pipeline" onClick={() => setWin(W.open)} link="View deals" />
           <div className="crm-funnel-wrap">
             <div className="crm-funnel">
               {o.funnel.map((f, i) => (
@@ -139,22 +210,22 @@ function Overview({ mine, period, onTab }) {
               <span className="t">{x.time || '—'}</span>
               <span className="s">
                 <span style={{ textDecoration: x.type === 'task' && x.done ? 'line-through' : undefined }}>{x.title}</span>
-                {x.recordName && <Link to={recordLink(x.recordKind, x.recordId)}> · {x.recordName}</Link>}
+                {x.recordName && <> · <RecLink kind={x.recordKind} id={x.recordId}>{x.recordName}</RecLink></>}
               </span>
             </div>
           ))}
         </div>
 
         <div className="crm-card">
-          <Head title="Recent deals" to="/crm/deals" />
+          <Head title="Recent deals" onClick={() => setWin(W.deals)} />
           {!o.recentDeals.length && <div className="small-muted">No deals yet. Convert a lead or add a deal.</div>}
           {o.recentDeals.map((x) => (
-            <Link key={x.id} to={recordLink('deal', x.id)} className="crm-deal-row">
+            <RecLink key={x.id} kind="deal" id={x.id} className="crm-deal-row">
               <span className="b" aria-hidden="true">🏢</span>
               <span className="n">{x.accountName || x.title}<small>{x.accountName ? x.title : ''}</small></span>
               <span className="v">{money(x.value)}</span>
               <span className={`status ${STAGE_TONE[x.stage] || 'review'}`}>{x.stage}</span>
-            </Link>
+            </RecLink>
           ))}
         </div>
       </div>
@@ -179,30 +250,30 @@ function Overview({ mine, period, onTab }) {
           <div className="crm-flow">
             {o.flow.map((f, i) => (
               <div key={f.key} className="crm-flow-step-wrap">
-                <Link to={f.to} className="crm-flow-step" style={{ '--tone': FUNNEL_COLORS[i] }}>
+                <button type="button" onClick={() => setWin(W[`flow_${f.key}`])} className="crm-flow-step" style={{ '--tone': FUNNEL_COLORS[i] }}>
                   <span className="c">{f.count.toLocaleString('en-IN')}</span>
                   <b>{f.label}</b>
                   <small>{f.sub}</small>
-                </Link>
+                </button>
                 {i < o.flow.length - 1 && <span className="arrow" aria-hidden="true">→</span>}
               </div>
             ))}
           </div>
           {sup && (
-            <Link to="/crm/accounts?tab=tickets" className="crm-support-line">
+            <button type="button" onClick={() => setWin(W.tickets)} className="crm-support-line">
               <span aria-hidden="true">🎧</span> <b>Customer support</b>
               <span>{sup.open} open</span>
               <span style={{ color: sup.late ? 'var(--red)' : undefined }}>{sup.late} reply late</span>
               <span>{sup.resolved30} resolved (30 days)</span>
               <span style={{ marginLeft: 'auto', color: 'var(--crm-blue)', fontWeight: 600 }}>Tickets →</span>
-            </Link>
+            </button>
           )}
           {d && d.closingSoon.length > 0 && (
             <>
               <div className="section-label">Closing in the next 30 days</div>
               {d.closingSoon.slice(0, 5).map((x) => (
                 <div key={x.id} style={{ display: 'flex', gap: 8, padding: '5px 0', borderBottom: '1px solid var(--line-soft)', fontSize: 13 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}><Link to={recordLink('deal', x.id)}>{x.title}</Link><div className="small-muted" style={{ fontSize: 11.5 }}>{x.accountName || ''} · {x.stage}</div></div>
+                  <div style={{ flex: 1, minWidth: 0 }}><RecLink kind="deal" id={x.id}>{x.title}</RecLink><div className="small-muted" style={{ fontSize: 11.5 }}>{x.accountName || ''} · {x.stage}</div></div>
                   <div style={{ textAlign: 'right' }}><b>{moneyShort(x.value)}</b><div className="small-muted" style={{ fontSize: 11.5, color: x.late ? 'var(--red)' : undefined }}>{x.late ? 'late · ' : ''}{dateOf(x.expectedClose)}</div></div>
                 </div>
               ))}
@@ -211,14 +282,15 @@ function Overview({ mine, period, onTab }) {
         </div>
       </div>
 
+      {win && <ListWindow what={win} onClose={() => setWin(null)} />}
       {d && (
         <div className="crm-grid2">
           <div className="crm-card">
-            <Head title="Where leads come from" to="/crm/leads" link="Leads" />
+            <Head title="Where leads come from" onClick={() => setWin(W.sources)} link="Open leads" />
             <Bars rows={d.leads.bySource} value={(r) => r.count} />
           </div>
           <div className="crm-card">
-            <Head title="Pipeline by stage" to="/crm/deals" link="Board" />
+            <Head title="Pipeline by stage" onClick={() => setWin(W.open)} link="Open deals" />
             <Bars rows={d.byStage} label={(r) => r.stage} value={(r) => r.value || 0} right={(r) => `${r.count} · ${moneyShort(r.value)}`} />
             {d.lostReasons.length > 0 && (<><div className="section-label">Why deals were lost (90 days)</div><Bars rows={d.lostReasons} value={(r) => r.count} /></>)}
           </div>
@@ -264,7 +336,7 @@ function Activities({ mine }) {
         <div key={a.id} className="crm-act-row">
           <span className="ic" style={{ background: KIND_COLOR[a.kind] }} aria-hidden="true">{ACT_ICON[a.kind]}</span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13.5 }}><b>{a.subject || me.lists.activityKinds[a.kind]}</b>{a.recordName && <> · <Link to={recordLink(a.recordKind, a.recordId)}>{a.recordName}</Link></>}</div>
+            <div style={{ fontSize: 13.5 }}><b>{a.subject || me.lists.activityKinds[a.kind]}</b>{a.recordName && <> · <RecLink kind={a.recordKind} id={a.recordId}>{a.recordName}</RecLink></>}</div>
             {a.note && <div className="small-muted" style={{ fontSize: 12.5, whiteSpace: 'pre-wrap' }}>{a.note}</div>}
           </div>
           <div className="small-muted" style={{ fontSize: 11.5, textAlign: 'right', whiteSpace: 'nowrap' }}>{dateTimeOf(a.at)}<br />{a.byName || ''}</div>
@@ -275,14 +347,13 @@ function Activities({ mine }) {
 }
 
 export default function CrmDashboard() {
-  const { me, reloadMe, toast } = useCrm();
-  const [sp, setSp] = useSearchParams();
-  const [open, setOpen] = useOpenParam(sp, setSp);
+  const { me, reloadMe, toast, openRecord } = useCrm();
+  const [sp] = useSearchParams();
+  const [adding, setAdding] = useState(null); // 'lead' | 'deal' - the form opens here
   const [mine, setMine] = useState(!me.seesAll);
   const [period, setPeriod] = useState('month');
   const [tab, setTab] = useState(sp.get('tab') || 'overview'); // overview | activities | team | forecast
   const [settings, setSettings] = useState(false);
-  const [refresh, setRefresh] = useState(0);
   return (
     <div className="page crm-page">
       <div className="page-head">
@@ -305,8 +376,8 @@ export default function CrmDashboard() {
           <select defaultValue="" onChange={(e) => { const k = e.target.value; e.target.value = ''; if (k) download(`/crm/export/${k}`, `crm-${k}-${istToday()}.csv`).catch(() => toast('The download did not work.')); }} aria-label="Download" style={{ width: 'auto' }}>
             <option value="">Download…</option><option value="leads">Leads</option><option value="deals">Deals</option><option value="accounts">Accounts</option><option value="contacts">Contacts</option><option value="activities">Calls, meetings, notes</option><option value="tasks">Follow-ups</option>
           </select>
-          {me.canEdit && <Link className="btn" to="/crm/leads?add=1">+ Lead</Link>}
-          {me.canEdit && <Link className="btn btn-primary" to="/crm/deals?add=1">+ Deal</Link>}
+          {me.canEdit && <button type="button" className="btn" onClick={() => setAdding('lead')}>+ Lead</button>}
+          {me.canEdit && <button type="button" className="btn btn-primary" onClick={() => setAdding('deal')}>+ Deal</button>}
         </div>
       </div>
       <div className="tabs" role="tablist">
@@ -314,11 +385,11 @@ export default function CrmDashboard() {
           <div key={k} role="tab" tabIndex={0} aria-selected={tab === k} className={`tab${tab === k ? ' active' : ''}`} onClick={() => setTab(k)} onKeyDown={(e) => { if (e.key === 'Enter') setTab(k); }}>{l}</div>
         ))}
       </div>
-      {tab === 'overview' && <Overview key={refresh} mine={mine} period={period} onTab={setTab} />}
+      {tab === 'overview' && <Overview mine={mine} period={period} onTab={setTab} />}
       {tab === 'activities' && <Activities mine={mine} />}
       {tab === 'team' && <TeamTargets />}
       {tab === 'forecast' && <ForecastFunnel />}
-      {open && <RecordPanel kind={open.kind} id={open.id} onClose={() => setOpen(null)} onChanged={() => setRefresh((n) => n + 1)} />}
+      {adding && <RecordForm kind={adding} preset={adding === 'deal' ? { feePercent: '8.33' } : { source: '' }} onClose={() => setAdding(null)} onSaved={(row) => { const k = adding; setAdding(null); openRecord(k, row.id); }} />}
       {settings && <CrmSettings onClose={() => setSettings(false)} onSaved={() => { setSettings(false); reloadMe(); }} />}
     </div>
   );

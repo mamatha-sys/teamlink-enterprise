@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../../api';
 import Modal from '../../components/Modal.jsx';
-import { useCrm, errOf, dateOf, istToday, Pill, RecordForm, RecordPanel, useOpenParam, download } from './crmShared.jsx';
+import { useCrm, errOf, dateOf, istToday, Pill, RecordForm, download } from './crmShared.jsx';
 import CrmCampaigns from './CrmCampaigns.jsx';
 
 function ImportLeads({ onClose, onDone }) {
@@ -65,10 +65,10 @@ function ImportLeads({ onClose, onDone }) {
 }
 
 export default function CrmLeads() {
-  const { me, toast } = useCrm();
+  const { me, toast, openRecord, version } = useCrm();
   const [sp, setSp] = useSearchParams();
+  const setOpen = (o) => openRecord(o.kind, o.id);
   const [view, setView] = useState(sp.get('tab') === 'campaigns' ? 'campaigns' : 'leads');
-  const [open, setOpen] = useOpenParam(sp, setSp);
   const [adding, setAdding] = useState(sp.get('add') === '1');
   const [importing, setImporting] = useState(false);
   const [rows, setRows] = useState(null);
@@ -81,7 +81,7 @@ export default function CrmLeads() {
   const [picked, setPicked] = useState(() => new Set());
   const load = () => api.get('/crm/leads', { params: { q: q || undefined, status: status || undefined, source: source || undefined, rating: rating || undefined, owner: owner || undefined } })
     .then((r) => { setRows(r.data.rows); setErr(''); setPicked(new Set()); }).catch((e) => setErr(errOf(e, 'The leads could not be read.')));
-  useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [q, status, source, rating, owner]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [q, status, source, rating, owner, version]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (sp.get('add') === '1') { const n = new URLSearchParams(sp); n.delete('add'); setSp(n, { replace: true }); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const today = istToday();
   const toggle = (id) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -161,7 +161,6 @@ export default function CrmLeads() {
       </>)}
       {adding && <RecordForm kind="lead" preset={{ source: '' }} onClose={() => setAdding(false)} onSaved={(row) => { setAdding(false); load(); setOpen({ kind: 'lead', id: row.id }); }} />}
       {importing && <ImportLeads onClose={() => setImporting(false)} onDone={() => { setImporting(false); load(); }} />}
-      {open && <RecordPanel kind={open.kind} id={open.id} onClose={() => setOpen(null)} onChanged={load} />}
     </div>
   );
 }

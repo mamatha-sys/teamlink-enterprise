@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../../api';
 import Modal from '../../components/Modal.jsx';
-import { useCrm, errOf, dateOf, moneyShort, istToday, Pill, RecordForm, RecordPanel, useOpenParam, download } from './crmShared.jsx';
+import { useCrm, errOf, dateOf, moneyShort, istToday, Pill, RecordForm, download } from './crmShared.jsx';
 import { TicketList } from './CrmSupport.jsx';
 
 function FromClient({ onClose, onDone }) {
@@ -41,8 +41,9 @@ function FromClient({ onClose, onDone }) {
 
 export default function CrmAccounts() {
   const { me, toast } = useCrm();
-  const [sp, setSp] = useSearchParams();
-  const [open, setOpen] = useOpenParam(sp, setSp);
+  const [sp] = useSearchParams();
+  const { openRecord, version } = useCrm();
+  const setOpen = (o) => openRecord(o.kind, o.id);
   const [tab, setTab] = useState(['contacts', 'tickets'].includes(sp.get('tab')) ? sp.get('tab') : 'accounts');
   const [rows, setRows] = useState(null);
   const [err, setErr] = useState('');
@@ -57,7 +58,7 @@ export default function CrmAccounts() {
     const params = tab === 'accounts' ? { q: q || undefined, kind: kind || undefined, owner: owner || undefined } : { q: q || undefined };
     return api.get(`/crm/${tab}`, { params }).then((r) => { setRows(r.data.rows); setErr(''); }).catch((e) => setErr(errOf(e, 'This list could not be read.')));
   };
-  useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [tab, q, kind, owner]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [tab, q, kind, owner, version]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="page">
@@ -127,7 +128,6 @@ export default function CrmAccounts() {
       {(adding === 'account' || adding === 'contact') && <RecordForm kind={adding} onClose={() => setAdding(null)} onSaved={(row) => { const k = adding; setAdding(null); if (k === 'account') { setTab('accounts'); load(); setOpen({ kind: 'account', id: row.id }); } else { setTab('contacts'); load(); } }} />}
       {adding === 'client' && <FromClient onClose={() => setAdding(null)} onDone={(acc) => { setAdding(null); setTab('accounts'); load(); setOpen({ kind: 'account', id: acc.id }); }} />}
       {editContact && <RecordForm kind="contact" row={editContact} onClose={() => setEditContact(null)} onSaved={() => { setEditContact(null); load(); }} />}
-      {open && <RecordPanel kind={open.kind} id={open.id} onClose={() => setOpen(null)} onChanged={load} />}
     </div>
   );
 }
