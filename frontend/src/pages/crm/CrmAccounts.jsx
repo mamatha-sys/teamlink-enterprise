@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../../api';
 import Modal from '../../components/Modal.jsx';
-import { useCrm, errOf, dateOf, moneyShort, Pill, RecordForm, RecordPanel, useOpenParam } from './crmShared.jsx';
+import { useCrm, errOf, dateOf, moneyShort, istToday, Pill, RecordForm, RecordPanel, useOpenParam, download } from './crmShared.jsx';
 
 function FromClient({ onClose, onDone }) {
   const { toast } = useCrm();
@@ -39,7 +39,7 @@ function FromClient({ onClose, onDone }) {
 }
 
 export default function CrmAccounts() {
-  const { me } = useCrm();
+  const { me, toast } = useCrm();
   const [sp, setSp] = useSearchParams();
   const [open, setOpen] = useOpenParam(sp, setSp);
   const [tab, setTab] = useState(sp.get('tab') === 'contacts' ? 'contacts' : 'accounts');
@@ -61,13 +61,14 @@ export default function CrmAccounts() {
     <div className="page">
       <div className="page-head">
         <div><h1>Accounts &amp; Contacts</h1><div className="page-sub">The companies we sell to and the people we talk to</div></div>
-        {me.canEdit && (
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button type="button" className="btn" onClick={() => download(`/crm/export/${tab}`, `crm-${tab}-${istToday()}.csv`).catch(() => toast('The download did not work.'))}>Download</button>
+          {me.canEdit && (<>
             <button type="button" className="btn" onClick={() => setAdding('client')}>From a TeamLink client</button>
             <button type="button" className="btn" onClick={() => setAdding('contact')}>+ Contact</button>
             <button type="button" className="btn btn-primary" onClick={() => setAdding('account')}>+ Account</button>
-          </div>
-        )}
+          </>)}
+        </div>
       </div>
       <div className="tabs" role="tablist">
         <div role="tab" tabIndex={0} aria-selected={tab === 'accounts'} className={`tab${tab === 'accounts' ? ' active' : ''}`} onClick={() => setTab('accounts')} onKeyDown={(e) => { if (e.key === 'Enter') setTab('accounts'); }}>Accounts</div>
@@ -76,7 +77,7 @@ export default function CrmAccounts() {
       <div className="filter-row">
         <input type="text" placeholder={tab === 'accounts' ? 'Search company, city, industry' : 'Search name, phone, email, company'} value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 260 }} aria-label="Search" />
         {tab === 'accounts' && <select value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Type"><option value="">Prospects and clients</option><option value="Prospect">Prospects</option><option value="Client">TeamLink clients</option></select>}
-        {tab === 'accounts' && me.seesAll && <select value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Owner"><option value="">Every BDE</option>{me.owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select>}
+        {tab === 'accounts' && me.seesAll && <select value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Owner"><option value="">Everyone</option>{me.owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select>}
       </div>
       {err && <div className="notice" role="alert">{err}</div>}
       <div className="tbl-wrap">

@@ -28,13 +28,14 @@ export default function CrmPage() {
   const [err, setErr] = useState('');
   const [toasts, setToasts] = useState([]);
   const seq = useRef(0);
-  useEffect(() => { api.get('/crm/me').then((r) => setMe(r.data)).catch((e) => setErr(errOf(e, 'The CRM could not be opened.'))); }, []);
+  const reloadMe = useCallback(() => api.get('/crm/me').then((r) => setMe(r.data)).catch((e) => setErr(errOf(e, 'The CRM could not be opened.'))), []);
+  useEffect(() => { reloadMe(); }, [reloadMe]);
   const toast = useCallback((text) => {
     seq.current += 1; const id = seq.current;
     setToasts((t) => [...t, { id, text }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200);
   }, []);
-  const ctx = useMemo(() => ({ me, toast }), [me, toast]);
+  const ctx = useMemo(() => ({ me, toast, reloadMe }), [me, toast, reloadMe]);
 
   const Page = PAGES[page];
   if (!Page) return <Navigate to="/crm/dashboard" replace />; // the old CRM addresses (forms, data tables ...) land on the dashboard

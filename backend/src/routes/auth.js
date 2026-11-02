@@ -60,6 +60,9 @@ async function sessionPayload(identity) {
     access,
     passwordStatus,
     workflow: { allowedStages, stageActions: STAGE_WORKFLOW_ACTIONS, bdeTl: require('../utils/scope').isBdeTl(identity) }, // eslint-disable-line global-require
+    // THE SALES CRM (2026-11-02): this login's CRM role (admin / tl = sales manager / view / bde = salesperson / null), so the
+    // sidebar shows CRM to the sales team, including people an Admin added in CRM settings (crm/service.js).
+    crmRole: await require('../crm/service').crmRoleFor(identity).catch(() => null), // eslint-disable-line global-require
     // WHAT THIS LOGIN MAY FILTER BY, computed by utils/scope.js — the same
     // helper that decides what the lists actually return.
     //

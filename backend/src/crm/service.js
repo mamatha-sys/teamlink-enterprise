@@ -5,12 +5,14 @@
 //   Deals                the pipeline board (Prospecting ... Won / Lost with reason); Won -> "Add as client" (ATS)
 //   Accounts & Contacts  companies (prospects and clients) with their people, deals, timeline and follow-ups
 //
-// WHO SEES WHAT
-//   Super Admin / Admin   everything, edits everything, may give a record to another BDE
-//   BDE TL                everything (the whole BDE book, like Clients), edits, may give a record to another BDE
-//   Manager / Asst Mgr    everything, read only
-//   BDE                   their own records only (owner = them); a new record is theirs
-//   anybody else          nothing (the CRM is not opened)
+// WHO SEES WHAT - a CRM for the SALES TEAM (founder 2026-11-02: "sales team kosam ani chepparu ... sale kosam crm kaavali")
+//   Super Admin / Admin            everything, edits everything, may give a record to another salesperson, sets up the team
+//   Sales manager                  everything, edits, gives records to salespeople, sets targets and CRM settings
+//                                  (= the BDE TL, and anybody the Admin lists as "Sales manager" in CRM settings)
+//   Manager / Asst Mgr (ATS)       everything, read only
+//   Salesperson                    their own records only (owner = them); a new record is theirs
+//                                  (= the BDEs, and anybody listed as "Salesperson" in CRM settings)
+//   anybody else                   nothing (the CRM is not opened)
 // ---------------------------------------------------------------------------
 const crypto = require('crypto');
 const prisma = require('../db');
@@ -19,13 +21,14 @@ const { logAudit } = require('../utils/audit');
 const { notifyUsers } = require('../utils/notify');
 const { atsViewRole, isBdeTl } = require('../utils/scope');
 
-const STAGES = ['Prospecting', 'Contacted', 'Meeting', 'Requirement discussed', 'Proposal sent', 'Negotiation', 'Won', 'Lost'];
-const STAGE_PROB = { Prospecting: 10, Contacted: 20, Meeting: 40, 'Requirement discussed': 50, 'Proposal sent': 60, Negotiation: 80, Won: 100, Lost: 0 };
+// stages are fixed; sources, lost reasons and stage probabilities are CRM settings (crm/settings.js, BDE TL / Admin)
+const SETTINGS = require('./settings');
+
+const { STAGES } = SETTINGS;
 const LEAD_STATUSES = ['New', 'Contacted', 'Qualified', 'Junk', 'Converted'];
-const SOURCES = ['LinkedIn', 'Referral', 'Cold call', 'Website', 'Job post signal', 'Email campaign', 'WhatsApp', 'Event', 'Existing client', 'Other'];
 const CONTACT_ROLES = ['Decision maker', 'HR', 'Influencer', 'Finance', 'Other'];
 const ACTIVITY_KINDS = { call: 'Call', meeting: 'Meeting', email: 'Email', whatsapp: 'WhatsApp', note: 'Note' };
-const LOST_REASONS = ['Price / fee too high', 'Chose another vendor', 'Hiring on hold', 'No response', 'Hiring in-house', 'Not a fit', 'Other'];
+const RATINGS = ['Hot', 'Warm', 'Cold'];
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 const HM = /^\d{2}:\d{2}$/;
 
@@ -38,14 +41,22 @@ const fail = (status, error, extra) => ({ status, body: { error, ...(extra || {}
 const okBody = (body) => ({ status: 200, body });
 
 // ---- access -------------------------------------------------------------------------------------------
+// 'admin' | 'tl' (sales manager) | 'view' | 'bde' (salesperson) | null. The listed team comes from the CRM settings already
+// read (crmRoleFor / the CRM routes read them first).
 function roleOf(user) {
   if (!user || !user.id) return null;
   const v = atsViewRole(user);
   if (v === 'admin') return 'admin';
-  if (isBdeTl(user)) return 'tl';
+  if (user.clientId || user.candidateId || v === 'client' || v === 'candidate') return null; // never a client / candidate login
+  const t = SETTINGS.teamRole(user.id);
+  if (t === 'manager' || isBdeTl(user)) return 'tl';
   if (v === 'mgmt') return 'view';
-  if (v === 'bde' || user.role === 'BDE') return 'bde';
+  if (t === 'rep' || v === 'bde' || user.role === 'BDE') return 'bde';
   return null;
+}
+async function crmRoleFor(user) {
+  await SETTINGS.load().catch(() => null);
+  return roleOf(user);
 }
 const seesAll = (r) => r === 'admin' || r === 'tl' || r === 'view';
 const mayEdit = (r) => r === 'admin' || r === 'tl' || r === 'bde';
@@ -55,14 +66,18 @@ const canEditRow = (user, r, row) => !!row && mayEdit(r) && (r !== 'bde' || row.
 // SQL piece for a list: a BDE reads their own rows only
 const scopeSql = (user, r, alias = '') => (seesAll(r) ? { sql: '1=1', params: [] } : { sql: `${alias}"ownerId" = ?`, params: [user.id] });
 
-// The people a record may belong to: the BDEs and the BDE TLs who still work here.
+// The people a record may belong to: the sales team who still work here - the BDEs, the BDE TLs and the people listed in
+// CRM settings. tl = a sales manager.
 async function ownerOptions() {
+  const st = await SETTINGS.load();
+  const listed = new Map(st.salesTeam.map((m) => [m.userId, m.role]));
   const users = await prisma.user.findMany({
-    where: { OR: [{ atsRole: 'BDE' }, { role: 'BDE' }, { AND: [{ atsRole: 'TL' }, { atsDepartment: 'BDE' }] }] },
-    select: { id: true, name: true, status: true, atsRole: true },
+    where: { OR: [{ atsRole: 'BDE' }, { role: 'BDE' }, { AND: [{ atsRole: 'TL' }, { atsDepartment: 'BDE' }] }, ...(listed.size ? [{ id: { in: [...listed.keys()] } }] : [])] },
+    select: { id: true, name: true, status: true, atsRole: true, atsDepartment: true, clientId: true, candidateId: true },
     orderBy: { name: 'asc' },
   }).catch(() => []);
-  return users.filter((u) => !/inactive|disabled|deleted|left|relieved|exit/i.test(String(u.status || ''))).map((u) => ({ id: u.id, name: u.name, tl: u.atsRole === 'TL' }));
+  return users.filter((u) => !u.clientId && !u.candidateId && !/inactive|disabled|deleted|left|relieved|exit|suspended/i.test(String(u.status || '')))
+    .map((u) => ({ id: u.id, name: u.name, tl: listed.get(u.id) === 'manager' || (u.atsRole === 'TL' && String(u.atsDepartment || '').toUpperCase() === 'BDE') }));
 }
 async function pickOwner(user, r, wanted) {
   if (!wanted || !mayAssign(r) || wanted === user.id) return { id: user.id, name: user.name || null };
@@ -73,10 +88,10 @@ async function pickOwner(user, r, wanted) {
 // ---- record kinds ------------------------------------------------------------------------------------
 // fields a person may write, with their kind ('s' text, 'n' number, 'i' integer, 'd' date, 'L' long text)
 const KINDS = {
-  lead: { table: 'CrmLead', label: 'Lead', name: 'company', fields: { company: 's', contactName: 's', designation: 's', phone: 's', email: 's', industry: 's', city: 's', source: 's', status: 's', notes: 'L' } },
+  lead: { table: 'CrmLead', label: 'Lead', name: 'company', fields: { company: 's', contactName: 's', designation: 's', phone: 's', email: 's', industry: 's', city: 's', source: 's', status: 's', rating: 's', notes: 'L' } },
   account: { table: 'CrmAccount', label: 'Account', name: 'name', fields: { name: 's', industry: 's', city: 's', website: 's', phone: 's', email: 's', source: 's', notes: 'L' } },
   contact: { table: 'CrmContact', label: 'Contact', name: 'name', fields: { accountId: 's', name: 's', designation: 's', role: 's', phone: 's', email: 's', notes: 'L' } },
-  deal: { table: 'CrmDeal', label: 'Deal', name: 'title', fields: { title: 's', accountId: 's', contactId: 's', openings: 'i', avgCtc: 'n', feePercent: 'n', value: 'n', probability: 'i', expectedClose: 'd', notes: 'L' } },
+  deal: { table: 'CrmDeal', label: 'Deal', name: 'title', fields: { title: 's', accountId: 's', contactId: 's', openings: 'i', avgCtc: 'n', feePercent: 'n', value: 'n', probability: 'i', expectedClose: 'd', nextStep: 's', notes: 'L' } },
 };
 
 function cleanFields(kind, body, { partial }) {
@@ -99,6 +114,7 @@ function cleanFields(kind, body, { partial }) {
   if (out.phone && String(out.phone).replace(/\D/g, '').length < 8) return { error: 'This phone number looks too short.' };
   if (kind === 'lead' && 'status' in out && !LEAD_STATUSES.includes(out.status || '')) return { error: 'Pick a lead status from the list.' };
   if (kind === 'contact' && out.role && !CONTACT_ROLES.includes(out.role)) return { error: 'Pick the contact\'s role from the list.' };
+  if (kind === 'lead' && out.rating && !RATINGS.includes(out.rating)) return { error: 'Rating is Hot, Warm or Cold.' };
   if (kind === 'deal') {
     if (out.probability != null && out.probability > 100) return { error: 'Probability is a percent (0 to 100).' };
     if (out.feePercent != null && out.feePercent > 100) return { error: 'The fee is a percent (0 to 100).' };
@@ -165,6 +181,7 @@ async function list(user, kind, q = {}) {
     if (q.status && LEAD_STATUSES.includes(q.status)) { where.push('x."status" = ?'); params.push(q.status); } else if (q.status !== 'all') where.push('x."status" NOT IN (\'Converted\', \'Junk\')');
     if (text) { where.push('(x."company" LIKE ? OR x."contactName" LIKE ? OR x."phone" LIKE ? OR x."email" LIKE ? OR x."city" LIKE ?)'); params.push(...Array(5).fill(`%${text}%`)); }
     if (q.source) { where.push('x."source" = ?'); params.push(clip(q.source)); }
+    if (q.rating && RATINGS.includes(q.rating)) { where.push('x."rating" = ?'); params.push(q.rating); }
     if (q.owner && seesAll(r)) { where.push('x."ownerId" = ?'); params.push(clip(q.owner, 60)); }
     return DB.all(`SELECT x.*, ${LAST_ACT('leadId')}, ${NEXT_TASK('leadId')} FROM "CrmLead" x WHERE ${where.join(' AND ')} ORDER BY x."updatedAt" DESC LIMIT 1000`, ...params);
   }
@@ -234,12 +251,12 @@ async function create(user, kind, body = {}) {
   const c = cleanFields(kind, body, { partial: false });
   if (c.error) return fail(400, c.error);
   const own = await pickOwner(user, r, clip(body.ownerId, 60));
-  if (!own) return fail(400, 'Pick the owner from the list of BDEs.');
+  if (!own) return fail(400, 'Pick the owner from the sales team list.');
   const now = DB.nowIso();
   const row = { id: newId(kind), ...c.data, ownerId: own.id, ownerName: own.name, createdById: user.id, createdAt: now, updatedAt: now };
   if (kind === 'lead') {
     row.status = row.status && row.status !== 'Converted' ? row.status : 'New';
-    if (row.source && !SOURCES.includes(row.source)) row.source = 'Other';
+    if (row.source && !(await SETTINGS.load()).sources.includes(row.source)) row.source = 'Other';
     const dups = await duplicatesOf(row);
     if (dups.length && body.force !== true) return fail(409, 'This company or person is already in TeamLink.', { duplicates: dups });
   }
@@ -259,7 +276,7 @@ async function create(user, kind, body = {}) {
       if (!ct || ct.accountId !== row.accountId) row.contactId = null;
     }
     row.stage = STAGES.includes(body.stage) && !['Won', 'Lost'].includes(body.stage) ? body.stage : 'Prospecting';
-    if (row.probability == null) row.probability = STAGE_PROB[row.stage];
+    if (row.probability == null) row.probability = (await SETTINGS.load()).stageProbability[row.stage];
     row.value = dealValue(row);
   }
   const saved = await insert(KINDS[kind].table, row);
@@ -275,11 +292,11 @@ async function edit(user, kind, id, body = {}) {
   if (c.error) return fail(400, c.error);
   const data = { ...c.data };
   if (kind === 'lead' && data.status === 'Converted' && row.status !== 'Converted') return fail(400, 'Use "Convert" to turn a lead into an account and a deal.');
-  if (kind === 'lead' && data.source && !SOURCES.includes(data.source)) data.source = 'Other';
+  if (kind === 'lead' && data.source && !(await SETTINGS.load()).sources.includes(data.source)) data.source = 'Other';
   if ('ownerId' in body && body.ownerId && body.ownerId !== row.ownerId) {
-    if (!mayAssign(r)) return fail(403, 'Only the BDE TL or an Admin can give a record to another BDE.');
+    if (!mayAssign(r)) return fail(403, 'Only a Sales manager or an Admin can give a record to another salesperson.');
     const own = await pickOwner(user, r, clip(body.ownerId, 60));
-    if (!own) return fail(400, 'Pick the owner from the list of BDEs.');
+    if (!own) return fail(400, 'Pick the owner from the sales team list.');
     data.ownerId = own.id; data.ownerName = own.name;
   }
   if (kind === 'contact' && data.accountId && data.accountId !== row.accountId) {
@@ -310,7 +327,7 @@ async function moveDeal(user, id, { stage, lostReason } = {}) {
   const reason = clip(lostReason, 300);
   if (stage === 'Lost' && !reason) return fail(400, 'Why was the deal lost? Please pick the reason.');
   const now = DB.nowIso();
-  const data = { stage, probability: STAGE_PROB[stage], updatedAt: now, wonAt: stage === 'Won' ? now : null, lostAt: stage === 'Lost' ? now : null, lostReason: stage === 'Lost' ? reason : null };
+  const data = { stage, probability: (await SETTINGS.load()).stageProbability[stage], updatedAt: now, wonAt: stage === 'Won' ? now : null, lostAt: stage === 'Lost' ? now : null, lostReason: stage === 'Lost' ? reason : null };
   const saved = await update('CrmDeal', row.id, data);
   await insert('CrmActivity', { id: newId('act'), kind: 'note', subject: `Stage: ${row.stage} → ${stage}`, note: stage === 'Lost' ? `Lost: ${reason}` : null, at: now, dealId: row.id, accountId: row.accountId, byId: user.id, byName: user.name || null, createdAt: now });
   await audit(user, stage === 'Won' ? 'CRM deal won' : stage === 'Lost' ? 'CRM deal lost' : 'CRM deal stage changed', 'CrmDeal', row.id, `${row.title}: ${row.stage} -> ${stage}`, reason || undefined);
@@ -353,7 +370,7 @@ async function convertLead(user, id, body = {}) {
   if (body.createDeal !== false) {
     const d = cleanFields('deal', { title: body.dealTitle || `${lead.company} - hiring`, openings: body.openings, avgCtc: body.avgCtc, feePercent: body.feePercent, value: body.value, expectedClose: body.expectedClose }, { partial: false });
     if (d.error) return fail(400, d.error);
-    const row = { id: newId('deal'), ...d.data, accountId: account.id, contactId: contact ? contact.id : null, leadId: lead.id, stage: 'Contacted', probability: STAGE_PROB.Contacted, ...base };
+    const row = { id: newId('deal'), ...d.data, accountId: account.id, contactId: contact ? contact.id : null, leadId: lead.id, stage: 'Contacted', probability: (await SETTINGS.load()).stageProbability.Contacted, ...base };
     row.value = dealValue(row);
     deal = await insert('CrmDeal', row);
   }
@@ -554,7 +571,7 @@ async function remove(user, kind, id) {
   if (!row) return fail(404, 'This record is not there.');
   const own = (kind === 'activity' ? row.byId : row.createdById || row.ownerId) === user.id;
   if (!mayAssign(r) && !(r === 'bde' && own && (kind === 'activity' || kind === 'task'))) {
-    return fail(403, kind === 'lead' ? 'A BDE does not delete a lead: mark it Junk. The BDE TL or an Admin can delete it.' : 'Only the BDE TL or an Admin can delete this.');
+    return fail(403, kind === 'lead' ? 'A salesperson does not delete a lead: mark it Junk. A Sales manager or an Admin can delete it.' : 'Only a Sales manager or an Admin can delete this.');
   }
   if (kind === 'account') {
     const n = await DB.one('SELECT COUNT(*) AS "n" FROM "CrmDeal" WHERE "accountId" = ?', row.id);
@@ -593,15 +610,19 @@ async function accountFromClient(user, clientId) {
 
 async function me(user) {
   const r = roleOf(user);
-  if (!r) return fail(403, 'The CRM is for the BDE team, the BDE TL, Managers and Admins.');
+  if (!r) return fail(403, 'The CRM is for the sales team. Ask an Admin to add you to the sales team (CRM settings).');
+  const st = await SETTINGS.load();
   return okBody({
     role: r, canEdit: mayEdit(r), canAssign: mayAssign(r), seesAll: seesAll(r),
     owners: mayAssign(r) || seesAll(r) ? await ownerOptions() : [],
-    lists: { stages: STAGES, stageProbability: STAGE_PROB, leadStatuses: LEAD_STATUSES, sources: SOURCES, contactRoles: CONTACT_ROLES, activityKinds: ACTIVITY_KINDS, lostReasons: LOST_REASONS },
+    salesTeam: mayAssign(r) ? st.salesTeam : [], // the people added in CRM settings (the BDEs / BDE TLs are on the team anyway)
+    lists: { stages: STAGES, stageProbability: st.stageProbability, leadStatuses: LEAD_STATUSES, sources: st.sources, contactRoles: CONTACT_ROLES, activityKinds: ACTIVITY_KINDS, lostReasons: st.lostReasons, ratings: RATINGS, staleDays: st.staleDays, proposalValidityDays: st.proposalValidityDays },
   });
 }
 
 module.exports = {
-  roleOf, me, list, clientOptions, accountFromClient, detail, create, edit, moveDeal, linkClient, convertLead, addActivity, addTask, finishTask, tasks, remind, dashboard, remove, duplicatesOf, dealValue,
-  STAGES, LEAD_STATUSES, SOURCES,
+  roleOf, crmRoleFor, me, list, clientOptions, accountFromClient, detail, create, edit, moveDeal, linkClient, convertLead, addActivity, addTask, finishTask, tasks, remind, dashboard, remove, duplicatesOf, dealValue,
+  STAGES, LEAD_STATUSES, RATINGS,
+  // shared with crm/extra.js
+  ownerOptions, getRow, insert, update, audit, canSeeRow, canEditRow, seesAll, mayEdit, mayAssign, scopeSql, newId, clip, num, fail, okBody, istToday, istNow, normCo, phone10, cleanFields, CONTACT_ROLES,
 };

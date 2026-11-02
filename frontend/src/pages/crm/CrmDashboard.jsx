@@ -4,7 +4,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../api';
-import { useCrm, errOf, money, moneyShort, dateOf, dateTimeOf, TaskList, recordLink, ACT_ICON, RecordPanel, useOpenParam } from './crmShared.jsx';
+import { useCrm, errOf, money, moneyShort, dateOf, dateTimeOf, TaskList, recordLink, ACT_ICON, RecordPanel, useOpenParam, download, istToday } from './crmShared.jsx';
+import { TeamTargets, ForecastFunnel, CrmSettings } from './CrmReports.jsx';
 
 function Bars({ rows, value, label = (r) => r.name, right }) {
   const max = Math.max(1, ...rows.map(value));
@@ -28,6 +29,9 @@ export default function CrmDashboard() {
   const [sp, setSp] = useSearchParams();
   const [open, setOpen] = useOpenParam(sp, setSp);
   const [mine, setMine] = useState(!me.seesAll);
+  const { reloadMe, toast } = useCrm();
+  const [tab, setTab] = useState(sp.get('tab') || 'overview'); // overview | team | forecast
+  const [settings, setSettings] = useState(false);
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
   const load = () => api.get('/crm/dashboard', { params: mine ? { mine: 1 } : {} }).then((r) => { setD(r.data); setErr(''); }).catch((e) => setErr(errOf(e, 'The dashboard could not be read.')));
@@ -44,7 +48,7 @@ export default function CrmDashboard() {
       <div className="page-head">
         <div>
           <h1>CRM Dashboard</h1>
-          <div className="page-sub">{d ? `${d.scope === 'all' ? 'Whole BDE team' : 'My'} sales · ${dateOf(d.today)}` : 'Sales'}</div>
+          <div className="page-sub">{d ? `${d.scope === 'all' ? 'Whole sales team' : 'My'} sales · ${dateOf(d.today)}` : 'Sales'}</div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           {me.seesAll && (
@@ -52,13 +56,24 @@ export default function CrmDashboard() {
               <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} style={{ width: 'auto' }} /> Only mine
             </label>
           )}
+          {me.canAssign && <button type="button" className="btn" onClick={() => setSettings(true)} title="Sources, lost reasons, stage probabilities">⚙ Settings</button>}
+          <select className="btn" defaultValue="" onChange={(e) => { const k = e.target.value; e.target.value = ''; if (k) download(`/crm/export/${k}`, `crm-${k}-${istToday()}.csv`).catch(() => toast('The download did not work.')); }} aria-label="Download" style={{ width: 'auto' }}>
+            <option value="">Download…</option><option value="leads">Leads</option><option value="deals">Deals</option><option value="accounts">Accounts</option><option value="contacts">Contacts</option><option value="activities">Calls, meetings, notes</option><option value="tasks">Follow-ups</option>
+          </select>
           {me.canEdit && <Link className="btn" to="/crm/leads?add=1">+ Lead</Link>}
           {me.canEdit && <Link className="btn btn-primary" to="/crm/deals?add=1">+ Deal</Link>}
         </div>
       </div>
-      {err && <div className="notice" role="alert">{err}</div>}
-      {!d && !err && <div className="small-muted">Loading…</div>}
-      {d && (
+      <div className="tabs" role="tablist">
+        {[['overview', 'Overview'], ['team', me.seesAll ? 'Team & targets' : 'My month & target'], ['forecast', 'Forecast & funnel']].map(([k, l]) => (
+          <div key={k} role="tab" tabIndex={0} aria-selected={tab === k} className={`tab${tab === k ? ' active' : ''}`} onClick={() => setTab(k)} onKeyDown={(e) => { if (e.key === 'Enter') setTab(k); }}>{l}</div>
+        ))}
+      </div>
+      {tab === 'team' && <TeamTargets />}
+      {tab === 'forecast' && <ForecastFunnel />}
+      {tab === 'overview' && err && <div className="notice" role="alert">{err}</div>}
+      {tab === 'overview' && !d && !err && <div className="small-muted">Loading…</div>}
+      {tab === 'overview' && d && (
         <>
           <div className="stat-row" style={{ marginBottom: 16 }}>
             {stat(moneyShort(d.pipeline.value), `Open pipeline · ${d.pipeline.open} deal${d.pipeline.open === 1 ? '' : 's'} (likely ${moneyShort(d.pipeline.weighted)})`, '/crm/deals')}
@@ -131,6 +146,7 @@ export default function CrmDashboard() {
         </>
       )}
       {open && <RecordPanel kind={open.kind} id={open.id} onClose={() => setOpen(null)} onChanged={load} />}
+      {settings && <CrmSettings onClose={() => setSettings(false)} onSaved={() => { setSettings(false); reloadMe(); }} />}
     </div>
   );
 }

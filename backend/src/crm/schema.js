@@ -12,6 +12,8 @@
 //   CrmDeal      one sales opportunity on the pipeline (stage, value, probability, expected close; Won / Lost + reason)
 //   CrmActivity  a call, meeting, email, WhatsApp or note on a lead / account / deal (the timeline)
 //   CrmTask      a follow-up with a due date (bell + email reminder to the owner the day it is due, once)
+//   CrmTarget    a BDE's target for a month (won value, and optionally a number of deals) - set by the BDE TL / Admin
+//   CrmProposal  a proposal (fee terms, positions) made from a deal: PDF, emailed to the client, Accepted / Declined
 // ---------------------------------------------------------------------------
 const prisma = require('../db');
 
@@ -84,6 +86,30 @@ const DDL = [
     ${owner}
   )`,
   'CREATE INDEX IF NOT EXISTS "CrmTask_owner" ON "CrmTask"("ownerId", "status", "dueDate")',
+  // (2026-11-02, the full CRM) monthly targets per BDE, and proposals sent from a deal
+  `CREATE TABLE IF NOT EXISTS "CrmTarget" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "ownerId" TEXT NOT NULL, "ownerName" TEXT,
+    "month" TEXT NOT NULL,
+    "amount" REAL NOT NULL DEFAULT 0, "deals" INTEGER,
+    "setById" TEXT, "createdAt" TEXT NOT NULL, "updatedAt" TEXT NOT NULL
+  )`,
+  'CREATE UNIQUE INDEX IF NOT EXISTS "CrmTarget_owner_month" ON "CrmTarget"("ownerId", "month")',
+  `CREATE TABLE IF NOT EXISTS "CrmProposal" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "number" TEXT NOT NULL,
+    "dealId" TEXT NOT NULL, "accountId" TEXT,
+    "dataJson" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'Draft',
+    "sentAt" TEXT, "sentTo" TEXT, "decidedAt" TEXT,
+    "createdById" TEXT, "createdByName" TEXT, "createdAt" TEXT NOT NULL, "updatedAt" TEXT NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS "CrmProposal_deal" ON "CrmProposal"("dealId")',
+];
+// Columns added after the first release: added once, "duplicate column" is the normal answer afterwards.
+const COLUMNS = [
+  ['CrmLead', 'rating', 'TEXT'],
+  ['CrmDeal', 'nextStep', 'TEXT'],
 ];
 
 let done = null;
@@ -91,6 +117,10 @@ function ensure() {
   if (done) return done;
   done = (async () => {
     for (const sql of DDL) await prisma.$executeRawUnsafe(sql); // eslint-disable-line no-await-in-loop
+    for (const [t, c, type] of COLUMNS) {
+      // eslint-disable-next-line no-await-in-loop
+      await prisma.$executeRawUnsafe(`ALTER TABLE "${t}" ADD COLUMN "${c}" ${type}`).catch((e) => { if (!/duplicate column/i.test(e.message)) throw e; });
+    }
     return true;
   })().catch((err) => { done = null; console.error('[crm] schema:', err.message); return false; }); // eslint-disable-line no-console
   return done;

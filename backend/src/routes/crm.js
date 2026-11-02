@@ -16,16 +16,22 @@
 //   GET    /crm/tasks?when=overdue|today|upcoming|open|done[&mine=1]
 //   POST   /crm/tasks                      {title, dueDate, dueTime, leadId|dealId|accountId, ownerId?}
 //   POST   /crm/tasks/:id/done             {note}
+//   GET    /crm/reports?month=YYYY-MM      BDE performance vs target, forecast, funnel, deals going cold
+//   PUT    /crm/targets {month, ownerId, amount, deals}     PUT /crm/settings {sources, lostReasons, stageProbability, staleDays}
+//   POST   /crm/leads/bulk {ids, ownerId|status|rating}     POST /crm/leads/import?name=&ownerId=&dryRun=1 (the file as the body)
+//   GET    /crm/export/leads|deals|accounts|contacts|activities|tasks   (CSV)
+//   GET/POST /crm/deals/:id/proposals    GET /crm/proposals/:id/pdf    POST /crm/proposals/:id/send {to, message}   /status {status}
 //   DELETE /crm/:kind/:id                  Admin / BDE TL (a BDE: their own activity / follow-up)
 // ---------------------------------------------------------------------------
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const CRM = require('../crm/service');
+const X = require('../crm/extra');
 
 const router = express.Router();
 router.use(requireAuth);
-router.use((req, res, next) => {
-  if (!CRM.roleOf(req.user)) return res.status(403).json({ error: 'The CRM is for the BDE team, the BDE TL, Managers and Admins.' });
+router.use(async (req, res, next) => {
+  if (!(await CRM.crmRoleFor(req.user))) return res.status(403).json({ error: 'The CRM is for the sales team. Ask an Admin to add you to the sales team (CRM settings).' });
   return next();
 });
 
@@ -46,6 +52,38 @@ router.post('/tasks', wrap((req) => CRM.addTask(req.user, req.body || {})));
 router.post('/tasks/:id/done', wrap((req) => CRM.finishTask(req.user, req.params.id, req.body && req.body.note)));
 router.post('/activities', wrap((req) => CRM.addActivity(req.user, req.body || {})));
 
+// the full CRM (crm/extra.js): reports, targets, settings, import, bulk, export, proposals
+router.get('/reports', wrap((req) => X.reports(req.user, { month: String(req.query.month || '') })));
+router.put('/targets', wrap((req) => X.setTarget(req.user, req.body || {})));
+router.put('/settings', wrap((req) => X.saveSettings(req.user, req.body || {})));
+router.get('/people', wrap((req) => X.people(req.user, String(req.query.q || ''))));
+router.post('/leads/bulk', wrap((req) => X.bulkLeads(req.user, req.body || {})));
+const rawUpload = express.raw({ type: () => true, limit: '8mb' }); // the Excel / CSV file itself (the JSON parser stops at 100 kb)
+router.post('/leads/import', rawUpload, wrap((req) => X.importLeads(req.user, Buffer.isBuffer(req.body) ? req.body : null, {
+  fileName: String(req.query.name || ''), ownerId: String(req.query.ownerId || ''), source: String(req.query.source || ''), dryRun: String(req.query.dryRun || '') === '1',
+})));
+router.get('/export/:kind', async (req, res, next) => {
+  try {
+    const out = await X.exportCsv(req.user, req.params.kind);
+    if (!out.csv) return send(res, out);
+    res.set('Content-Type', 'text/csv; charset=utf-8');
+    res.set('Content-Disposition', `attachment; filename="${out.name}"`);
+    return res.send(out.csv);
+  } catch (e) { return next(e); }
+});
+router.get('/deals/:id/proposals', wrap((req) => X.proposalDefaults(req.user, req.params.id)));
+router.post('/deals/:id/proposals', wrap((req) => X.createProposal(req.user, req.params.id, req.body || {})));
+router.get('/proposals/:id/pdf', async (req, res, next) => {
+  try {
+    const out = await X.proposalPdf(req.user, req.params.id);
+    if (!out.pdf) return send(res, out);
+    res.set('Content-Type', 'application/pdf');
+    res.set('Content-Disposition', `inline; filename="${out.name}"`);
+    return res.send(out.pdf);
+  } catch (e) { return next(e); }
+});
+router.post('/proposals/:id/send', wrap((req) => X.sendProposal(req.user, req.params.id, req.body || {})));
+router.post('/proposals/:id/status', wrap((req) => X.decideProposal(req.user, req.params.id, req.body || {})));
 router.get('/client-options', wrap(async (req) => ({ status: 200, body: { clients: (await CRM.clientOptions(req.user)).map((c) => ({ id: c.id, name: c.name, city: c.location, owner: c.bdeOwner })) } })));
 router.post('/accounts/from-client', wrap((req) => CRM.accountFromClient(req.user, req.body && req.body.clientId)));
 router.post('/leads/:id/convert', wrap((req) => CRM.convertLead(req.user, req.params.id, req.body || {})));

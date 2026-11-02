@@ -27,10 +27,38 @@ export const dateOf = (iso) => { if (!iso) return ''; const d = new Date(iso.len
 export const dateTimeOf = (iso) => { if (!iso) return ''; const d = new Date(iso); return Number.isNaN(d.getTime()) ? iso : d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); };
 export const istToday = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
 export const addDays = (ymd, n) => new Date(Date.parse(`${ymd}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+// a deal still open with nothing logged for N days (CRM settings) is "going cold": the number of days, or 0
+export function staleDays(deal, lastActivity, limit) {
+  if (!deal || ['Won', 'Lost'].includes(deal.stage)) return 0;
+  const last = (lastActivity && (lastActivity.at || lastActivity)) || deal.lastActivityAt || deal.createdAt;
+  const days = Math.floor((Date.now() - Date.parse(last)) / 86400000);
+  return days >= (limit || 14) ? days : 0;
+}
 export const ACT_ICON = { call: '📞', meeting: '🤝', email: '✉️', whatsapp: '💬', note: '📝' };
 export const KIND_PATH = { lead: 'leads', deal: 'deals', account: 'accounts', contact: 'accounts' };
 export const recordLink = (kind, id) => `/crm/${KIND_PATH[kind] || 'dashboard'}?open=${kind}:${id}`;
-const STATUS_CLASS = { New: 'new', Contacted: 'pending', Qualified: 'active', Junk: 'rejected', Converted: 'joined', Won: 'joined', Lost: 'rejected', Prospect: 'new', Client: 'active' };
+const STATUS_CLASS = { Draft: 'review', Sent: 'pending', Accepted: 'joined', Declined: 'rejected', Hot: 'overdue', Warm: 'pending', Cold: 'new', New: 'new', Contacted: 'pending', Qualified: 'active', Junk: 'rejected', Converted: 'joined', Won: 'joined', Lost: 'rejected', Prospect: 'new', Client: 'active' };
+// a file from the API (CSV, PDF) with the login's token: opened (PDF) or saved (CSV)
+export async function download(url, name, { open } = {}) {
+  const r = await api.get(url, { responseType: 'blob' });
+  const href = URL.createObjectURL(r.data);
+  if (open) { window.open(href, '_blank', 'noopener'); setTimeout(() => URL.revokeObjectURL(href), 60000); return; }
+  const a = document.createElement('a'); a.href = href; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 10000);
+}
+// Call / WhatsApp / Email straight from a record (the phone's dialer, WhatsApp, the mail app)
+export function QuickContact({ phone, email }) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  const wa = digits.length === 10 ? `91${digits}` : digits;
+  if (!digits && !email) return null;
+  return (
+    <span style={{ display: 'inline-flex', gap: 4 }}>
+      {digits && <a className="btn btn-sm" href={`tel:${phone}`} title={`Call ${phone}`}>📞 Call</a>}
+      {digits.length >= 10 && <a className="btn btn-sm" href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" title="Open WhatsApp">💬 WhatsApp</a>}
+      {email && <a className="btn btn-sm" href={`mailto:${email}`} title={`Email ${email}`}>✉️ Email</a>}
+    </span>
+  );
+}
 export const Pill = ({ v }) => (v ? <span className={`status ${STATUS_CLASS[v] || 'review'}`}>{v}</span> : null);
 
 // ---- the forms -------------------------------------------------------------------------------------------
@@ -41,6 +69,7 @@ function fieldsFor(kind, me) {
       { k: 'company', label: 'Company *' }, { k: 'contactName', label: 'Contact person' }, { k: 'designation', label: 'Designation' },
       { k: 'phone', label: 'Phone', type: 'tel' }, { k: 'email', label: 'Email', type: 'email' }, { k: 'industry', label: 'Industry' },
       { k: 'city', label: 'City' }, { k: 'source', label: 'Source', type: 'select', options: L.sources },
+      { k: 'rating', label: 'Rating', type: 'select', options: L.ratings },
       { k: 'status', label: 'Status', type: 'select', options: L.leadStatuses.filter((s) => s !== 'Converted'), editOnly: true },
       { k: 'notes', label: 'Notes', type: 'textarea', wide: true },
     ];
@@ -64,6 +93,7 @@ function fieldsFor(kind, me) {
     { k: 'openings', label: 'Openings', type: 'number' }, { k: 'avgCtc', label: 'Average CTC (₹ a year)', type: 'number' }, { k: 'feePercent', label: 'Our fee (% of CTC)', type: 'number' },
     { k: 'value', label: 'Deal value (₹)', type: 'number', hint: 'Worked out from openings × CTC × fee when all three are given.' },
     { k: 'expectedClose', label: 'Expected close', type: 'date' },
+    { k: 'nextStep', label: 'Next step', hint: 'For example: send the proposal, meet the HR head' },
   ];
 }
 
@@ -136,15 +166,15 @@ export function RecordForm({ kind, row, preset, onClose, onSaved }) {
             <label>{x.label}</label>
             {input(x)}
             {x.k === 'value' && auto != null && <div className="small-muted" style={{ marginTop: 3 }}>{money(auto)} (openings × CTC × fee)</div>}
-            {x.hint && auto == null && <div className="small-muted" style={{ marginTop: 3 }}>{x.hint}</div>}
+            {x.hint && (x.k !== 'value' || auto == null) && <div className="small-muted" style={{ marginTop: 3 }}>{x.hint}</div>}
           </div>
         ))}
         {me.canAssign && (
           <div className="field">
-            <label>Owner (BDE)</label>
+            <label>Owner (salesperson)</label>
             <select value={f.ownerId || ''} onChange={(e) => set('ownerId', e.target.value)}>
               <option value="">{editing ? (row.ownerName || '—') : 'Me'}</option>
-              {me.owners.map((o) => <option key={o.id} value={o.id}>{o.name}{o.tl ? ' · BDE TL' : ''}</option>)}
+              {me.owners.map((o) => <option key={o.id} value={o.id}>{o.name}{o.tl ? ' · Sales manager' : ''}</option>)}
             </select>
           </div>
         )}
@@ -319,6 +349,100 @@ export function useMoveDeal(onMoved) {
   return { move, dialog };
 }
 
+// ---- proposals of a deal (PDF, email to the client, accepted / declined) ------------------------------------------
+function ProposalForm({ dealId, defaults, onClose, onDone }) {
+  const { toast } = useCrm();
+  const [f, setF] = useState(() => ({ ...defaults, roles: defaults.roles.map((r) => ({ ...r })) }));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const setRole = (i, k, v) => setF((x) => ({ ...x, roles: x.roles.map((r, j) => (j === i ? { ...r, [k]: v } : r)) }));
+  async function save() {
+    setBusy(true); setErr('');
+    try { const r = await api.post(`/crm/deals/${dealId}/proposals`, f); toast(`Proposal ${r.data.proposal.number} is ready.`); onDone(r.data.proposal); } catch (e) { setErr(errOf(e, 'The proposal could not be made.')); } finally { setBusy(false); }
+  }
+  const numField = (k, label, extra) => <div className="field"><label>{label}</label><input type="number" min={0} value={f[k] ?? ''} onChange={(e) => set(k, e.target.value)} {...extra} /></div>;
+  return (
+    <Modal title="New proposal" size="wide" onClose={onClose} foot={<><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="button" className="btn btn-primary" disabled={busy} onClick={save}>{busy ? 'Making…' : 'Make the proposal (PDF)'}</button></>}>
+      <div className="grid-3">
+        <div className="field"><label>Company</label><input type="text" value={f.company || ''} onChange={(e) => set('company', e.target.value)} /></div>
+        <div className="field"><label>To (person)</label><input type="text" value={f.toName || ''} onChange={(e) => set('toName', e.target.value)} /></div>
+        <div className="field"><label>Their email</label><input type="email" value={f.toEmail || ''} onChange={(e) => set('toEmail', e.target.value)} /></div>
+      </div>
+      <div className="section-label" style={{ marginTop: 4 }}>Positions</div>
+      {f.roles.map((r, i) => (
+        <div key={i} style={{ display: 'grid', gridTemplateColumns: '3fr 1fr 2fr auto', gap: 6, marginBottom: 6 }}>
+          <input type="text" placeholder="Job title" value={r.title} onChange={(e) => setRole(i, 'title', e.target.value)} aria-label="Job title" />
+          <input type="number" min={0} placeholder="Openings" value={r.openings} onChange={(e) => setRole(i, 'openings', e.target.value)} aria-label="Openings" />
+          <input type="number" min={0} placeholder="Annual CTC ₹" value={r.ctc} onChange={(e) => setRole(i, 'ctc', e.target.value)} aria-label="Annual CTC" />
+          <button type="button" className="btn btn-sm" disabled={f.roles.length === 1} onClick={() => setF((x) => ({ ...x, roles: x.roles.filter((_, j) => j !== i) }))} aria-label="Remove position">×</button>
+        </div>
+      ))}
+      <button type="button" className="btn btn-sm" onClick={() => setF((x) => ({ ...x, roles: [...x.roles, { title: '', openings: '', ctc: '' }] }))}>+ Position</button>
+      <div className="section-label">Terms</div>
+      <div className="grid-3">
+        {numField('feePercent', 'Fee (% of annual CTC)', { step: '0.01' })}
+        {numField('gstPercent', 'GST %')}
+        {numField('paymentDays', 'Payment within (days of invoice)')}
+        {numField('guaranteeDays', 'Replacement guarantee (days)')}
+        {numField('validityDays', 'Proposal valid for (days)')}
+      </div>
+      <div className="field"><label>Notes (optional)</label><textarea rows={3} value={f.notes || ''} onChange={(e) => set('notes', e.target.value)} /></div>
+      {err && <div className="small-muted" role="alert" style={{ color: 'var(--red)' }}>{err}</div>}
+    </Modal>
+  );
+}
+
+function ProposalBox({ dealId, onChanged }) {
+  const { toast } = useCrm();
+  const [d, setD] = useState(null);
+  const [making, setMaking] = useState(false);
+  const [sending, setSending] = useState(null); // the proposal being emailed
+  const [to, setTo] = useState('');
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  const load = () => api.get(`/crm/deals/${dealId}/proposals`).then((r) => setD(r.data)).catch(() => setD({ proposals: [], canEdit: false }));
+  useEffect(() => { load(); }, [dealId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pdf = (p) => download(`/crm/proposals/${p.id}/pdf`, `${p.number}.pdf`, { open: true }).catch(() => toast('The PDF could not be opened.'));
+  async function send() {
+    setBusy(true);
+    try { const r = await api.post(`/crm/proposals/${sending.id}/send`, { to, message: msg }); toast(`Sent to ${r.data.sentTo}.`); setSending(null); load(); if (onChanged) onChanged(); } catch (e) { toast(errOf(e, 'The proposal was not sent.')); } finally { setBusy(false); }
+  }
+  async function decide(p, status) {
+    try { await api.post(`/crm/proposals/${p.id}/status`, { status }); toast(`Marked ${status.toLowerCase()}.`); load(); if (onChanged) onChanged(); } catch (e) { toast(errOf(e, 'This could not be saved.')); }
+  }
+  if (!d) return null;
+  return (
+    <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+        <div className="section-label" style={{ margin: 0 }}>Proposals ({d.proposals.length})</div>
+        {d.canEdit && d.defaults && <button type="button" className="btn btn-sm" style={{ marginLeft: 'auto' }} onClick={() => setMaking(true)}>+ Proposal</button>}
+      </div>
+      {!d.proposals.length && <div className="small-muted">No proposal yet. Make one: positions and fee terms, as a PDF you can email to the client.</div>}
+      {d.proposals.map((p) => (
+        <div key={p.id} style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '6px 0', borderBottom: '1px solid var(--line-soft)', fontSize: 13 }}>
+          <b>{p.number}</b> <Pill v={p.status} />
+          <span className="small-muted" style={{ fontSize: 11.5 }}>{p.sentAt ? `sent ${dateOf(p.sentAt)} to ${p.sentTo}` : `made ${dateOf(p.createdAt)}`}</span>
+          <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn-sm" onClick={() => pdf(p)}>PDF</button>
+            {d.canEdit && <button type="button" className="btn btn-sm" onClick={() => { setSending(p); setTo(d.defaults ? d.defaults.toEmail : ''); setMsg(''); }}>Email</button>}
+            {d.canEdit && p.status !== 'Accepted' && <button type="button" className="btn btn-sm" onClick={() => decide(p, 'Accepted')}>Accepted</button>}
+            {d.canEdit && p.status !== 'Declined' && <button type="button" className="btn btn-sm" onClick={() => decide(p, 'Declined')}>Declined</button>}
+          </span>
+        </div>
+      ))}
+      {making && <ProposalForm dealId={dealId} defaults={d.defaults} onClose={() => setMaking(false)} onDone={(p) => { setMaking(false); load(); pdf(p); }} />}
+      {sending && (
+        <Modal title={`Email ${sending.number}`} onClose={() => setSending(null)} foot={<><button type="button" className="btn" onClick={() => setSending(null)}>Cancel</button><button type="button" className="btn btn-primary" disabled={busy || !to} onClick={send}>{busy ? 'Sending…' : 'Send'}</button></>}>
+          <div className="field"><label>To (email)</label><input type="email" value={to} onChange={(e) => setTo(e.target.value)} /></div>
+          <div className="field"><label>Message (optional: a polite default is used when empty)</label><textarea rows={4} value={msg} onChange={(e) => setMsg(e.target.value)} /></div>
+          <div className="small-muted">The PDF is attached. The deal moves to "Proposal sent" and the email is written on its timeline.</div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 // ---- one record ---------------------------------------------------------------------------------------------
 export function RecordPanel({ kind, id, onClose, onChanged }) {
   const { me } = useCrm();
@@ -333,6 +457,7 @@ export function RecordPanel({ kind, id, onClose, onChanged }) {
   const { move, dialog } = useMoveDeal(changed);
   const row = d && d[kind];
   const name = row ? (row.company || row.name || row.title) : '';
+  const stale = kind === 'deal' && row ? staleDays(row, (d.activities || [])[0], me.lists.staleDays) : 0;
   const link = row ? { [`${kind}Id`]: row.id } : null;
 
   function addAsClient() {
@@ -349,13 +474,16 @@ export function RecordPanel({ kind, id, onClose, onChanged }) {
       ? [['Contact', [row.contactName, row.designation].filter(Boolean).join(' · ')], ['Phone', row.phone], ['Email', row.email], ['Industry', row.industry], ['City', row.city], ['Source', row.source]]
       : kind === 'deal'
         ? [['Account', d.account ? <Link to={recordLink('account', d.account.id)}>{d.account.name}</Link> : '—'], ['Contact', d.contact ? `${d.contact.name}${d.contact.phone ? ` · ${d.contact.phone}` : ''}` : ''], ['Value', money(row.value)], ['Probability', `${row.probability}%`],
-          ['Openings × CTC × fee', row.openings ? `${row.openings} × ${money(row.avgCtc)} × ${row.feePercent || 0}%` : ''], ['Expected close', dateOf(row.expectedClose)], ...(row.stage === 'Lost' ? [['Lost because', row.lostReason]] : [])]
+          ['Openings × CTC × fee', row.openings ? `${row.openings} × ${money(row.avgCtc)} × ${row.feePercent || 0}%` : ''], ['Expected close', dateOf(row.expectedClose)], ['Next step', row.nextStep], ...(row.stage === 'Lost' ? [['Lost because', row.lostReason]] : [])]
         : [['Type', <Pill v={row.kind} />], ['Industry', row.industry], ['City', row.city], ['Phone', row.phone], ['Email', row.email], ['Website', row.website], ['Source', row.source],
           ...(d.client ? [['TeamLink client', <Link to={`/clients/${d.client.id}`}>{d.client.name} ↗</Link>]] : [])];
     body = (
       <>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 12 }}>
           {kind === 'lead' && <Pill v={row.status} />}
+          {kind === 'lead' && <Pill v={row.rating} />}
+          {kind === 'deal' && stale > 0 && <span className="status overdue" title={`Nothing logged for ${stale} days`}>💤 {stale} days quiet</span>}
+          <QuickContact phone={kind === 'deal' ? (d.contact && d.contact.phone) : row.phone} email={kind === 'deal' ? (d.contact && d.contact.email) : row.email} />
           {kind === 'deal' && <Pill v={['Won', 'Lost'].includes(row.stage) ? row.stage : null} />}
           <span className="small-muted">Owner: {row.ownerName || '—'}</span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -379,6 +507,7 @@ export function RecordPanel({ kind, id, onClose, onChanged }) {
           {facts.filter(([, v]) => v).map(([l, v]) => <div key={l}><div className="small-muted" style={{ fontSize: 11 }}>{l}</div><div style={{ fontSize: 13 }}>{v}</div></div>)}
         </div>
         {row.notes && <div className="card" style={{ padding: 10, marginBottom: 12, whiteSpace: 'pre-wrap', fontSize: 13 }}>{row.notes}</div>}
+        {kind === 'deal' && <ProposalBox dealId={row.id} onChanged={changed} />}
         {kind === 'account' && (
           <div className="grid-2" style={{ marginBottom: 12 }}>
             <div className="card" style={{ padding: 12 }}>

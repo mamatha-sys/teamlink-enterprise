@@ -289,6 +289,8 @@ export const ACCOUNTS_ITEMS = [
 // and the Managers (read only); the server decides what each one sees (backend/src/crm/service.js).
 const crmOpen = (u) => {
   if (!u || isExternalUser(u)) return false;
+  // the server says who is on the sales team (crmRole on /auth/me, 2026-11-02: people an Admin adds in CRM settings too)
+  if (u.crmRole !== undefined) return !!u.crmRole;
   const ats = productRole(u, 'ats');
   if (['SUPER_ADMIN', 'ADMIN', 'BDE'].includes(u.role) || ['SUPER_ADMIN', 'ADMIN', 'BDE', 'MANAGER', 'ASSISTANT_MANAGER'].includes(ats)) return true;
   return ats === 'TL' && String(u.atsDepartment || '').toUpperCase() === 'BDE';

@@ -4,10 +4,10 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../../api';
-import { useCrm, errOf, money, moneyShort, dateOf, istToday, RecordForm, RecordPanel, useOpenParam, useMoveDeal } from './crmShared.jsx';
+import { useCrm, errOf, money, moneyShort, dateOf, istToday, RecordForm, RecordPanel, useOpenParam, useMoveDeal, staleDays, download } from './crmShared.jsx';
 
 export default function CrmDeals() {
-  const { me } = useCrm();
+  const { me, toast } = useCrm();
   const [sp, setSp] = useSearchParams();
   const [open, setOpen] = useOpenParam(sp, setSp);
   const [adding, setAdding] = useState(sp.get('add') === '1');
@@ -24,7 +24,7 @@ export default function CrmDeals() {
   useEffect(() => { if (sp.get('add') === '1') { const n = new URLSearchParams(sp); n.delete('add'); setSp(n, { replace: true }); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const { move, dialog } = useMoveDeal(() => load());
   const today = istToday();
-  const mayMove = () => me.canEdit; // a BDE only reads their own deals; the BDE TL / Admin move any
+  const mayMove = () => me.canEdit; // a salesperson only reads their own deals; a sales manager / Admin moves any
 
   const openDeals = (rows || []).filter((d) => !['Won', 'Lost'].includes(d.stage));
   const card = (d) => (
@@ -48,6 +48,7 @@ export default function CrmDeals() {
           {d.nextTaskDue && !['Won', 'Lost'].includes(d.stage) && <span className={d.nextTaskDue < today ? 'late' : ''}>{d.expectedClose ? ' · ' : ''}Follow-up {d.nextTaskDue === today ? 'today' : dateOf(d.nextTaskDue)}</span>}
         </div>
       )}
+      {staleDays(d, null, me.lists.staleDays) > 0 && <div className="s late" title="Nothing logged for a while">💤 {staleDays(d, null, me.lists.staleDays)} days quiet</div>}
       {d.stage === 'Lost' && d.lostReason && <div className="s">{d.lostReason}</div>}
       {d.stage === 'Won' && <div className="s">{d.clientId ? '✓ TeamLink client' : 'Add as client →'}</div>}
     </div>
@@ -65,12 +66,13 @@ export default function CrmDeals() {
             <button type="button" className={`btn btn-sm${view === 'board' ? ' btn-primary' : ''}`} onClick={() => setView('board')}>Board</button>
             <button type="button" className={`btn btn-sm${view === 'list' ? ' btn-primary' : ''}`} onClick={() => setView('list')}>List</button>
           </div>
+          <button type="button" className="btn" onClick={() => download('/crm/export/deals', `crm-deals-${today}.csv`).catch(() => toast('The download did not work.'))}>Download</button>
           {me.canEdit && <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>+ Deal</button>}
         </div>
       </div>
       <div className="filter-row">
         <input type="text" placeholder="Search deal or account" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 240 }} aria-label="Search deals" />
-        {me.seesAll && <select value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Owner"><option value="">Every BDE</option>{me.owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select>}
+        {me.seesAll && <select value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Owner"><option value="">Everyone</option>{me.owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select>}
         {me.canEdit && view === 'board' && <span className="small-muted">Drag a deal to its new stage.</span>}
       </div>
       {err && <div className="notice" role="alert">{err}</div>}
