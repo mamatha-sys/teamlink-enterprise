@@ -17,13 +17,13 @@ import './CourseFiles.css';
 const MB = 1024 * 1024;
 export const LIMITS = {
   Video: { max: 300 * MB, ext: ['mp4', 'webm', 'mov', 'm4v', 'ogv'] },
-  Document: { max: 25 * MB, ext: ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'png', 'jpg', 'jpeg', 'webp'] },
+  Document: { max: 25 * MB, ext: ['pdf', 'txt', 'png', 'jpg', 'jpeg', 'webp'] },
 };
-export const LIMITS_TEXT = 'Videos: MP4, WebM or MOV, up to 300 MB. Documents: PDF, Word, PowerPoint, Excel or text, up to 25 MB.';
+export const LIMITS_TEXT = 'Videos: MP4, WebM or MOV, up to 300 MB. Documents: PDF, text or a picture, up to 25 MB. Word, PowerPoint or Excel: save as PDF first, so it opens in the browser.';
 
 const ACCEPT = {
   Video: '.mp4,.webm,.mov,.m4v,.ogv,video/mp4,video/webm,video/quicktime',
-  Document: '.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.png,.jpg,.jpeg,.webp',
+  Document: '.pdf,.txt,.png,.jpg,.jpeg,.webp',
 };
 
 const extOf = (name) => {
@@ -49,7 +49,7 @@ export function checkFile(file, kind) {
     }
     return kind === 'Video'
       ? 'This kind of video can\'t be added. Use MP4, WebM or MOV.'
-      : 'This kind of file can\'t be added. Use PDF, Word, PowerPoint, Excel or text.';
+      : 'This kind of file can\'t be added. Use PDF, text or a picture. A Word, PowerPoint or Excel file: save it as PDF first.';
   }
   if (!file.size) return 'This file is empty.';
   if (file.size > LIMITS[kind].max) {

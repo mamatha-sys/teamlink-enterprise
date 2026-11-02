@@ -325,24 +325,23 @@ function TextViewer({ src }) {
   return <pre className="lms-text">{state.text}</pre>;
 }
 
-// Word / PowerPoint / Excel: no browser can show these inside a page, so the
-// learner opens them on their own device. Said plainly on the screen — these
-// are the one kind of material that is NOT view-only.
+// Word / PowerPoint / Excel added before 2026-11-02: no browser can show these inside a page, and opening one saved it to the
+// device. Nothing is downloaded any more (founder 2026-11-02: "open document antey akkade open avali download avakudadhu"): the
+// screen says it must be added again as a PDF. New uploads of these types are refused.
 const OFFICE_NAME = {
   'application/msword': 'Word', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word',
   'application/vnd.ms-powerpoint': 'PowerPoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PowerPoint',
   'application/vnd.ms-excel': 'Excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel',
 };
-function OfficeFile({ src, material }) {
+function OfficeFile({ material }) {
   const app = OFFICE_NAME[material.mimeType] || 'Office';
   return (
     <div className="lms-office">
       <div className="lms-office-icon" aria-hidden="true">📄</div>
       <div>
         <b>{material.fileName || material.title}</b>
-        <div className="small-muted">This is a {app} file. It can&apos;t be shown inside the app — open it on your device. Keep this screen open while you read it.</div>
+        <div className="small-muted">This is a {app} file, which can&apos;t open inside the app. Ask HR or your TL to add it again as a PDF — then it opens right here.</div>
       </div>
-      <button type="button" className="btn btn-primary" onClick={() => window.open(src, '_blank', 'noopener')}>Open file</button>
     </div>
   );
 }
@@ -355,7 +354,7 @@ export function SecureDocument({ material, onPages }) {
   useBlockSaveKeys();
   if (error) return <div className="error-text">{error}</div>;
   if (!src) return <div className="small-muted">Loading document…</div>;
-  if (OFFICE_NAME[material.mimeType]) return <OfficeFile src={src} material={material} />;
+  if (OFFICE_NAME[material.mimeType]) return <OfficeFile material={material} />;
   const isPdf = material.mimeType === 'application/pdf';
   const isText = material.mimeType === 'text/plain';
   return (

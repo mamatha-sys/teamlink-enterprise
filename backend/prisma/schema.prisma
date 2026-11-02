@@ -2442,6 +2442,8 @@ model CourseAssessmentAttempt {
   total        Int       @default(0)
   passed       Boolean?
   timedOut     Boolean   @default(false)
+  // what was answered, per question (JSON: question, options, chosen, correct) - shown back once the course is completed (2026-11-02)
+  answers      String?
 
   @@index([assignmentId])
   @@index([courseId, employeeId])

@@ -229,6 +229,12 @@ async function ownEmployee(req) {
   return prisma.employee.findUnique({ where: { userId: req.user.id } });
 }
 
+// ONLY MY DEPARTMENT'S COURSES (founder 2026-11-02: "valla department assign chesina courses matrame kanipinchali"). A course that
+// reached this person because it was given to a department they are no longer in is not theirs any more: hidden from My Courses and
+// refused when opened. Courses given to everyone, or to them by name, stay.
+const lowDept = (d) => String(d || '').trim().toLowerCase();
+const inMyDepartment = (a, me) => !(a && a.source === 'Department' && a.department && me && me.department && lowDept(a.department) !== lowDept(me.department));
+
 // ===========================================================================
 // THE COMPLETION RULES.
 //
@@ -515,7 +521,7 @@ router.get('/my', VIEW, async (req, res) => {
   const me = await ownEmployee(req);
   if (me) await joinOrgWideCourses(me);
   const mine = me
-    ? await prisma.courseAssignment.findMany({ where: { employeeId: me.id } })
+    ? (await prisma.courseAssignment.findMany({ where: { employeeId: me.id } })).filter((a) => inMyDepartment(a, me))
     : [];
   const courses = mine.length
     ? await prisma.course.findMany({
@@ -596,7 +602,7 @@ router.get('/my/courses/:id', VIEW, async (req, res) => {
   const assignment = await prisma.courseAssignment.findUnique({
     where: { courseId_employeeId: { courseId: course.id, employeeId: me.id } },
   });
-  if (!assignment) return res.status(403).json({ error: 'You are not enrolled on this course' });
+  if (!assignment || !inMyDepartment(assignment, me)) return res.status(403).json({ error: 'You are not enrolled on this course' });
 
   const ev = await evaluate(course, await touch(assignment));
   const a = ev.assignment;
@@ -1611,6 +1617,80 @@ router.post('/courses/:id/questions/import', MANAGE, EDIT_COURSE(byCourseParam),
   return res.status(201).json({ imported: created.length, rejected, questions: created });
 });
 
+// QUESTIONS AND ANSWERS FROM AN EXCEL / CSV FILE (founder 2026-11-02: "course add chese tapudu assessment question and answers upload
+// cheyali"). One row per question: Question | Option A | Option B | Option C | Option D (up to F) | Answer. The Answer is the letter
+// (A, B, ...) or the exact text of the right option. A row without a usable answer is REPORTED, never guessed. The sample file is
+// GET /lms/questions/sample (the same columns, two example rows).
+const Q_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
+function questionsFromSheet(buffer) {
+  const XLSX = require('xlsx'); // eslint-disable-line global-require
+  const wb = XLSX.read(buffer, { type: 'buffer' });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  if (!sheet) return { ready: [], rejected: [{ row: 0, reason: 'The file has no sheet' }] };
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
+  const key = (r, ...names) => {
+    const k = Object.keys(r).find((x) => names.includes(String(x).trim().toLowerCase().replace(/\s+/g, ' ')));
+    return k ? String(r[k]).trim() : '';
+  };
+  const ready = []; const rejected = [];
+  rows.forEach((r, i) => {
+    const rowNo = i + 2; // row 1 is the header
+    const question = key(r, 'question', 'questions');
+    const opts = Q_LETTERS.map((L) => key(r, `option ${L.toLowerCase()}`, L.toLowerCase(), `option${L.toLowerCase()}`)).filter(Boolean);
+    const answer = key(r, 'answer', 'correct answer', 'correct');
+    if (!question && !opts.length && !answer) return; // an empty row
+    if (!question) { rejected.push({ row: rowNo, reason: 'No question' }); return; }
+    if (opts.length < 2) { rejected.push({ row: rowNo, question, reason: 'Fewer than two options' }); return; }
+    let correctIndex = -1;
+    const letter = answer.replace(/^option\s*/i, '').trim().toUpperCase();
+    if (/^[A-F]$/.test(letter)) correctIndex = Q_LETTERS.indexOf(letter);
+    if (correctIndex < 0) correctIndex = opts.findIndex((o) => o.toLowerCase() === answer.toLowerCase());
+    if (correctIndex < 0 || correctIndex >= opts.length) { rejected.push({ row: rowNo, question, reason: answer ? `The answer "${answer}" is not one of the options` : 'No answer' }); return; }
+    ready.push({ question, options: opts, correctIndex });
+  });
+  return { ready, rejected };
+}
+router.get('/questions/sample', MANAGE, (req, res) => {
+  const XLSX = require('xlsx'); // eslint-disable-line global-require
+  const ws = XLSX.utils.aoa_to_sheet([
+    ['Question', 'Option A', 'Option B', 'Option C', 'Option D', 'Answer'],
+    ['What is the login time in the office?', '9:00 AM', '9:15 AM', '10:00 AM', '11:00 AM', 'B'],
+    ['Which day is the weekly off?', 'Saturday', 'Sunday', 'Monday', 'Friday', 'Sunday'],
+  ]);
+  ws['!cols'] = [{ wch: 50 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 10 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Questions');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="assessment-questions-sample.xlsx"');
+  return res.send(buf);
+});
+router.post('/courses/:id/questions/import-file', MANAGE, EDIT_COURSE(byCourseParam), async (req, res) => {
+  const course = await courseOr404(req, res);
+  if (!course) return undefined;
+  let parsed;
+  try { parsed = await attachments.parseMultipart(req, { maxBytes: 5 * 1024 * 1024 }); } catch { return res.status(400).json({ error: 'The file could not be read. Upload an Excel (.xlsx) or CSV file of 5 MB or less.' }); }
+  const f = parsed && parsed.file;
+  if (!f || !f.data || !f.data.length) return res.status(400).json({ error: 'Choose the questions file first.' });
+  if (!/\.(xlsx|xls|csv)$/i.test(f.filename || '')) return res.status(400).json({ error: 'Upload the questions as an Excel (.xlsx) or CSV file. Download the sample to see the columns.' });
+  let out;
+  try { out = questionsFromSheet(f.data); } catch { return res.status(400).json({ error: 'The file could not be read as a spreadsheet. Download the sample and fill it in.' }); }
+  if (!out.ready.length) return res.status(400).json({ error: 'No question in the file could be used. Check the columns against the sample.', rejected: out.rejected });
+  let position = await prisma.assessmentQuestion.count({ where: { courseId: course.id } });
+  const created = [];
+  for (const q of out.ready) {
+    // eslint-disable-next-line no-await-in-loop
+    const row = await prisma.assessmentQuestion.create({ data: { courseId: course.id, question: q.question, options: JSON.stringify(q.options), correctIndex: q.correctIndex, position } });
+    position += 1;
+    created.push(bankQuestion(row));
+  }
+  await logAudit({ userId: req.user.id, actorName: req.user.name, action: `Assessment questions uploaded from a file (${created.length})`, entity: 'Course', entityId: course.id, toValue: f.filename });
+  await require('../utils/dataIoNotify').notifyDataIo(req, { // eslint-disable-line global-require
+    kind: 'import', module: 'LMS', count: created.length + out.rejected.length, created: created.length, what: 'assessment questions', detail: `course "${course.title}" from ${f.filename}; ${out.rejected.length} row(s) rejected`,
+  });
+  return res.status(201).json({ imported: created.length, rejected: out.rejected, questions: created });
+});
+
 // --- Enrolled Employees ----------------------------------------------------
 // Enrolling SOMEBODY ELSE, one person at a time, from the course screen. The
 // same scope rule, audit trail and notification as a bulk assignment.
@@ -1661,6 +1741,11 @@ router.post('/enrollments/:id/extra-attempt', ASSIGN, async (req, res) => {
   }
   if (a.completed) return res.status(409).json({ error: 'This learner has already completed the course.' });
   if (a.course.maxAttempts == null) return res.status(409).json({ error: 'This course allows unlimited attempts.' });
+  // No changing answers after seeing them (founder 2026-11-02: "change chesukodaniki permission undakudadhu employees ki"): once the
+  // last attempt is used, the learner is shown the right answers - another attempt after that would be taken with the key in hand.
+  if (attemptsLeftOf(a.course, a) === 0 && await prisma.courseAssessmentAttempt.count({ where: { assignmentId: a.id, answers: { not: null } } })) {
+    return res.status(409).json({ error: 'This learner has already been shown the right answers, so another attempt is not allowed.' });
+  }
   const updated = await prisma.courseAssignment.update({ where: { id: a.id }, data: { extraAttempts: { increment: 1 } } });
   await logAudit({ userId: req.user.id, actorName: req.user.name, action: 'Extra assessment attempt granted', entity: 'Course', entityId: a.courseId, toValue: a.employee.name });
   return res.json({ id: updated.id, extraAttempts: updated.extraAttempts, attemptsLeft: attemptsLeftOf(a.course, updated) });
@@ -1840,6 +1925,15 @@ router.post('/courses/:id/assessment/submit', VIEW, async (req, res) => {
   const bank = await prisma.assessmentQuestion.findMany({ where: { id: { in: parseIds(attempt.questionIds) } } });
   const timedOut = expired(attempt, now);
   let correct = 0;
+  // WHAT WAS ANSWERED, kept with the attempt (founder 2026-11-02: "assessment rasi complete ina tarvatha answers chupinchali"):
+  // every question in the order of the paper, its options, the learner's answer and the right one. Shown back only once the
+  // course is completed (or no attempt is left) - never while a retake could still use it.
+  const order = parseIds(attempt.questionIds);
+  const review = order.map((qid) => bank.find((q) => q.id === qid)).filter(Boolean).map((q) => {
+    const opts = parseOptions(q.options);
+    const chosen = answers[q.id] !== undefined && answers[q.id] !== null ? String(answers[q.id]) : null;
+    return { question: q.question, options: opts, chosen, correct: opts[q.correctIndex], right: !timedOut && chosen !== null && chosen === opts[q.correctIndex] };
+  });
   if (!timedOut) {
     bank.forEach((q) => {
       const opts = parseOptions(q.options);
@@ -1854,7 +1948,7 @@ router.post('/courses/:id/assessment/submit', VIEW, async (req, res) => {
 
   await prisma.courseAssessmentAttempt.update({
     where: { id: attempt.id },
-    data: { submittedAt: now, score, correct, total, passed, timedOut },
+    data: { submittedAt: now, score, correct, total, passed, timedOut, answers: JSON.stringify(review) },
   });
   let updated = await prisma.courseAssignment.update({
     where: { id: assignment.id },
@@ -1891,7 +1985,26 @@ router.post('/courses/:id/assessment/submit', VIEW, async (req, res) => {
     completedAt: updated.completedAt, certificateId: updated.certificateId,
     certificateEligible: updated.certificateEligible,
     assignmentId: updated.id,
+    // the answers, once nothing can be changed any more: the course is completed, or no attempt is left
+    review: updated.completed || left === 0 ? review : null,
   });
+});
+
+// THE ANSWERS OF THE LAST ATTEMPT, to read again later (founder 2026-11-02). Only the learner's own, and only once the course is
+// completed or no attempt is left - so a retake can never be done with the answer key in hand. Read only: nothing here changes.
+router.get('/my/courses/:id/review', VIEW, async (req, res) => {
+  const me = await ownEmployee(req);
+  if (!me) return res.status(404).json({ error: 'No employee record is linked to this login' });
+  const course = await prisma.course.findUnique({ where: { id: req.params.id } });
+  if (!course) return res.status(404).json({ error: 'Course not found' });
+  const assignment = await prisma.courseAssignment.findUnique({ where: { courseId_employeeId: { courseId: course.id, employeeId: me.id } } });
+  if (!assignment) return res.status(403).json({ error: 'You are not assigned to this course' });
+  if (!assignment.completed && attemptsLeftOf(course, assignment) !== 0) return res.status(409).json({ error: 'The answers are shown after you complete the assessment.' });
+  const last = await prisma.courseAssessmentAttempt.findFirst({ where: { assignmentId: assignment.id, submittedAt: { not: null } }, orderBy: { attemptNo: 'desc' } });
+  if (!last) return res.status(404).json({ error: 'No assessment was submitted yet.' });
+  let review = null;
+  try { review = last.answers ? JSON.parse(last.answers) : null; } catch { review = null; }
+  return res.json({ attemptNo: last.attemptNo, score: last.score, correct: last.correct, total: last.total, passed: last.passed, submittedAt: last.submittedAt, review });
 });
 
 // ===========================================================================

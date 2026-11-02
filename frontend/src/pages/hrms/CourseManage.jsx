@@ -118,11 +118,49 @@ function QuestionModal({ courseId, editing, onClose, onSaved }) {
   );
 }
 
+// QUESTIONS AND ANSWERS FROM AN EXCEL / CSV FILE (founder 2026-11-02: "course add chese tapudu assessment question and answers upload
+// cheyali"): Question | Option A..D | Answer (the letter or the right option's text). Server: /lms/questions/sample, .../questions/import-file.
+export async function downloadQuestionSample() {
+  const r = await api.get('/lms/questions/sample', { responseType: 'blob' });
+  const url = URL.createObjectURL(r.data);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'assessment-questions-sample.xlsx';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+export async function uploadQuestionsFile(courseId, file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const r = await api.post(`/lms/courses/${courseId}/questions/import-file`, fd);
+  return r.data;
+}
+function RejectedRows({ rows }) {
+  if (!rows || !rows.length) return null;
+  return (
+    <ul style={{ margin: '6px 0 0 16px' }}>
+      {rows.map((r) => <li key={`${r.row || r.block}-${r.reason}`}>{r.row ? `Row ${r.row}` : `Block ${r.block}`}{r.question ? ` — "${r.question}"` : ''}: {r.reason}</li>)}
+    </ul>
+  );
+}
+
 function ImportModal({ courseId, onClose, onSaved }) {
   const [text, setText] = useState('');
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+
+  async function runFile(file) {
+    if (!file) return;
+    setError(''); setBusy(true);
+    try {
+      const data = await uploadQuestionsFile(courseId, file);
+      setResult(data);
+      if (data.imported) onSaved(true);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not read that file.');
+      if (err.response?.data?.rejected) setResult({ imported: 0, rejected: err.response.data.rejected });
+    } finally { setBusy(false); }
+  }
 
   async function run() {
     setError(''); setBusy(true);
@@ -144,8 +182,16 @@ function ImportModal({ courseId, onClose, onSaved }) {
         <button className="btn btn-primary" disabled={busy || !text.trim()} onClick={run}>{busy ? 'Importing…' : 'Import'}</button>
       </>}
     >
-      <div className="small-muted" style={{ marginBottom: 8 }}>
-        One question per block, blank line between blocks. Mark the correct option with a <b>*</b>. A block with
+      <div className="field">
+        <label>Upload an Excel or CSV file (questions with their answers)</label>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input type="file" accept=".xlsx,.xls,.csv" disabled={busy} onChange={(e) => runFile(e.target.files && e.target.files[0])} />
+          <button type="button" className="btn btn-sm" onClick={() => downloadQuestionSample().catch(() => setError('The sample could not be downloaded.'))}>Download sample</button>
+        </div>
+        <div className="small-muted" style={{ marginTop: 4 }}>Columns: Question, Option A, Option B, Option C, Option D, Answer (A / B / C / D, or the right option&apos;s words).</div>
+      </div>
+      <div className="small-muted" style={{ margin: '10px 0 8px' }}>Or paste them:
+        one question per block, blank line between blocks. Mark the correct option with a <b>*</b>. A block with
         nothing marked is reported back rather than guessed at.
       </div>
       <pre className="import-sample">{`1. What is prompt engineering?
@@ -160,13 +206,7 @@ D. Engineer`}</pre>
       {result && (
         <div className="notice">
           Imported <b>{result.imported}</b> question(s).
-          {result.rejected.length > 0 && (
-            <ul style={{ margin: '6px 0 0 16px' }}>
-              {result.rejected.map((r) => (
-                <li key={r.block}>Block {r.block}{r.question ? ` — "${r.question}"` : ''}: {r.reason}</li>
-              ))}
-            </ul>
-          )}
+          <RejectedRows rows={result.rejected} />
         </div>
       )}
       {error && <div className="error-text">{error}</div>}
@@ -207,6 +247,8 @@ export function CourseFormModal({ course, onClose, onSaved }) {
   const [items, setItems] = useState([]);
   const [created, setCreated] = useState(null);
   const [phase, setPhase] = useState('form'); // form | uploading | done
+  const [qFile, setQFile] = useState(null); // the questions + answers file, uploaded once the course exists
+  const [qResult, setQResult] = useState(null);
   const patchItem = (key, patch) => setItems((list) => list.map((it) => (it.key === key ? { ...it, ...patch } : it)));
 
   async function uploadAll(newCourse) {
@@ -222,7 +264,6 @@ export function CourseFormModal({ course, onClose, onSaved }) {
         patchItem(it.key, { status: 'failed', error: err.message });
       }
     }
-    setPhase('done');
   }
 
   async function save() {
@@ -234,9 +275,15 @@ export function CourseFormModal({ course, onClose, onSaved }) {
         return;
       }
       const res = await api.post('/lms/courses', form);
-      if (!items.some((it) => it.status === 'waiting')) { onSaved(res.data); return; }
+      if (!items.some((it) => it.status === 'waiting') && !qFile) { onSaved(res.data); return; }
       setCreated(res.data);
       await uploadAll(res.data);
+      if (qFile) {
+        try { setQResult(await uploadQuestionsFile(res.data.id, qFile)); } catch (err) {
+          setQResult({ imported: 0, rejected: err.response?.data?.rejected || [], error: err.response?.data?.error || 'The questions file could not be read.' });
+        }
+      }
+      setPhase('done');
     } catch (err) {
       setError(err.response?.data?.error || 'Could not save the course.');
     } finally { setBusy(false); }
@@ -251,7 +298,7 @@ export function CourseFormModal({ course, onClose, onSaved }) {
 
   let footer;
   if (phase === 'uploading') {
-    footer = <button className="btn btn-primary" disabled>Uploading files…</button>;
+    footer = <button className="btn btn-primary" disabled>Uploading…</button>;
   } else if (phase === 'done') {
     footer = <button className="btn btn-primary" onClick={() => onSaved(created)}>Open course</button>;
   } else {
@@ -269,7 +316,7 @@ export function CourseFormModal({ course, onClose, onSaved }) {
         <div className="notice cfiles-summary">
           <span>
             <b>Saved.</b> The course is created.{' '}
-            {phase === 'uploading'
+            {items.length === 0 ? (phase === 'uploading' ? 'Now adding the questions — keep this window open.' : '') : phase === 'uploading'
               ? 'Now adding your files — keep this window open.'
               : added === items.length
                 ? `All ${added} file${added === 1 ? '' : 's'} added.`
@@ -277,6 +324,12 @@ export function CourseFormModal({ course, onClose, onSaved }) {
           </span>
         </div>
         <CourseFilesPicker items={items} buttons={false} hint={false} />
+        {qFile && (
+          <div className={qResult && !qResult.imported ? 'error-text' : 'notice'} style={{ marginTop: 10 }}>
+            {!qResult ? 'Adding the questions…' : (qResult.imported ? <>Questions added: <b>{qResult.imported}</b>.</> : (qResult.error || 'No question was added.'))}
+            {qResult && <RejectedRows rows={qResult.rejected} />}
+          </div>
+        )}
       </Modal>
     );
   }
@@ -314,6 +367,16 @@ export function CourseFormModal({ course, onClose, onSaved }) {
             onRemove={(key) => setItems((list) => list.filter((it) => it.key !== key))}
             disabled={busy}
           />
+        </div>
+      )}
+      {!course && (
+        <div className="field">
+          <span>Assessment questions and answers (Excel or CSV)</span>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input type="file" accept=".xlsx,.xls,.csv" disabled={busy} onChange={(e) => setQFile((e.target.files && e.target.files[0]) || null)} />
+            <button type="button" className="btn btn-sm" onClick={() => downloadQuestionSample().catch(() => setError('The sample could not be downloaded.'))}>Download sample</button>
+          </div>
+          <div className="small-muted" style={{ marginTop: 4 }}>Columns: Question, Option A, Option B, Option C, Option D, Answer (A / B / C / D, or the right option&apos;s words). You can add more questions later.</div>
         </div>
       )}
       <div className="field">
@@ -829,7 +892,7 @@ export default function CourseManage({ courseId, onBack }) {
           </label>
           {note && <div className="small-muted" style={{ marginTop: 6, color: '#15803d' }}>{note}</div>}
           <div className="small-muted" style={{ marginTop: 6 }}>
-            PDFs, pictures, text and videos open inside the app only (view-only). Word, PowerPoint and Excel files open on the learner&apos;s own device — save them as PDF to keep them view-only.
+            PDFs, pictures, text and videos open inside the app only (view-only, never downloaded). Word, PowerPoint and Excel files are not taken — save them as PDF first.
           </div>
         </PanelPad>
 

@@ -161,7 +161,48 @@ function DocumentPanel({ material, minSeconds, onProgress }) {
 // Passed: the certificate, right where the learner submitted. Shown the
 // moment a passing submission comes back (and whenever a completed course is
 // reopened), so the learner never has to go looking for it.
-function PassedPanel({ assignment, passMark, onView, onDownload, downloading }) {
+// THE ANSWERS, read only (founder 2026-11-02: "assessment rasi complete ina tarvatha answers chupinchali, change chesukodaniki
+// permission undakudadhu employees ki"): every question, what the learner picked and the right answer. Shown once the course is
+// completed or no attempt is left (the server decides); nothing here can be changed.
+function AnswerReview({ review }) {
+  if (!review || !review.length) return null;
+  return (
+    <div style={{ marginTop: 12 }}>
+      <b style={{ fontSize: 14 }}>Your answers</b>
+      <ol style={{ margin: '8px 0 0', paddingLeft: 20 }}>
+        {review.map((q, i) => (
+          <li key={`${i}-${q.question}`} style={{ margin: '0 0 10px', fontSize: 13, lineHeight: 1.5 }}>
+            <div style={{ fontWeight: 600 }}>{q.question}</div>
+            <div style={{ color: q.right ? 'var(--teal, #1c7c4a)' : '#b42318' }}>
+              {q.right ? '✓' : '✗'} Your answer: <b>{q.chosen == null ? 'Not answered' : q.chosen}</b>
+            </div>
+            {!q.right && <div>Right answer: <b>{q.correct}</b></div>}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+function SeeMyAnswers({ courseId }) {
+  const [data, setData] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [err, setErr] = useState('');
+  async function toggle() {
+    if (open) { setOpen(false); return; }
+    setOpen(true);
+    if (data) return;
+    try { const r = await api.get(`/lms/my/courses/${courseId}/review`); setData(r.data); } catch (e) { setErr(e.response?.data?.error || 'The answers could not be loaded.'); }
+  }
+  return (
+    <div style={{ marginTop: 10 }}>
+      <button type="button" className="btn btn-sm" onClick={toggle}>{open ? 'Hide my answers' : 'See my answers'}</button>
+      {open && err ? <div className="error-text" style={{ marginTop: 6 }}>{err}</div> : null}
+      {open && data ? (data.review ? <AnswerReview review={data.review} /> : <div className="small-muted" style={{ marginTop: 6 }}>The answers of this attempt were not kept (it was taken before answers were saved).</div>) : null}
+    </div>
+  );
+}
+
+function PassedPanel({ assignment, passMark, onView, onDownload, downloading, courseId }) {
   return (
     <div
       role="status"
@@ -185,6 +226,7 @@ function PassedPanel({ assignment, passMark, onView, onDownload, downloading }) 
       <div className="cell-muted" style={{ fontSize: 11.5, marginTop: 10 }}>
         It is also kept in your certificates on My Learning. You can still revisit the course materials from the list on the left.
       </div>
+      {courseId && assignment.score != null ? <SeeMyAnswers courseId={courseId} /> : null}
     </div>
   );
 }
@@ -262,6 +304,7 @@ function AssessmentPanel({ courseId, course, state, openAttempt, attempts, onFin
           </span>
         </div>
         {!result.passed && result.canRetry && <button className="btn btn-primary btn-sm" onClick={start}>Retake assessment</button>}
+        <AnswerReview review={result.review} />
       </div>
     );
   }
@@ -518,6 +561,7 @@ export default function LearnCourse({ courseId, onBack }) {
             {active === 'assessment' && (
               assignment.completed ? (
                 <PassedPanel
+                  courseId={course.id}
                   assignment={assignment}
                   passMark={course.passMark}
                   downloading={downloading}
@@ -555,6 +599,7 @@ export default function LearnCourse({ courseId, onBack }) {
             {active === 'certificate' && (
               assignment.completed ? (
                 <PassedPanel
+                  courseId={course.id}
                   assignment={assignment}
                   passMark={course.requireAssessment ? course.passMark : null}
                   downloading={downloading}

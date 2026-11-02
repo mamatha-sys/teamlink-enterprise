@@ -40,14 +40,10 @@ const MULTIPART_MAX = 25 * 1024 * 1024; // the buffered form stays small
 
 const OOXML = 'application/vnd.openxmlformats-officedocument';
 // MIME -> extension. This map IS the LMS allow-list; anything absent is refused.
+// WORD / POWERPOINT / EXCEL ARE NOT TAKEN ANY MORE (founder 2026-11-02: "open document antey akkade open avali download avakudadhu"):
+// no browser can show them inside a page, so opening one always saved it to the learner's device. Save them as PDF and add the PDF.
 const ALLOWED = {
   'application/pdf': 'pdf',
-  'application/msword': 'doc',
-  [`${OOXML}.wordprocessingml.document`]: 'docx',
-  'application/vnd.ms-powerpoint': 'ppt',
-  [`${OOXML}.presentationml.presentation`]: 'pptx',
-  'application/vnd.ms-excel': 'xls',
-  [`${OOXML}.spreadsheetml.sheet`]: 'xlsx',
   'text/plain': 'txt',
   'image/png': 'png',
   'image/jpeg': 'jpg',
@@ -65,9 +61,7 @@ const ALLOWED = {
 const BY_EXT = {
   pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
   webp: 'image/webp', mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', ogv: 'video/ogg',
-  mov: 'video/quicktime', doc: 'application/msword', docx: `${OOXML}.wordprocessingml.document`,
-  ppt: 'application/vnd.ms-powerpoint', pptx: `${OOXML}.presentationml.presentation`,
-  xls: 'application/vnd.ms-excel', xlsx: `${OOXML}.spreadsheetml.sheet`, txt: 'text/plain',
+  mov: 'video/quicktime', txt: 'text/plain',
 };
 // Other declared types a browser / OS really sends for these extensions.
 const ZIPPISH = ['application/zip', 'application/x-zip-compressed'];
@@ -361,7 +355,7 @@ const MESSAGE = {
   TOO_LARGE: `That file is bigger than ${VIDEO_MAX / MB} MB.`,
   TOO_LARGE_VIDEO: `This video is bigger than ${VIDEO_MAX / MB} MB. Make it shorter or smaller and try again.`,
   TOO_LARGE_DOC: `This document is bigger than ${DOC_MAX / MB} MB. Make it smaller (for example, save it as PDF) and try again.`,
-  BAD_TYPE: 'This kind of file can\'t be added. Videos: MP4, WebM or MOV. Documents: PDF, Word, PowerPoint, Excel, text or a picture (PNG, JPG).',
+  BAD_TYPE: 'This kind of file can\'t be added. Videos: MP4, WebM or MOV. Documents: PDF, text or a picture (PNG, JPG). A Word, PowerPoint or Excel file would download instead of opening: save it as PDF first (File > Save As > PDF) and add the PDF.',
   CONTENT_MISMATCH: 'This file doesn\'t match its name — it may be damaged or renamed. Open it, save it again, and upload that copy.',
   NOT_MULTIPART: 'Upload the file as a multipart/form-data request.',
 };
