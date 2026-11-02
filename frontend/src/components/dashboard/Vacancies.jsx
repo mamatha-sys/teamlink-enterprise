@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import api from '../../api';
+import Modal from '../Modal.jsx';
 
 // Vacancies on the dashboard (founder 2026-11-02: "dashboard medha vacancies enni unai anni kuda kanipinchali").
 // Planned people per department and role (STL / TL / Employee) vs who is working now. Server: GET /dashboard/vacancies (utils/vacancies.js).
-// A login that may not see it gets 403 and the card is simply not shown. Only the Super Admin changes the plan ("Change numbers").
+// The dashboard shows ONE small card (the number of vacancies); a click opens the table. A login that may not see it gets 403 and the card is simply not shown. Only the Super Admin changes the plan ("Change numbers").
 const red = '#b42318';
 const green = '#1c7c4a';
 
 export default function Vacancies() {
   const [d, setD] = useState(null);
+  const [show, setShow] = useState(false); // the table (opens from the card)
   const [open, setOpen] = useState({}); // "group|role" -> names shown
   const [edit, setEdit] = useState(null); // the plan being changed
   const [busy, setBusy] = useState(false);
@@ -28,10 +30,22 @@ export default function Vacancies() {
   const setNum = (gi, role, v) => setEdit(edit.map((g, i) => (i !== gi ? g : { ...g, rows: g.rows.map((r) => (r.role === role ? { ...r, planned: v === '' ? '' : Number(v) } : r)) })));
 
   const t = d.totals;
+  const close = () => { setShow(false); setEdit(null); setErr(''); };
   return (
-    <div className="card" style={{ padding: 16, margin: '16px 0' }} role="region" aria-label="Vacancies">
+    <>
+      {/* the small card on the dashboard (founder 2026-11-02: "vacancies okka card evvu dani medha click chestey ahh table open avali") */}
+      <button
+        type="button" className="card" onClick={() => setShow(true)} aria-label={`Vacancies: ${t.vacant}. Open the table`}
+        style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4, padding: '14px 18px', margin: '16px 0', minWidth: 220, textAlign: 'left', cursor: 'pointer', border: '1px solid var(--line, #e5e7eb)' }}
+      >
+        <span className="small-muted" style={{ fontSize: 12 }}>Vacancies</span>
+        <b style={{ fontSize: 28, lineHeight: 1.1, color: t.vacant ? red : green }}>{t.vacant}</b>
+        <span className="small-muted" style={{ fontSize: 12 }}>Should have {t.planned} · Working {t.filled}</span>
+        <span style={{ fontSize: 12, color: 'var(--primary, #1a56db)' }}>See by department →</span>
+      </button>
+      {show ? (
+        <Modal title={`Vacancies: ${t.vacant}`} size="wide" onClose={close}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <b style={{ fontSize: 16 }}>Vacancies: <span style={{ color: t.vacant ? red : green }}>{t.vacant}</span></b>
         <span className="small-muted">Should have {t.planned} · Working now {t.filled}{t.leaving ? ` · ${t.leaving} leaving (notice period)` : ''}</span>
         <span style={{ flex: 1 }} />
         {d.canEdit && !edit ? <button type="button" className="btn btn-sm" onClick={() => setEdit(JSON.parse(JSON.stringify(d.plan)))}>Change numbers</button> : null}
@@ -80,6 +94,8 @@ export default function Vacancies() {
           }))}</tbody>
         </table></div>
       )}
-    </div>
+        </Modal>
+      ) : null}
+    </>
   );
 }
