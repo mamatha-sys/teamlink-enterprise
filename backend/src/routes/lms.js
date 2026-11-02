@@ -251,9 +251,12 @@ const inMyDepartment = (a, me) => !(a && a.source === 'Department' && a.departme
 // and then, when requireAssessment is on, a passing assessment.
 // ===========================================================================
 
+// AN UPLOADED FILE'S OWN TYPE DECIDES (founder 2026-11-02: "nurse documentation, doctors documentation lo videos ravadam ledhu blank
+// gane kanipistunai"): a PDF whose Kind had been set to Video was handed to the video player and stayed blank at 0:00. A stored file is
+// a Video only when it is a video file, otherwise a Document - whatever the Kind column says; only a link keeps its chosen kind.
 function materialKind(m) {
-  if (m.kind && ['Video', 'Document', 'Link'].includes(m.kind)) return m.kind;
   if (m.storedPath) return media.kindForMime(m.mimeType);
+  if (m.kind && ['Video', 'Document', 'Link'].includes(m.kind)) return m.kind;
   return 'Link';
 }
 
@@ -1284,6 +1287,7 @@ router.get('/courses/:id/manage', MANAGE, EDIT_COURSE(byCourseParam), async (req
       href: m.storedPath ? null : m.url,
     })),
     questions: questions.map(bankQuestion),
+    canDeleteAllQuestions: mayDeleteAllQuestions(req.user),
     canAssign: await canAssign(req.user),
     enrolled: assignments.map((a) => {
       // A material still waiting for the chain is not on the course for any learner, so it does not count toward their progress.
@@ -1352,7 +1356,7 @@ function requiredOf(raw) {
 function publicMaterial(m) {
   if (!m) return m;
   const { storedPath, ...rest } = m;
-  return { ...rest, hasFile: !!storedPath };
+  return { ...rest, kind: materialKind(m), hasFile: !!storedPath };
 }
 
 // UPLOAD APPROVAL (founder, 2026-10-24: "whatever TLs or HR upload in LMS takes approvals hierarchy-wise, up to the Super Admin").
@@ -1432,7 +1436,7 @@ router.post('/courses/:id/materials', MANAGE, EDIT_COURSE(byCourseParam), async 
       sizeBytes: stored.sizeBytes,
       uploadedBy: req.user.name || null,
       // Inferred from the file unless the manager said otherwise.
-      kind: kindOf(fields.kind, media.kindForMime(stored.mimeType)),
+      kind: media.kindForMime(stored.mimeType), // the file's own type (see materialKind)
       required: requiredOf(fields.required),
       approvalStatus: hold ? 'Pending' : 'Approved',
     },
@@ -1475,7 +1479,7 @@ router.post('/courses/:id/materials/upload-finish', MANAGE, EDIT_COURSE(byCourse
     data: {
       // sizeBytes is a 32-bit column (shown on the screen only): a file over 2 GB is stored without it
       courseId: course.id, title, fileName: stored.fileName, storedPath: stored.storedPath, mimeType: stored.mimeType, sizeBytes: stored.sizeBytes <= 2147483647 ? stored.sizeBytes : null,
-      uploadedBy: req.user.name || null, kind: kindOf(b.kind, media.kindForMime(stored.mimeType)), required: requiredOf(b.required),
+      uploadedBy: req.user.name || null, kind: media.kindForMime(stored.mimeType), required: requiredOf(b.required),
       approvalStatus: hold ? 'Pending' : 'Approved',
     },
   });
@@ -1527,6 +1531,9 @@ router.patch('/materials/:id', MANAGE, EDIT_COURSE(byMaterialParam), async (req,
     // A link cannot be played or streamed; a file cannot be "a link".
     if (b.kind === 'Link' && m.storedPath) return res.status(400).json({ error: 'An uploaded file cannot be a Link' });
     if (b.kind !== 'Link' && !m.storedPath && b.kind === 'Video') return res.status(400).json({ error: 'Only an uploaded video file can be a Video' });
+    if (m.storedPath && b.kind !== media.kindForMime(m.mimeType)) {
+      return res.status(400).json({ error: media.kindForMime(m.mimeType) === 'Video' ? 'This file is a video, so it stays a Video.' : 'This file is a document (for example a PDF), not a video, so it stays a Document. To show a video here, add the video file with "Add video".' });
+    }
     data.kind = b.kind;
   }
   if (b.required !== undefined) data.required = requiredOf(b.required);
@@ -1592,6 +1599,23 @@ router.put('/questions/:id', MANAGE, EDIT_COURSE(byQuestionParam), async (req, r
     data: { question: v.question, options: JSON.stringify(v.options), correctIndex: v.correctIndex },
   });
   return res.json(bankQuestion(updated));
+});
+
+// DELETE EVERY QUESTION OF A COURSE AT ONCE (founder 2026-11-02: "lms lo eppudu petina assessment anni okesari delete cheyali daniki
+// button pettu, adhi only superadmin, TLs ki matrame"). Only a Super Admin or a TL - and a TL only on a course they may edit (their own
+// draft), the same rule as the question bank itself. Refused while somebody is in the middle of the assessment. Submitted attempts keep
+// their scores and the answers they were shown.
+const mayDeleteAllQuestions = (u) => !!u && (u.role === 'SUPER_ADMIN' || u.hrmsRole === 'SUPER_ADMIN' || (u.hrmsRole || u.role) === 'TL');
+router.delete('/courses/:id/questions', MANAGE, EDIT_COURSE(byCourseParam), async (req, res) => {
+  if (!mayDeleteAllQuestions(req.user)) return res.status(403).json({ error: 'Only the Super Admin or a TL can delete all the questions at once.' });
+  const course = await courseOr404(req, res);
+  if (!course) return undefined;
+  const now = new Date();
+  const taking = await prisma.courseAssessmentAttempt.count({ where: { courseId: course.id, submittedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] } });
+  if (taking) return res.status(409).json({ error: `${taking} ${taking === 1 ? 'person is' : 'people are'} taking this assessment right now. Try again when they have finished.` });
+  const out = await prisma.assessmentQuestion.deleteMany({ where: { courseId: course.id } });
+  await logAudit({ userId: req.user.id, actorName: req.user.name, action: `All assessment questions deleted (${out.count})`, entity: 'Course', entityId: course.id, toValue: course.title });
+  return res.json({ deleted: out.count });
 });
 
 router.delete('/questions/:id', MANAGE, EDIT_COURSE(byQuestionParam), async (req, res) => {

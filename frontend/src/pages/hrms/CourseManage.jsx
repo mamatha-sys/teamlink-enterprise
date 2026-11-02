@@ -607,6 +607,8 @@ function AssessmentScreen({ data, reload, onBack }) {
         <div className="panel-head">
           <h3>Question Bank ({data.questions.length})</h3>
           <div className="panel-head-actions">
+            {/* Super Admin / TL only (founder 2026-11-02): every question of this course at once */}
+            {data.canDeleteAllQuestions && data.questions.length > 0 && <button className="btn btn-danger" onClick={deleteAllQuestions}>Delete all questions</button>}
             <button className="btn" onClick={() => setModal({ kind: 'import' })}>Import Questions</button>
             <button className="btn btn-primary" onClick={() => setModal({ kind: 'question' })}>+ Add Question</button>
           </div>
@@ -736,6 +738,16 @@ export default function CourseManage({ courseId, onBack }) {
     }
   }
 
+  async function deleteAllQuestions() {
+    const n = data.questions.length;
+    // eslint-disable-next-line no-alert
+    if (!confirm(`Delete ALL ${n} question${n === 1 ? '' : 's'} of this course? This cannot be undone. Learners who already took the assessment keep their scores.`)) return;
+    setError(''); setNote('');
+    try { const r = await api.delete(`/lms/courses/${data.course.id}/questions`); setNote(`Deleted ${r.data.deleted} question${r.data.deleted === 1 ? '' : 's'}.`); load(); } catch (err) {
+      setError(err.response?.data?.error || 'Could not delete the questions.');
+    }
+  }
+
   async function removeMaterial(m) {
     // eslint-disable-next-line no-alert
     if (!confirm(`Remove "${m.title}"?`)) return;
@@ -851,12 +863,15 @@ export default function CourseManage({ courseId, onBack }) {
                   <button className="btn btn-sm btn-ghost" onClick={() => removeMaterial(m)}>Remove</button>
                 </div>
                 <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', fontSize: 12, marginLeft: 30 }}>
-                  <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    Kind
-                    <Combo value={m.kind} style={{ width: 'auto', minHeight: 28, padding: '2px 6px' }} onChange={(e) => updateMaterial(m, { kind: e.target.value })}>
-                      {(m.hasFile ? ['Video', 'Document'] : ['Link', 'Document']).map((k) => <option key={k} value={k}>{k}</option>)}
-                    </Combo>
-                  </label>
+                  {/* An uploaded file's kind is its own type (a PDF is never a Video - founder 2026-11-02, blank videos); only a link picks one. */}
+                  {m.hasFile ? <span className="small-muted">Kind: <b>{m.kind}</b></span> : (
+                    <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      Kind
+                      <Combo value={m.kind} style={{ width: 'auto', minHeight: 28, padding: '2px 6px' }} onChange={(e) => updateMaterial(m, { kind: e.target.value })}>
+                        {['Link', 'Document'].map((k) => <option key={k} value={k}>{k}</option>)}
+                      </Combo>
+                    </label>
+                  )}
                   <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
                     <input type="checkbox" style={{ width: 'auto' }} checked={m.required} onChange={(e) => updateMaterial(m, { required: e.target.checked })} />
                     Required for completion
