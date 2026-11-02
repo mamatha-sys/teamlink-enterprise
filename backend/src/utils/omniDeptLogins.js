@@ -36,7 +36,9 @@ const title = (d) => String(d || '').trim().replace(/\s+/g, ' ').split(' ')
   .map((w) => (w.replace(/[^a-z]/gi, '').length <= 3 ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
   .join(' ');
 const slug = (d) => canon(d).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30) || 'dept';
-const wsNameFor = (dept) => `Teamlink ${title(dept)}`;
+// Green Start keeps ONE WhatsApp number per workspace, so a department's 2nd, 3rd ... number gets "Teamlink <Dept> - 2", "- 3" (founder
+// 2026-11-02: both job-update numbers to Education); the department login is a member of all of them.
+const wsNameFor = (dept, i = 1) => `Teamlink ${title(dept)}${i > 1 ? ` - ${i}` : ''}`;
 
 /** <company>+omni-<dept>@<domain> (the company mailbox receives anything Green Start ever mails it). */
 function emailFor(dept, companyEmail) {
@@ -46,9 +48,11 @@ function emailFor(dept, companyEmail) {
 }
 
 // a workspace that already stands for this department: "Teamlink Medical", "Medical", "... Medical"
-function findWorkspace(wss, dept) {
+// the 2nd, 3rd ... workspace of a department: "Teamlink Medical - 2", "Medical - 2"
+function findWorkspace(wss, dept, i = 1) {
   const d = canon(dept);
-  const n = (w) => String(w.name || '').trim().toLowerCase();
+  const n = (w) => String(w.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (i > 1) return wss.find((w) => n(w) === `teamlink ${d} - ${i}`) || wss.find((w) => n(w) === `${d} - ${i}`) || null;
   return wss.find((w) => n(w) === `teamlink ${d}`) || wss.find((w) => n(w) === d) || wss.find((w) => n(w).endsWith(` ${d}`)) || null;
 }
 
@@ -98,19 +102,29 @@ async function run({ why = 'manual', pushChannels = true } = {}) {
           continue; // eslint-disable-line no-continue
         }
         const dept = depts[0];
-        let ws = findWorkspace(wss, dept);
-        if (ws && taken.has(ws.id) && taken.get(ws.id) !== n.id) {
-          result.departments.push({ dept: title(dept), number: n.label, state: 'failed', words: `Workspace "${ws.name}" already has another WhatsApp number (one number per workspace in Omni-Channel).` });
+        const free = (w) => w && (!taken.has(w.id) || taken.get(w.id) === n.id);
+        // the workspace this number had last time stays its own (numbers keep their place when another one is added)
+        let ws = cur && cur.auto && canon(cur.dept) === canon(dept) ? wss.find((w) => w.id === cur.workspaceId) : null;
+        let i = 1;
+        if (!free(ws)) {
+          ws = null;
+          for (; i <= 20; i += 1) { // the first "Teamlink <Dept>", "- 2", "- 3" ... without another number
+            const w = findWorkspace(wss, dept, i);
+            if (!w || free(w)) { ws = w; break; }
+          }
+        }
+        if (!ws && i > 20) {
+          result.departments.push({ dept: title(dept), number: n.label, state: 'failed', words: `${title(dept)} has too many WhatsApp numbers for Omni-Channel workspaces.` });
           delete map[n.id];
           continue; // eslint-disable-line no-continue
         }
         if (!ws) {
           try {
             // eslint-disable-next-line no-await-in-loop
-            ws = await O.call('POST', '/workspaces', { token, body: { ...(orgId ? { organizationId: orgId } : {}), name: wsNameFor(dept) } });
+            ws = await O.call('POST', '/workspaces', { token, body: { ...(orgId ? { organizationId: orgId } : {}), name: wsNameFor(dept, i) } });
             wss = [...wss, { id: ws.id, name: ws.name, orgId }];
           } catch (err) {
-            result.departments.push({ dept: title(dept), number: n.label, state: 'failed', words: `The workspace "${wsNameFor(dept)}" could not be made: ${err.message}` });
+            result.departments.push({ dept: title(dept), number: n.label, state: 'failed', words: `The workspace "${wsNameFor(dept, i)}" could not be made: ${err.message}` });
             delete map[n.id];
             continue; // eslint-disable-line no-continue
           }
@@ -130,17 +144,21 @@ async function run({ why = 'manual', pushChannels = true } = {}) {
 
       // 3. a login per department workspace
       const logins = (await getSetting(KEY, {})).departments || {};
-      for (const p of plan) {
-        const k = canon(p.dept);
+      const byDept = new Map(); // one login per department, in every workspace of its numbers
+      for (const p of plan) { const k = canon(p.dept); if (!byDept.has(k)) byDept.set(k, []); byDept.get(k).push(p); }
+      for (const [k, group] of byDept) {
+        const p = group[0];
+        const ids = group.map((g) => g.ws.id);
         const email = emailFor(p.dept, company);
-        const row = { dept: title(p.dept), workspace: p.ws.name, workspaceId: p.ws.id, number: p.number.label, email, whatsapp: waOf(p.ws.id) };
+        const row = { dept: title(p.dept), workspace: group.map((g) => g.ws.name).join(', '), workspaceId: p.ws.id, workspaceIds: ids, number: group.map((g) => g.number.label).join(', '), email, whatsapp: waOf(p.ws.id) };
         try {
           if (!email) throw new Error('The company Omni-Channel account (its email) is not set: Integrations > Omni-Channel.');
+          let w = '';
           // eslint-disable-next-line no-await-in-loop
-          const w = await ensureLogin(token, p.ws.id, email, title(p.dept));
-          // only THIS workspace: the department login is taken out of every other one (a moved number, a hand-made add)
+          for (const g of group) w = await ensureLogin(token, g.ws.id, email, title(p.dept));
+          // only ITS workspaces: the department login is taken out of every other one (a moved number, a hand-made add)
           // eslint-disable-next-line no-await-in-loop
-          const out = await removeElsewhere(token, wss.filter((x) => x.id !== p.ws.id), email);
+          const out = await removeElsewhere(token, wss.filter((x) => !ids.includes(x.id)), email);
           Object.assign(row, { state: 'ready', words: out.length ? `${w} Taken out of ${out.join(', ')}.` : w });
         } catch (err) {
           Object.assign(row, { state: 'failed', words: String(err.message || err).slice(0, 300) });
