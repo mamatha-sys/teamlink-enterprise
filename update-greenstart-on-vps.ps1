@@ -7,15 +7,18 @@
 #                                            start, health check. If the health check fails it switches back to the old code by itself.
 #
 # What goes live: Green Start "release" d2f52bce (30 Oct, the owner's fully tested version) + SEO -> Keyword Research (live since 31 Oct)
-# + SEO -> Search Console phase 1 (2 Nov: stored history, daily + Sync now, comparisons, TeamLink keyword groups, CSV / Excel).
-# The archive: Desktop\TeamLink-GreenStart-VPS\green-start-update-20261102-search-console.tar.gz (code only: no .env, no packages, no data;
-# built from git branch claude/search-console-on-live = the 31 Oct live code + the Search Console commits, tested on that base).
-# The 31 Oct package (green-start-update-20261031-kr.tar.gz) can still be passed with -Archive.
+# + SEO -> Search Console phase 1 (2 Nov: stored history, daily + Sync now, comparisons, TeamLink keyword groups, CSV / Excel)
+# + Manage Templates -> RCS (2 Nov: Save draft, phone preview, Failed submission, Edit and submit again, SMSTAKE's reason; founder:
+#   "keyword research and rcs renduu live kii vellalii", "search console kuda live kii pampouu").
+# The archive: Desktop\TeamLink-GreenStart-VPS\green-start-update-20261102-kr-sc-rcs.tar.gz (code only: no .env, no packages, no data;
+# built from git branch claude/live-kr-sc-rcs = claude/search-console-on-live (the 31 Oct live code + the Search Console commits) + the
+# RCS template commit, tested on that base: API/web tsc, unit + screen tests, RCS and Keyword Research e2e on a throwaway database).
+# Earlier packages can still be passed with -Archive: green-start-update-20261102-search-console.tar.gz (without RCS), the 31 Oct one.
 # Kept as they are: gs-api/.env (secrets), green-start-web/.env.production, /opt/green-start/uploads, run/ (gate etc.), the database
 # (only NEW tables are added: on today's live only 20261102100000_gsc_history, 7 Search Console tables). The old code stays in /opt/green-start/.old-<time>.
 # TeamLink (pm2, port 4010) is not touched. Do not click inside this window while it runs.
 # ---------------------------------------------------------------------------
-param([switch]$Apply, [string]$Archive = (Join-Path $env:USERPROFILE 'Desktop\TeamLink-GreenStart-VPS\green-start-update-20261102-search-console.tar.gz'))
+param([switch]$Apply, [string]$Archive = (Join-Path $env:USERPROFILE 'Desktop\TeamLink-GreenStart-VPS\green-start-update-20261102-kr-sc-rcs.tar.gz'))
 $ErrorActionPreference = 'Stop'
 $VpsHost = 'root@72.61.233.104'
 if (-not (Test-Path $Archive)) { throw "The update archive is not here: $Archive" }
@@ -98,7 +101,7 @@ if [ "$ok" != 1 ]; then
   exit 1
 fi
 rm -f "$SRC"
-echo "GREEN START UPDATED: release d2f52bce + Keyword Research + Search Console. Old code kept in $OLD (delete it after a few good days)."
+echo "GREEN START UPDATED: release d2f52bce + Keyword Research + Search Console + RCS templates. Old code kept in $OLD (delete it after a few good days)."
 systemctl is-active green-start-api green-start-worker green-start-gate | paste -sd' '
 '@
 $mode = if ($Apply) { 'apply' } else { 'dry' }
@@ -108,4 +111,4 @@ Write-Host "[2/2] $(if ($Apply) { 'Updating Green Start on the VPS (backup, buil
 $script | ssh $VpsHost 'tr -d ''\r'' | bash -s'
 if ($LASTEXITCODE -ne 0) { throw 'The update on the VPS stopped (see the lines above). If it said ROLLED BACK, the old Green Start is running again.' }
 if (-not $Apply) { Write-Host "`nDRY RUN finished. If it built fine, run:  .\update-greenstart-on-vps.ps1 -Apply" -ForegroundColor Yellow }
-else { Write-Host "`nDone. Open https://greenstart.teamlinks.in (from TeamLink > Omni-Channel) > SEO > Search Console (press Sync now once)." -ForegroundColor Green }
+else { Write-Host "`nDone. Open https://greenstart.teamlinks.in (from TeamLink > Omni-Channel) > SEO > Search Console (press Sync now once), and Manage Templates > RCS." -ForegroundColor Green }
