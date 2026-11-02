@@ -63,7 +63,7 @@ const hooks = (from) => GOT.slice(from).filter((g) => g.url.startsWith('/api/v1/
   const KEYS = ['rcs.omniSync', 'rcs.omniForward', 'rcs.omniRemoved', 'rcs.webhook.raw'];
   const saved = await prisma.appSetting.findMany({ where: { key: { in: KEYS } } });
   await prisma.appSetting.deleteMany({ where: { key: { in: KEYS } } });
-  const IDS = ['ZZOMNI1', 'ZZOMNI2', 'ZZOWN1'];
+  const IDS = ['ZZOMNI1', 'ZZOMNI1B', 'ZZOMNI2', 'ZZOWN1'];
   try {
     await Z.preclean();
     await prisma.rcsTemplate.deleteMany({ where: { templateId: { in: IDS } } });
@@ -110,6 +110,15 @@ const hooks = (from) => GOT.slice(from).filter((g) => g.url.startsWith('/api/v1/
     const p3 = await Z.call('POST', '/api/rcs/templates/omni/pull', sTok);
     const a3 = await prisma.rcsTemplate.findUnique({ where: { id: a.id } }); const b3 = await prisma.rcsTemplate.findUnique({ where: { id: b.id } });
     Z.check('D6 approved in Omni-Channel -> Approved here; the name follows; module and SMS fallback set in TeamLink stay', p3.body.ok && b3.status === 'APPROVED' && a3.name === 'ZZTEST RCSOMNI approved v2' && a3.module === 'ATS' && JSON.parse(a3.bodyJson).fallback.dltTemplateId === '1107000000000000009', [b3.status, a3.name, a3.module]);
+    // rejected in Omni-Channel, edited and submitted again: rcssms.in gives a NEW id to the same Omni-Channel template
+    TPLS[0].providerTemplateId = 'ZZOMNI1B'; TPLS[0].rcsCarrier.templateId = 'ZZOMNI1B'; TPLS[0].status = 'pending';
+    const p3b = await Z.call('POST', '/api/rcs/templates/omni/pull', sTok);
+    const moved = await prisma.rcsTemplate.findMany({ where: { bodyJson: { contains: '"omniTemplateId":"gs-1"' } } });
+    Z.check('D6b submitted again with a new rcssms.in id: the SAME TeamLink row moves to it (no duplicate), module and SMS fallback kept, back to waiting',
+      p3b.body.ok && moved.length === 1 && moved[0].id === a.id && moved[0].templateId === 'ZZOMNI1B' && moved[0].status === 'PENDING' && moved[0].module === 'ATS'
+      && JSON.parse(moved[0].bodyJson).fallback && JSON.stringify(JSON.parse(moved[0].bodyJson).earlierIds) === '["ZZOMNI1"]' && /submitted again/.test(p3b.body.words), [p3b.body, moved.map((x) => [x.templateId, x.status])]);
+    TPLS[0].status = 'approved';
+    await Z.call('POST', '/api/rcs/templates/omni/pull', sTok);
     const rp = await Z.call('POST', '/api/rcs/templates/omni/pull', rTok);
     Z.check('D7 only an Admin can get templates from Omni-Channel', rp.status === 403, rp.status);
 

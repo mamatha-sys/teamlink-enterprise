@@ -7,6 +7,8 @@
 //                  workspace's RCS templates that carry an rcssms.in id (GET /templates?channel=rcs) and keeps them in rcs_templates:
 //                  same template id = ONE row (never a duplicate), status = Omni-Channel's (only Approved can be sent from TeamLink).
 //                  A template made in TeamLink itself (or added by hand) is never overwritten: it is counted as "already here".
+//                  rcssms.in cannot edit a template, so "Edit and submit again" in Omni-Channel gives the SAME template a NEW id:
+//                  the row TeamLink already has for that Omni-Channel template moves to the new id (module, SMS fallback kept).
 //                  A template that disappears from Omni-Channel is NOT deleted here (it may still be approved at rcssms.in), and one an
 //                  Admin removed here is not taken in again. A draft (no rcssms.in id yet) stays in Omni-Channel only.
 //   forward()      rcssms.in posts template approvals and delivery reports to ONE address: TeamLink's public /api/webhooks/rcs. Green
@@ -106,8 +108,21 @@ async function pull({ why = 'manual' } = {}) {
             if (!r) continue; // eslint-disable-line no-continue
             result.seen += 1;
             // eslint-disable-next-line no-await-in-loop
-            const cur = await prisma.rcsTemplate.findUnique({ where: { templateId: r.templateId } });
+            let cur = await prisma.rcsTemplate.findUnique({ where: { templateId: r.templateId } });
             if (!cur && gone.has(r.templateId)) { result.removedHere += 1; continue; } // eslint-disable-line no-continue
+            if (!cur && r.body.omniTemplateId) {
+              // the same Omni-Channel template under an earlier rcssms.in id (submitted again after a rejection)
+              // eslint-disable-next-line no-await-in-loop
+              const was = (await prisma.rcsTemplate.findMany({ where: { bodyJson: { contains: `"omniTemplateId":${JSON.stringify(r.body.omniTemplateId)}` } } }))
+                .find((x) => parse(x.bodyJson, {}).source === 'omnichannel' && parse(x.bodyJson, {}).omniTemplateId === r.body.omniTemplateId);
+              if (was) {
+                const old = parse(was.bodyJson, {});
+                const earlier = [...(Array.isArray(old.earlierIds) ? old.earlierIds : []), was.templateId].slice(-20);
+                // eslint-disable-next-line no-await-in-loop
+                cur = await prisma.rcsTemplate.update({ where: { id: was.id }, data: { templateId: r.templateId, bodyJson: JSON.stringify({ ...old, earlierIds: earlier }) } });
+                result.resubmitted = (result.resubmitted || 0) + 1;
+              }
+            }
             if (!cur) {
               // eslint-disable-next-line no-await-in-loop
               await prisma.rcsTemplate.create({ data: { templateId: r.templateId, name: r.name, rcsType: r.rcsType, status: r.status, bodyJson: JSON.stringify(r.body), module: null } });
@@ -125,7 +140,7 @@ async function pull({ why = 'manual' } = {}) {
         }
       }
       result.ok = true;
-      result.words = `${result.seen} RCS template${result.seen === 1 ? '' : 's'} in Omni-Channel: ${result.added} new here, ${result.updated} updated, ${result.alreadyHere} already in TeamLink${result.removedHere ? `, ${result.removedHere} removed here by an Admin` : ''}.`;
+      result.words = `${result.seen} RCS template${result.seen === 1 ? '' : 's'} in Omni-Channel: ${result.added} new here, ${result.updated} updated, ${result.alreadyHere} already in TeamLink${result.resubmitted ? ` (${result.resubmitted} submitted again with a new rcssms.in id)` : ''}${result.removedHere ? `, ${result.removedHere} removed here by an Admin` : ''}.`;
     } catch (err) {
       result.words = String((err && err.message) || err).slice(0, 300);
     }
