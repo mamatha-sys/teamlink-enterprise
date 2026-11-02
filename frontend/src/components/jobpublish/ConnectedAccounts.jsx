@@ -9,6 +9,7 @@ import './naukriShineMailboxes.css';
 // ADMINISTRATION > INTEGRATIONS > Job Portal settings > "Connected accounts"  (founder, 2026-11-02)
 // The Job Portal uses the SAME accounts as TeamLink's Integrations, by itself: nothing is entered twice here.
 //   WhatsApp      TeamLink's default WhatsApp number is handed to the portal, which sends its messages from it.
+//   Email / SMS   TeamLink's SMTP account is the portal's SMTP; the portal's SMS go out through TeamLink's SMS channel.
 //   Social media  the accounts of Integrations > Social Media (a portal job is published to them from the Post step).
 //   AI calling    TeamLink's AI calling (the portal's recruiters use it through TeamLink).
 // Server: utils/portalIntegrations.js. No token or password is ever on this screen.
@@ -34,7 +35,8 @@ export default function ConnectedAccounts() {
     setBusy(true); setNote(null);
     try {
       const { data } = await api.post('/portal-admin/connected/sync', {});
-      setNote(data.pushed || data.unchanged ? { ok: true, text: 'Done. The Job Portal now sends WhatsApp from this number.' } : { ok: false, text: data.skipped || data.error || 'Nothing was sent.' });
+      const parts = [['WhatsApp', data.whatsapp], ['Email', data.email], ['SMS', data.sms]].map(([n, o]) => `${n}: ${o && (o.pushed || o.unchanged) ? 'done' : ((o && (o.skipped || o.error)) || 'nothing sent')}`);
+      setNote({ ok: [data.whatsapp, data.email, data.sms].every((o) => o && (o.pushed || o.unchanged)), text: parts.join(' · ') });
       await load();
     } catch (e) { setNote({ ok: false, text: errOf(e) }); }
     setBusy(false);
@@ -44,6 +46,10 @@ export default function ConnectedAccounts() {
   if (!d) return <div className="nsm-hint">Loading…</div>;
   const wa = d.whatsapp || {};
   const portalOn = wa.portal && wa.portal.configured;
+  const em = d.email || {};
+  const sm = d.sms || {};
+  const emailOn = !!(em.portal && em.portal.configured);
+  const smsOn = !!(sm.portal && sm.portal.relay);
 
   return (
     <div className="nsm-wrap">
@@ -63,11 +69,30 @@ export default function ConnectedAccounts() {
           </ul>
         )}
         <div className="jp-row">
-          <button type="button" className="btn btn-sm" disabled={busy || !wa.sendsFrom} onClick={sync}>{busy ? 'Sending…' : 'Send the number to the Job Portal now'}</button>
+          <button type="button" className="btn btn-sm" disabled={busy} onClick={sync}>{busy ? 'Sending…' : 'Hand WhatsApp, email and SMS to the Job Portal now'}</button>
           <Link to="/admin/integrations?tab=messaging" className="btn btn-sm">Change the WhatsApp numbers</Link>
         </div>
         <span className="nsm-hint">It is sent again by itself every time the number changes or the Job Portal starts.{wa.lastPush && wa.lastPush.at ? ` Last time: ${when(wa.lastPush.at)}.` : ''}</span>
         {note && <div className={note.ok ? 'jp-ok' : 'jp-err'} role={note.ok ? 'status' : 'alert'} style={{ margin: 0 }}>{note.text}</div>}
+      </section>
+
+      <section className="nsm-card">
+        <div className="nsm-card-hd"><b>Email</b></div>
+        {em.teamlink && em.teamlink.host
+          ? <div className={emailOn ? 'jp-ok' : 'jp-err'} style={{ margin: 0 }} role="status">{emailOn ? `The Job Portal sends email through ${em.teamlink.host} as ${em.teamlink.from}.` : 'The Job Portal does not have the email account yet.'}</div>
+          : <div className="jp-err" style={{ margin: 0 }} role="alert">TeamLink has no working email account{em.teamlink && em.teamlink.problem ? `: ${em.teamlink.problem}` : ''}. Connect one in Integrations, then it reaches the Job Portal by itself.</div>}
+        {em.portal && em.portal.error && <div className="jp-err" role="alert">The Job Portal could not be reached: {em.portal.error}</div>}
+        <div className="jp-row"><Link to="/admin/integrations?tab=connections" className="btn btn-sm">Change the email account</Link></div>
+      </section>
+
+      <section className="nsm-card">
+        <div className="nsm-card-hd"><b>SMS</b></div>
+        {sm.teamlink && sm.teamlink.provider
+          ? <div className={smsOn ? 'jp-ok' : 'jp-err'} style={{ margin: 0 }} role="status">{smsOn ? `The Job Portal sends SMS through TeamLink's SMS (${sm.teamlink.provider}).` : 'The Job Portal is not using TeamLink SMS yet.'}</div>
+          : <div className="jp-err" style={{ margin: 0 }} role="alert">TeamLink SMS is not ready{sm.teamlink && sm.teamlink.problem ? `: ${sm.teamlink.problem}` : ''}. Set it up in Integrations, then the Job Portal uses it by itself.</div>}
+        {sm.portal && sm.portal.error && <div className="jp-err" role="alert">The Job Portal could not be reached: {sm.portal.error}</div>}
+        <span className="nsm-hint">The same rules as TeamLink SMS apply: the approved template, the stop list, and nothing is sent until one real test SMS was delivered.</span>
+        <div className="jp-row"><Link to="/admin/integrations?tab=sms" className="btn btn-sm">Open SMS</Link></div>
       </section>
 
       <section className="nsm-card">

@@ -32,15 +32,45 @@ const call = async (path, body, method = 'POST') => {
   const noTok = await fetch(`${PORTAL}/api/integrations/teamlink/whatsapp/primary`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
   check('the door needs the TeamLink token', noTok.status === 401, noTok.status);
 
+  // ---- part 1b: email and SMS on the sandbox portal -------------------------------------------------------------------------
+  const http = require('http');
+  const handed = [];
+  const mock = http.createServer((req, res) => {
+    let body = ''; req.on('data', (c) => { body += c; });
+    req.on('end', () => { handed.push({ url: req.url, secret: req.headers['x-job-portal-secret'], body: JSON.parse(body || '{}') }); res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ ok: true, providerRef: 'mock-1' })); });
+  });
+  await new Promise((ok) => { mock.listen(4019, '127.0.0.1', ok); });
+  r = await call('/email/config', undefined, 'GET');
+  check('the portal says whether it has an email account (no password)', r.status === 200 && typeof r.json.configured === 'boolean' && !/pass/i.test(Object.keys(r.json).join(',')), r);
+  r = await call('/email/config', { host: '', port: 465, fromAddress: 'a@b.test' });
+  check('an email account without a host is refused', r.status === 422, r);
+  r = await call('/email/config', { host: '127.0.0.1', port: 1, secure: false, encryption: 'None', user: 'u', pass: 'ZZPASSWORD', fromAddress: 'hr@zztest.example', fromName: 'ZZ HR' });
+  check('a good email account is accepted and reads back without the password', r.status === 200 && r.json.configured === true && r.json.host === '127.0.0.1' && r.json.from === 'hr@zztest.example' && !/ZZPASSWORD/.test(r.text), r);
+  r = await call('/sms/relay', { on: 'yes' });
+  check('the SMS relay switch refuses a non-boolean', r.status === 422, r);
+  r = await call('/sms/relay', { on: true });
+  check('the SMS relay can be turned on', r.status === 200 && r.json.relay === true, r);
+  const sm = `93${Date.now().toString().slice(-8)}`;
+  r = await call('/candidates/invite', { people: [{ ref: 'zzs', name: `ZZTEST Sms ${sm}`, email: `zztest.sms.${sm}@example.invalid`, phone: sm }], dryRun: false });
+  const sent1 = r.json && r.json.results && r.json.results[0];
+  check('the portal SMS really goes to TeamLink, with the bridge secret', handed.some((h) => h.url === '/api/public/job-portal/sms' && h.secret === 'testsecret' && h.body.to === sm && String(h.body.text || '').length > 10), handed);
+  check('and the candidate delivery says SMS was sent', sent1 && sent1.delivery && sent1.delivery.sms === 'sent', sent1);
+  check('the email now uses the account TeamLink gave (it tried the server: failed, not "not configured")', sent1 && sent1.delivery && sent1.delivery.email && sent1.delivery.email !== 'not_configured', sent1);
+  mock.close();
+
   // ---- part 2: TeamLink's side ------------------------------------------------------------------------------------------------
   process.env.NODE_ENV = 'development';
   const stub = (rel, exports) => { const p = require.resolve(rel); require.cache[p] = { id: p, filename: p, loaded: true, exports }; };
   const sent = [];
   let portalPid = 111;
   let portalHas = false;
+  let emailHas = false;
+  let relayOn = false;
   stub('../src/utils/sandbox', { isSandbox: () => false });
   stub('../src/utils/jobPortalBridge', {
     portalFetch: async (p, o = {}) => {
+      if (/email\/config/.test(p)) { if (o.method === 'POST') { sent.push({ email: o.body }); emailHas = true; return { configured: true, host: o.body.host, pid: portalPid }; } return { configured: emailHas, pid: portalPid }; }
+      if (/sms\/relay/.test(p)) { if (o.method === 'POST') { sent.push({ relay: o.body }); relayOn = true; return { relay: true, pid: portalPid }; } return { relay: relayOn, pid: portalPid }; }
       if (o.method === 'POST') { sent.push(o.body); portalHas = true; return { configured: true, phoneNumberId: `…${String(o.body.phoneNumberId).slice(-4)}`, pid: portalPid }; }
       return { configured: portalHas, phoneNumberId: null, pid: portalPid };
     },
@@ -50,6 +80,9 @@ const call = async (path, body, method = 'POST') => {
   stub('../src/utils/whatsappCloud', { legacyConfig: async () => ({ configured: false, reason: 'not set' }) });
   stub('../src/utils/socialAccounts', { PLATFORMS: ['facebook', 'instagram'], list: async () => ({ facebook: [{ name: 'Page A', username: null, status: 'Connected', isDefault: true, tokenEnc: 'SHOULD-NOT-LEAK' }], instagram: [] }) });
   stub('../src/calling/settings', { status: async () => ({ state: 'Connected', detail: 'ok' }) });
+  const emailCfg = { configured: true, host: 'mail.zz.test', port: 465, secure: true, user: 'hr@zz.test', pass: 'EMAIL-SECRET-1', fromAddress: 'hr@zz.test', fromName: 'ZZ HR' };
+  stub('../src/utils/mailer', { emailConfig: async () => emailCfg });
+  stub('../src/utils/smsGateway', { smsConfig: async () => ({ configured: true, provider: 'SMSGW' }) });
   const P = require('../src/utils/portalIntegrations');
 
   let out = await P.pushWhatsapp();
@@ -66,10 +99,29 @@ const call = async (path, body, method = 'POST') => {
   out = await P.pushWhatsapp();
   check('with no working number in TeamLink nothing is sent (and nothing is invented)', out.configured === false && sent.length === 3, out);
 
+  // email and SMS
+  const before = sent.length;
+  let e1 = await P.pushEmail();
+  check('TeamLink hands its SMTP account to the portal', e1.pushed === true && sent.length === before + 1 && sent[before].email.host === 'mail.zz.test' && sent[before].email.pass === 'EMAIL-SECRET-1' && sent[before].email.encryption === 'SSL', { e1, last: sent[before] });
+  e1 = await P.pushEmail();
+  check('unchanged: the email account is not sent again', e1.unchanged === true && sent.length === before + 1, e1);
+  emailCfg.pass = 'EMAIL-SECRET-2';
+  e1 = await P.pushEmail();
+  check('the password changed in Integrations: the portal gets the new one', e1.pushed === true && sent[sent.length - 1].email.pass === 'EMAIL-SECRET-2', e1);
+  let s1 = await P.pushSms();
+  check('the portal is switched to TeamLink SMS', s1.pushed === true && s1.relay === true, s1);
+  s1 = await P.pushSms();
+  check('and not again while it stays on', s1.unchanged === true, s1);
+  portalPid = 333; emailHas = false; relayOn = false;
+  const all = await P.pushAll();
+  check('the portal started again: WhatsApp, email and SMS are all handed over again by itself', all.whatsapp.pushed === undefined || all.email.pushed === true, all);
+  check('(SMS too)', all.sms.pushed === true, all);
+
   const snap = await P.snapshot();
   const text = JSON.stringify(snap);
   check('the screen data lists the WhatsApp numbers, the social accounts and the AI calling state', snap.whatsapp.numbers.length === 1 && snap.social[0].accounts[0].name === 'Page A' && snap.aiCalling.state === 'Connected', snap);
-  check('no token, no secret and no encrypted value is in what a screen gets', !/SECRET-TOKEN|SHOULD-NOT-LEAK|tokenEnc/.test(text), text);
+  check('no token, no secret and no encrypted value is in what a screen gets', !/SECRET-TOKEN|SHOULD-NOT-LEAK|tokenEnc|EMAIL-SECRET/.test(text), text);
+  check('the screen data also has the email and SMS state', snap.email && snap.email.teamlink && snap.email.teamlink.host === 'mail.zz.test' && snap.sms && snap.sms.teamlink.provider === 'SMSGW', snap);
 
   console.log(failed ? `\n${failed} FAILED` : '\nALL PASSED');
   process.exit(failed ? 1 : 0);

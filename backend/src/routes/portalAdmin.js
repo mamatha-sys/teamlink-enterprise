@@ -58,8 +58,9 @@ router.get('/connected', view, wrap(async (req, res) => {
   res.json(await require('../utils/portalIntegrations').snapshot()); // eslint-disable-line global-require
 }));
 router.post('/connected/sync', change, wrap(async (req, res) => {
-  const out = await require('../utils/portalIntegrations').pushWhatsapp({ force: true }); // eslint-disable-line global-require
-  await audit(req, 'Job Portal: WhatsApp number handed over from TeamLink Integrations', 'whatsapp', out.pushed ? 'pushed' : (out.skipped || out.error || 'unchanged'));
+  const out = await require('../utils/portalIntegrations').pushAll({ force: true }); // eslint-disable-line global-require
+  const word = (o) => (o.pushed ? 'pushed' : (o.skipped || o.error || 'unchanged'));
+  await audit(req, 'Job Portal: WhatsApp, email and SMS handed over from TeamLink Integrations', 'integrations', `whatsapp ${word(out.whatsapp)}, email ${word(out.email)}, sms ${word(out.sms)}`);
   res.json(out);
 }));
 

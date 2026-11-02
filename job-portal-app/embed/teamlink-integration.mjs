@@ -470,6 +470,73 @@ export function teamlinkFrontRouter({ root, express }) {
     return res.json(await waInfo());
   }));
 
+  /*
+   * THE PORTAL SENDS EMAIL AND SMS THROUGH TEAMLINK'S OWN CHANNELS (founder 2026-11-02: "job portal kii anii integrations connect cheyuu").
+   *   EMAIL  TeamLink's Email (SMTP) account (Administration -> Integrations -> Email) becomes the portal's SMTP: same server, same From.
+   *          The portal reads config.smtp* on every send, so the values are set in memory and the cached connection is dropped.
+   *   SMS    The portal speaks MSG91 / Fast2SMS / Twilio, TeamLink uses the SMS Push Platform (web.smsgw.in), which the portal cannot
+   *          talk to. So the portal's SMS provider hands every message to TeamLink (POST {TEAMLINK_API_URL}/api/public/job-portal/sms with the
+   *          existing bridge secret), which sends it through its own SMS channel with its own DLT templates and "proven" rule.
+   * Nothing is written to the portal's database or disk. TeamLink sends these again after every portal start (backend/src/utils/
+   * portalIntegrations.js). No password is ever returned.
+   *   POST .../email/config { host, port, secure, encryption, user, pass, fromAddress, fromName }  ->  { configured, host, from }
+   *   GET  .../email/config                                                                         ->  { configured, host, from, pid }
+   *   POST .../sms/relay { on }   GET .../sms/relay                                                 ->  { relay, pid }
+   */
+  const emailInfo = async () => {
+    const cfg = (await import(pathToFileURL(join(ROOT, 'api', 'src', 'config.js')).href)).config;
+    return { configured: !!(cfg.emailFrom && cfg.smtpHost && cfg.smtpUser && cfg.smtpPass), host: cfg.smtpHost || null, from: cfg.emailFrom || null, pid: process.pid };
+  };
+  r.get('/api/integrations/teamlink/email/config', wrap(async (_req, res) => res.json(await emailInfo())));
+  r.post('/api/integrations/teamlink/email/config', wrap(async (req, res) => {
+    const b = req.body || {};
+    const host = String(b.host || '').trim();
+    const fromAddress = String(b.fromAddress || '').trim();
+    const port = Number(b.port);
+    if (!host || !fromAddress || !Number.isInteger(port) || port < 1 || port > 65535) return res.status(422).json({ error: { code: 'VALIDATION_FAILED', message: 'host, fromAddress and a port are required' } });
+    const cfgMod = await import(pathToFileURL(join(ROOT, 'api', 'src', 'config.js')).href);
+    const cfg = cfgMod.config;
+    const enc = String(b.encryption || '').toUpperCase();
+    cfg.smtpHost = host;
+    cfg.smtpPort = port;
+    cfg.smtpSecure = b.secure === true;
+    cfg.smtpEncryption = enc === 'STARTTLS' ? 'STARTTLS' : enc === 'NONE' ? 'None' : 'SSL';
+    cfg.smtpUser = String(b.user || '').trim();
+    cfg.smtpPass = String(b.pass || '');
+    cfg.emailFrom = fromAddress;
+    cfg.emailFromName = String(b.fromName || '').trim();
+    try { (await import(pathToFileURL(join(ROOT, 'api', 'src', 'notify', 'providers.js')).href)).resetSmtp(); } catch { /* the next send builds it again */ }
+    log('email: the portal now sends through TeamLink\'s SMTP account');
+    return res.json(await emailInfo());
+  }));
+
+  let smsRelay = false;
+  const relayInfo = () => ({ relay: smsRelay, pid: process.pid });
+  r.get('/api/integrations/teamlink/sms/relay', (_req, res) => res.json(relayInfo()));
+  r.post('/api/integrations/teamlink/sms/relay', wrap(async (req, res) => {
+    if (!req.body || typeof req.body.on !== 'boolean') return res.status(422).json({ error: { code: 'VALIDATION_FAILED', message: 'on must be true or false' } });
+    const { smsProvider } = await import(pathToFileURL(join(ROOT, 'api', 'src', 'notify', 'providers.js')).href);
+    if (req.body.on && !smsRelay) {
+      smsRelay = true;
+      smsProvider.configured = () => true;
+      smsProvider.send = async ({ to, text, purpose }) => {
+        if (!to) return { status: 'skipped_no_address', provider: 'teamlink-sms', error: 'no phone number' };
+        try {
+          const res2 = await fetch(`${teamlinkApi()}/api/public/job-portal/sms`, {
+            method: 'POST', headers: { 'content-type': 'application/json', 'x-job-portal-secret': pushSecret() },
+            body: JSON.stringify({ to, text, purpose: purpose || null }), signal: AbortSignal.timeout(20000),
+          });
+          const out = await res2.json().catch(() => ({}));
+          if (out && out.ok) return { status: 'sent', provider: 'teamlink-sms', ref: out.providerRef || null };
+          if (out && out.notConfigured) return { status: 'not_configured', provider: 'teamlink-sms', error: String(out.error || 'TeamLink SMS is not ready').slice(0, 300) };
+          return { status: 'failed', provider: 'teamlink-sms', error: String((out && out.error) || `HTTP ${res2.status}`).slice(0, 300) };
+        } catch (e) { return { status: 'failed', provider: 'teamlink-sms', error: String((e && e.message) || e).slice(0, 300) }; }
+      };
+      log('sms: the portal now sends SMS through TeamLink\'s SMS channel');
+    }
+    return res.json(relayInfo());
+  }));
+
   r.get('/api/integrations/teamlink/ping', (_req, res) => res.json({ ok: true, host: 'teamlink-embed', pid: process.pid }));
 
   /*

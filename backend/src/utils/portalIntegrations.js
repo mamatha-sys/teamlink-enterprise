@@ -16,10 +16,14 @@
 const crypto = require('crypto');
 
 const PORTAL = '/integrations/teamlink/whatsapp/primary';
+const PORTAL_EMAIL = '/integrations/teamlink/email/config';
+const PORTAL_SMS = '/integrations/teamlink/sms/relay';
 const bridge = () => require('./jobPortalBridge'); // eslint-disable-line global-require
 const isSandbox = () => require('./sandbox').isSandbox(); // eslint-disable-line global-require
 
 let last = { fingerprint: '', pid: null, at: null, ok: null, error: null };
+let lastEmail = { fingerprint: '', pid: null, at: null, ok: null, error: null };
+let lastSms = { pid: null, at: null, ok: null, error: null };
 
 // The number TeamLink itself sends from: the list's default number, else the single old connection.
 async function whatsappSource() {
@@ -51,6 +55,42 @@ async function pushWhatsapp({ force = false } = {}) {
   }
 }
 
+// TeamLink's Email (SMTP) account becomes the portal's SMTP. Never throws.
+async function pushEmail({ force = false } = {}) {
+  if (isSandbox()) return { skipped: 'sandbox' };
+  try {
+    const cfg = await require('./mailer').emailConfig(); // eslint-disable-line global-require
+    if (!cfg || !cfg.configured || !cfg.host || !cfg.fromAddress) return { skipped: 'TeamLink has no working email account', configured: false };
+    const fp = crypto.createHash('sha256').update([cfg.host, cfg.port, cfg.user, cfg.pass, cfg.fromAddress, cfg.fromName, cfg.secure].join('|')).digest('hex').slice(0, 16);
+    const now = await bridge().portalFetch(PORTAL_EMAIL, { timeoutMs: 8000 });
+    if (!force && lastEmail.fingerprint === fp && now && now.pid === lastEmail.pid && now.configured) return { unchanged: true, configured: true };
+    const body = { host: cfg.host, port: cfg.port, secure: !!cfg.secure, encryption: cfg.allowInsecure ? 'None' : (cfg.secure ? 'SSL' : 'STARTTLS'), user: cfg.user, pass: cfg.pass, fromAddress: cfg.fromAddress, fromName: cfg.fromName };
+    const out = await bridge().portalFetch(PORTAL_EMAIL, { method: 'POST', body, timeoutMs: 10000 });
+    lastEmail = { fingerprint: fp, pid: out.pid, at: new Date().toISOString(), ok: true, error: null };
+    return { pushed: true, configured: !!out.configured, host: out.host };
+  } catch (err) {
+    lastEmail = { ...lastEmail, ok: false, error: String((err && err.message) || err).slice(0, 200), at: new Date().toISOString() };
+    return { error: lastEmail.error };
+  }
+}
+
+// The portal hands its SMS to TeamLink's SMS channel (the portal cannot speak the SMS Push Platform). Never throws.
+async function pushSms({ force = false } = {}) {
+  if (isSandbox()) return { skipped: 'sandbox' };
+  try {
+    const now = await bridge().portalFetch(PORTAL_SMS, { timeoutMs: 8000 });
+    if (!force && now && now.relay && now.pid === lastSms.pid) return { unchanged: true, relay: true };
+    const out = await bridge().portalFetch(PORTAL_SMS, { method: 'POST', body: { on: true }, timeoutMs: 8000 });
+    lastSms = { pid: out.pid, at: new Date().toISOString(), ok: !!out.relay, error: null };
+    return { pushed: true, relay: !!out.relay };
+  } catch (err) {
+    lastSms = { ...lastSms, ok: false, error: String((err && err.message) || err).slice(0, 200), at: new Date().toISOString() };
+    return { error: lastSms.error };
+  }
+}
+
+const pushAll = async (o = {}) => ({ whatsapp: await pushWhatsapp(o), email: await pushEmail(o), sms: await pushSms(o) });
+
 // What the portal settings screen shows. No secret.
 async function snapshot() {
   const out = { whatsapp: { numbers: [], portal: null }, social: [], aiCalling: null };
@@ -66,6 +106,12 @@ async function snapshot() {
   } catch { /* none */ }
   try { out.whatsapp.portal = await bridge().portalFetch(PORTAL, { timeoutMs: 6000 }); } catch (e) { out.whatsapp.portal = { error: String((e && e.message) || e).slice(0, 160) }; }
   out.whatsapp.lastPush = { at: last.at, ok: last.ok, error: last.error };
+  out.email = { teamlink: null, portal: null };
+  try { const e = await require('./mailer').emailConfig(); out.email.teamlink = e.configured ? { host: e.host, from: e.fromAddress } : { problem: e.reason }; } catch { /* none */ } // eslint-disable-line global-require
+  try { out.email.portal = await bridge().portalFetch(PORTAL_EMAIL, { timeoutMs: 6000 }); } catch (e) { out.email.portal = { error: String((e && e.message) || e).slice(0, 160) }; }
+  out.sms = { teamlink: null, portal: null };
+  try { const c = await require('./smsGateway').smsConfig(); out.sms.teamlink = c.configured ? { provider: c.provider || null } : { problem: c.reason }; } catch { /* none */ } // eslint-disable-line global-require
+  try { out.sms.portal = await bridge().portalFetch(PORTAL_SMS, { timeoutMs: 6000 }); } catch (e) { out.sms.portal = { error: String((e && e.message) || e).slice(0, 160) }; }
   try {
     const SA = require('./socialAccounts'); // eslint-disable-line global-require
     const all = await SA.list(); // { facebook: [...], instagram: [...], ... }
@@ -84,10 +130,10 @@ async function snapshot() {
 let timer = null;
 function startSchedule() {
   if (timer || process.env.NODE_ENV === 'test') return;
-  const tick = () => { pushWhatsapp().catch(() => {}); };
+  const tick = () => { pushAll().catch(() => {}); };
   setTimeout(tick, 45 * 1000); // after the portal is up
   timer = setInterval(tick, 2 * 60 * 1000);
   if (timer.unref) timer.unref();
 }
 
-module.exports = { pushWhatsapp, snapshot, startSchedule, fingerprintOf };
+module.exports = { pushWhatsapp, pushEmail, pushSms, pushAll, snapshot, startSchedule, fingerprintOf };

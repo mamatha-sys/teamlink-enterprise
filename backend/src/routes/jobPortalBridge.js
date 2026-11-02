@@ -69,4 +69,21 @@ router.post('/applications', async (req, res) => {
   return res.status(out.status).json(out.body);
 });
 
+// THE PORTAL'S SMS GO THROUGH TEAMLINK'S SMS CHANNEL (founder 2026-11-02): the portal cannot speak the SMS Push Platform, so its SMS provider
+// (job-portal-app/embed/teamlink-integration.mjs) hands each message here with the bridge secret. It leaves through TeamLink's own SMS
+// gateway - its DLT templates, its opt-out list and its "not proven until a real SMS was delivered" rule - and the answer says what happened.
+router.post('/sms', async (req, res) => {
+  if (!bridge.secretMatches(req.get('x-job-portal-secret'))) return res.status(401).json({ ok: false, error: 'Invalid or missing job portal secret' });
+  const to = String((req.body && req.body.to) || '').trim();
+  const text = String((req.body && req.body.text) || '').trim();
+  if (!to || !text) return res.status(422).json({ ok: false, error: 'to and text are required' });
+  try {
+    const out = await require('../utils/smsGateway').sendSms({ to, kind: 'bulk', text }); // eslint-disable-line global-require
+    // always 200: the portal reads ok / notConfigured / error (a 5xx would be retried by api.js and send twice)
+    return res.json({ ok: !!out.ok, providerRef: out.providerRef || null, provider: out.provider || null, notConfigured: !!out.notConfigured, invalid: !!out.invalid, error: out.ok ? undefined : String(out.error || 'not sent').slice(0, 300) });
+  } catch (err) {
+    return res.json({ ok: false, error: String((err && err.message) || err).slice(0, 300) });
+  }
+});
+
 module.exports = router;
