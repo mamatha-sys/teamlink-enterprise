@@ -240,6 +240,18 @@ staff.post('/phone-call', async (req, res) => {
   send(res, await require('../calling/voice/sipCall').place(req.user, { applicationId: clip(b.applicationId, 60), purpose: clip(b.purpose, 40), language: clip(b.language, 20), fields: b.fields })); // eslint-disable-line global-require
 });
 
+// BULK AI PHONE CALLS through the same line (founder 2026-11-02): one confirmation for every ticked candidate; the calls go
+// out from one queue, a few at a time (calling/voice/phoneQueue.js). Each person is checked by the same rules as one call.
+staff.post('/phone-calls', async (req, res) => {
+  const b = req.body || {};
+  if (b.confirm !== true) return res.status(400).json({ error: 'Please confirm the calls first. No call is placed without your confirmation.' });
+  const ids = Array.isArray(b.applicationIds) ? b.applicationIds.slice(0, 1000) : [];
+  send(res, await require('../calling/voice/phoneQueue').enqueue(req.user, { applicationIds: ids, purpose: clip(b.purpose, 40), fields: b.fields })); // eslint-disable-line global-require
+});
+staff.get('/phone-calls/:batchId', async (req, res) => {
+  send(res, require('../calling/voice/phoneQueue').batchStatus(req.user, clip(req.params.batchId, 60))); // eslint-disable-line global-require
+});
+
 staff.post('/calls', async (req, res) => {
   const b = req.body || {};
   const r = await svc.createCalls(req.user, {

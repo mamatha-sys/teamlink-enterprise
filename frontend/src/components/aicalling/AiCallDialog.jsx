@@ -71,6 +71,26 @@ export default function AiCallDialog({
   }
 
   // AI PHONE CALL through our own SIP line, free voices: only the SIP minutes cost.
+  // BULK through the same line (2026-11-02): every ticked candidate, queued on the server, a few at a time
+  const [batch, setBatch] = useState(null); // { batchId, total, parallel, placed, refused, waiting, done }
+  useEffect(() => {
+    if (!batch || batch.done) return undefined;
+    const t = setTimeout(() => {
+      api.get(`/ai-calling/phone-calls/${batch.batchId}`).then((r) => setBatch((b) => ({ ...b, ...r.data }))).catch(() => {});
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [batch]);
+  async function phoneCalls() {
+    setBusy(true); setErr('');
+    try {
+      const r = await api.post('/ai-calling/phone-calls', { applicationIds: ids, purpose, fields, confirm: true });
+      setBatch({ ...r.data, placed: 0, refused: [], waiting: r.data.total, done: false });
+      if (onDone) onDone();
+    } catch (e) {
+      setErr(errorOf(e, 'The calls could not be queued.'));
+    } finally { setBusy(false); }
+  }
+
   async function phoneCall() {
     setBusy(true); setErr('');
     try {
@@ -109,12 +129,17 @@ export default function AiCallDialog({
       title={title}
       size="wide"
       onClose={onClose}
-      foot={sent || linkRes ? <button className="btn btn-primary" onClick={onClose}>Close</button> : (
+      foot={sent || linkRes || batch ? <button className="btn btn-primary" onClick={onClose}>Close</button> : (
         <>
           <button className="btn" onClick={onClose}>Cancel</button>
           {!many && (
             <button className="btn" disabled={busy || !linkAllowed} onClick={makeLink} title="Free: the candidate talks to the AI assistant on a web page. You send the link from your WhatsApp.">
               {busy ? 'Please wait…' : 'Send free AI link (WhatsApp)'}
+            </button>
+          )}
+          {many && phoneAi && phoneAi.ready && (
+            <button className="btn btn-primary" disabled={busy || !pv || !!pv.fieldError} onClick={phoneCalls} title="Real phone calls from our own line, a few at a time. Each one starts in English and follows the language the candidate speaks. The AI voice is free; only the call minutes cost.">
+              {busy ? 'Please wait…' : `Call ${ids.length} candidates with AI (phone)${phoneAi.mode === 'Test' ? ' - test' : ''}`}
             </button>
           )}
           {!many && phoneAi && phoneAi.ready && (
@@ -128,7 +153,17 @@ export default function AiCallDialog({
         </>
       )}
     >
-      {linkRes ? (
+      {batch ? (
+        <div>
+          <div className="notice" style={{ marginBottom: 10 }}>
+            {batch.done
+              ? `All done: ${batch.placed} call(s) placed${batch.refused.length ? `, ${batch.refused.length} not placed` : ''}.`
+              : `Calling ${batch.total} candidates from our own line, ${batch.parallel} at a time: ${batch.placed} placed, ${batch.waiting} waiting${batch.refused.length ? `, ${batch.refused.length} not placed` : ''}.`}
+          </div>
+          {batch.refused.map((r) => <div key={r.applicationId} className="small-muted">Not placed{r.name ? ` (${r.name})` : ''}: {r.reason}</div>)}
+          <div className="small-muted" style={{ marginTop: 6 }}>You can close this window: the calls go on. Each result appears on the candidate&apos;s history and on the AI Calling page.</div>
+        </div>
+      ) : linkRes ? (
         <div>
           <div className="notice" style={{ marginBottom: 10 }}>The free AI link is ready. Send it to the candidate from your WhatsApp. It works for 7 days, once.</div>
           <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '8px 12px', background: 'var(--paper)', whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.5, marginBottom: 10 }}>{linkRes.whatsapp.text}</div>
