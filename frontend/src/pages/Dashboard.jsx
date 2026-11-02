@@ -15,6 +15,7 @@ import Pager, { usePaged } from '../components/Pager.jsx';
 import AgreementsWaiting from '../components/agreements/AgreementsWaiting.jsx';
 import NewItems from '../components/dashboard/NewItems.jsx'; // the New button (2026-10-13)
 import ControlTower from '../components/dashboard/ControlTower.jsx'; // the Super Admin / Admin home (2026-10-23)
+import Vacancies from '../components/dashboard/Vacancies.jsx'; // vacancies per department (2026-11-02)
 
 // ---------------------------------------------------------------------------
 // THE OVERALL DASHBOARD (§18).
@@ -223,6 +224,7 @@ export default function Dashboard() {
     return (
       <>
         <ControlTower />
+        <Vacancies />
         <AgreementsWaiting />
       </>
     );

@@ -11,6 +11,7 @@ import FilterChips from '../../components/FilterChips.jsx';
 import DateRangePicker, { useDateRange, rangeParams } from '../../components/DateRangePicker.jsx';
 import { Tiles, DrillPanel } from './DashboardDrill.jsx';
 import TodayDeptChart from './TodayDeptChart.jsx';
+import Vacancies from '../../components/dashboard/Vacancies.jsx'; // vacancies per department (2026-11-02)
 // Recruiter joinings (2026-10-05): Super Admin's month-end popup + a recruiter's own figure.
 import NewItems from '../../components/dashboard/NewItems.jsx'; // the New button (2026-10-13), HRMS lines only (2026-10-24)
 import RecruiterJoiningsPopup from '../../components/recruiterJoinings/RecruiterJoiningsPopup.jsx';
@@ -148,6 +149,7 @@ function HrDashboard() {
           { key: 'manager', label: 'Reporting manager', value: filters.manager ? ((o.managers.find((m) => String(m.id) === String(filters.manager)) || {}).name || filters.manager) : '', onRemove: () => set('manager', '') },
         ]}
       />
+      <Vacancies />
 
       {error && <div className="notice red">{error}</div>}
 

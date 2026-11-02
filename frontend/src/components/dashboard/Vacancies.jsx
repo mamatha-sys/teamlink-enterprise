@@ -1,0 +1,85 @@
+import { useEffect, useState } from 'react';
+import api from '../../api';
+
+// Vacancies on the dashboard (founder 2026-11-02: "dashboard medha vacancies enni unai anni kuda kanipinchali").
+// Planned people per department and role (STL / TL / Employee) vs who is working now. Server: GET /dashboard/vacancies (utils/vacancies.js).
+// A login that may not see it gets 403 and the card is simply not shown. Only the Super Admin changes the plan ("Change numbers").
+const red = '#b42318';
+const green = '#1c7c4a';
+
+export default function Vacancies() {
+  const [d, setD] = useState(null);
+  const [open, setOpen] = useState({}); // "group|role" -> names shown
+  const [edit, setEdit] = useState(null); // the plan being changed
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    api.get('/dashboard/vacancies').then((r) => { if (alive) setD(r.data); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  if (!d) return null;
+
+  async function save() {
+    setBusy(true); setErr('');
+    try { const r = await api.put('/dashboard/vacancies/plan', { plan: edit }); setD(r.data); setEdit(null); } catch (e) { setErr(e.response?.data?.error || 'It could not be saved.'); } finally { setBusy(false); }
+  }
+  const setNum = (gi, role, v) => setEdit(edit.map((g, i) => (i !== gi ? g : { ...g, rows: g.rows.map((r) => (r.role === role ? { ...r, planned: v === '' ? '' : Number(v) } : r)) })));
+
+  const t = d.totals;
+  return (
+    <div className="card" style={{ padding: 16, margin: '16px 0' }} role="region" aria-label="Vacancies">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <b style={{ fontSize: 16 }}>Vacancies: <span style={{ color: t.vacant ? red : green }}>{t.vacant}</span></b>
+        <span className="small-muted">Should have {t.planned} · Working now {t.filled}{t.leaving ? ` · ${t.leaving} leaving (notice period)` : ''}</span>
+        <span style={{ flex: 1 }} />
+        {d.canEdit && !edit ? <button type="button" className="btn btn-sm" onClick={() => setEdit(JSON.parse(JSON.stringify(d.plan)))}>Change numbers</button> : null}
+      </div>
+
+      {edit ? (
+        <div style={{ marginTop: 12 }}>
+          <div className="small-muted" style={{ marginBottom: 8 }}>How many people each department should have.</div>
+          <div className="tbl-wrap"><table>
+            <thead><tr><th>Department</th>{d.roles.map((r) => <th key={r}>{r}</th>)}</tr></thead>
+            <tbody>{edit.map((g, gi) => (
+              <tr key={g.name}>
+                <td><b>{g.name}</b></td>
+                {d.roles.map((role) => {
+                  const row = g.rows.find((r) => r.role === role);
+                  return <td key={role}>{row ? <input type="number" min={0} max={500} value={row.planned} onChange={(e) => setNum(gi, role, e.target.value)} style={{ width: 70 }} aria-label={`${g.name} ${role}`} /> : <span className="small-muted">—</span>}</td>;
+                })}
+              </tr>
+            ))}</tbody>
+          </table></div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <button type="button" className="btn btn-primary btn-sm" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+            <button type="button" className="btn btn-sm" onClick={() => { setEdit(null); setErr(''); }} disabled={busy}>Cancel</button>
+          </div>
+          {err ? <div className="error-text" style={{ marginTop: 8 }}>{err}</div> : null}
+        </div>
+      ) : (
+        <div className="tbl-wrap" style={{ marginTop: 12 }}><table>
+          <thead><tr><th>Department</th><th>Role</th><th>Should have</th><th>Working now</th><th>Vacant</th></tr></thead>
+          <tbody>{d.groups.flatMap((g) => g.rows.map((r, i) => {
+            const k = `${g.name}|${r.role}`;
+            return (
+              <tr key={k}>
+                <td>{i === 0 ? <b>{g.name}</b> : ''}</td>
+                <td>{r.role}</td>
+                <td>{r.planned}</td>
+                <td>
+                  {r.filled ? <button type="button" className="link-btn" onClick={() => setOpen({ ...open, [k]: !open[k] })} style={{ background: 'none', border: 0, padding: 0, color: 'var(--primary, #1a56db)', cursor: 'pointer' }}>{r.filled}</button> : 0}
+                  {r.leaving ? <span className="small-muted"> ({r.leaving} leaving)</span> : null}
+                  {r.over ? <span className="small-muted"> (+{r.over} more than planned)</span> : null}
+                  {open[k] ? <div className="small-muted" style={{ fontSize: 12, marginTop: 4 }}>{r.people.map((p) => `${p.name}${p.leaving ? ' (notice)' : ''}`).join(', ')}</div> : null}
+                </td>
+                <td><b style={{ color: r.vacant ? red : green }}>{r.vacant}</b></td>
+              </tr>
+            );
+          }))}</tbody>
+        </table></div>
+      )}
+    </div>
+  );
+}

@@ -1951,6 +1951,29 @@ router.get('/today', require('../utils/permissions').requireInternal, async (req
 
 // The ATS/company summary is internal (review #3 access audit): a Client or
 // Candidate is refused — their home is the portal.
+// VACANCIES (founder 2026-11-02, utils/vacancies.js): planned people per department and role vs who is working now.
+// Seen by the Super Admin, Admin and whoever may see Employee Management (HR); the plan is changed by the Super Admin only.
+const mayseeVacancies = async (u) => ['SUPER_ADMIN', 'ADMIN'].includes(u.role) || can(u, 'hrms', 'hrms', 'Employee Management', 'view');
+router.get('/vacancies', async (req, res, next) => {
+  try {
+    if (!(await mayseeVacancies(req.user))) return res.status(403).json({ error: 'You cannot see the vacancies.' });
+    return res.json({ ...(await require('../utils/vacancies').view()), canEdit: req.user.role === 'SUPER_ADMIN' }); // eslint-disable-line global-require
+  } catch (err) { return next(err); }
+});
+router.put('/vacancies/plan', async (req, res, next) => {
+  try {
+    if (req.user.role !== 'SUPER_ADMIN') return res.status(403).json({ error: 'Only the Super Admin changes how many people each department should have.' });
+    const V = require('../utils/vacancies'); // eslint-disable-line global-require
+    const before = await V.readPlan();
+    const r = await V.savePlan((req.body || {}).plan);
+    if (r.error) return res.status(400).json({ error: r.error });
+    const brief = (pl) => pl.map((g) => `${g.name}: ${g.rows.map((x) => `${x.role} ${x.planned}`).join(', ')}`).join(' | ').slice(0, 480);
+    const { logAudit } = require('../utils/audit'); // eslint-disable-line global-require
+    await logAudit({ userId: req.user.id, actorName: req.user.name, action: 'Changed the vacancy plan', entity: 'Settings', entityId: V.PLAN_KEY, fromValue: brief(before), toValue: brief(await V.readPlan()) }).catch(() => null);
+    return res.json({ ...(await V.view()), canEdit: true });
+  } catch (err) { return next(err); }
+});
+
 router.get('/', require('../utils/permissions').requireInternal, async (req, res) => {
   // Every dashboard number is scoped the way the lists behind it are: a client
   // sees their own pipeline, a recruiter their own, a TL their department's.
