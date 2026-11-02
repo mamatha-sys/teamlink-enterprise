@@ -72,8 +72,6 @@ function HrDashboard() {
     ? null
     : { section, tile: c.tile, part: c.part || '', scope: c.scope || '', expected }));
   const isDrill = (tile, part, scope) => !!drill && drill.tile === tile && (drill.part || '') === part && (drill.scope || '') === scope;
-  const deptWorking = data.headcountByDepartment.reduce((n, d) => n + d.working, 0);
-  const deptLeft = data.headcountByDepartment.reduce((n, d) => n + d.left, 0);
   const birthdays = data.celebrations.filter((c) => c.kind === 'Birthday').length;
   // On Leave in the attendance row vs "Leave approved for this date" above it: say why they can differ.
   const kinds = ao.onLeaveKinds || {};
@@ -185,8 +183,8 @@ function HrDashboard() {
           onSwitch={(x) => setDrill((d) => ({ ...d, part: x.part, expected: x.n }))} />
       )}
 
-      {/* THE LAYOUT: Employee Overview (above), today's attendance with its one chart, then leave, then what is waiting for a decision;
-          the lists and calendars stay at the end. */}
+      {/* THE LAYOUT: Employee Overview (above), today's attendance, then leave, then what is waiting for a decision; the attendance chart
+          by department sits at the end beside Birthdays, with the lists and calendars. */}
       {/* PEOPLE ON ONE DAY, not person-days: the range's last day (today when
           the range runs on past it), out of the people on the rolls that day.
           The buckets add up to the headcount, and match the Attendance
@@ -251,10 +249,6 @@ function HrDashboard() {
       )}
       {vacOpen && vac ? <VacanciesPopup d={vac} setD={setVac} onClose={() => setVacOpen(false)} /> : null}
 
-      {/* THE ONE CHART (founder 2026-10-28: "HRMS dashboard clear ga, clarity ga, okka bar graph"): who came to work on the
-          attendance date, per department - the same people as the cards above. Clicking a department filters the dashboard to it. */}
-      <TodayDeptChart rows={ao.byDepartment} date={ao.asOf} onPickDept={(d) => set('department', d)} />
-
       <SectionLabel>{`Leave — ${p.name}`}</SectionLabel>
       <Tiles section="leave" drill={drill} onPick={pick} cells={[
         { id: 'total', tile: 'leaveTotal', value: lo.total, label: 'Leave Requests', help: 'Every leave request that overlaps the period: Pending + Approved + Rejected + Cancelled. It counts requests; the attendance cards count people.' },
@@ -294,24 +288,10 @@ function HrDashboard() {
 
 
       <TwoCol>
-        <Panel>
-          <PanelHead title={`Headcount by Department (now) — ${deptWorking} working, ${deptLeft} left`} />
-          {data.headcountByDepartment.length === 0
-            ? <EmptyMini>No employees in scope.</EmptyMini>
-            : (
-              <div className="hd-scroll">
-                {data.headcountByDepartment.map((d) => (
-                  <AssignRow key={d.department}>
-                    <span>{d.department}</span>
-                    <span className="cell-muted" style={{ fontSize: 11.5 }}>
-                      <button type="button" className={`hd-link${isDrill('dept', d.department, 'working') ? ' on' : ''}`} onClick={() => pick('dept', { tile: 'dept', part: d.department, scope: 'working' }, d.working)}>{d.working} working</button>
-                      <button type="button" className={`hd-link${isDrill('dept', d.department, 'left') ? ' on' : ''}`} onClick={() => pick('dept', { tile: 'dept', part: d.department, scope: 'left' }, d.left)}>{d.left} left</button>
-                    </span>
-                  </AssignRow>
-                ))}
-              </div>
-            )}
-        </Panel>
+        {/* THE ONE CHART, where Headcount by Department was (founder 2026-11-02: "dashboard headcount thisesi ahh place lo who came to
+            work, by department ahh chart ni pettu"): who came to work on the attendance date, per department - the same people as the
+            attendance cards. Clicking a department filters the dashboard to it. */}
+        <TodayDeptChart rows={ao.byDepartment} date={ao.asOf} onPickDept={(d) => set('department', d)} />
         <Panel>
           <PanelHead title={`Birthdays & Anniversaries (next 30 days) — ${data.celebrations.length}`} />
           {data.celebrations.length === 0
@@ -335,7 +315,7 @@ function HrDashboard() {
             )}
         </Panel>
       </TwoCol>
-      {drill && (drill.section === 'dept' || drill.section === 'cel') && (
+      {drill && drill.section === 'cel' && (
         <DrillPanel drill={drill} expected={drill.expected} params={params} onClose={() => setDrill(null)} />
       )}
 
