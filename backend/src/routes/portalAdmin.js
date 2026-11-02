@@ -53,6 +53,16 @@ const channel = (req) => (CHANNELS.includes(String(req.params.ch || '').toLowerC
 // which secret fields a body sets or clears - for the audit, never their values
 const secretNames = (obj) => Object.keys((obj && typeof obj === 'object') ? obj : {}).filter((k) => obj[k] !== '' && obj[k] != null);
 
+/* ---- Connected accounts: WhatsApp, social media, AI calling - the Integrations list, seen from the portal (utils/portalIntegrations.js) ---- */
+router.get('/connected', view, wrap(async (req, res) => {
+  res.json(await require('../utils/portalIntegrations').snapshot()); // eslint-disable-line global-require
+}));
+router.post('/connected/sync', change, wrap(async (req, res) => {
+  const out = await require('../utils/portalIntegrations').pushWhatsapp({ force: true }); // eslint-disable-line global-require
+  await audit(req, 'Job Portal: WhatsApp number handed over from TeamLink Integrations', 'whatsapp', out.pushed ? 'pushed' : (out.skipped || out.error || 'unchanged'));
+  res.json(out);
+}));
+
 /* ---- Job sites ---- */
 router.get('/job-sites', view, wrap(async (req, res) => {
   res.json(await portalFetch(`${T}/job-sites/admin/integrations`, { timeoutMs: 20000 }));

@@ -4,6 +4,8 @@ import Combo from '../Combo.jsx';
 import JpModal from './JpModal.jsx';
 import { when } from './jpKit.js';
 import NaukriShineMailboxes from './NaukriShineMailboxes.jsx';
+import CandidateLogins from './CandidateLogins.jsx';
+import ConnectedAccounts from './ConnectedAccounts.jsx';
 import './jobpublish.css';
 import './naukriShineMailboxes.css';
 import './portalSettings.css';
@@ -16,10 +18,12 @@ import './portalSettings.css';
 //   Naukri & Shine mailboxes   the response mailboxes and their recruiters (portal "Naukri & Shine Email Import")
 //   Notifications        the portal's Email (SMTP), SMS and WhatsApp (portal "Integrations" -> channels)
 //   AI screening         the standard screening questions and their weight (portal "AI Settings")
+//   WhatsApp, social media & AI calling   the same accounts as Integrations, used by the portal by itself (ConnectedAccounts.jsx)
+//   Candidate logins     every candidate is sent a Job Portal login (CandidateLogins.jsx, 2026-11-02)
 // Credentials go to the server once and never come back: a saved one shows only "saved" and its last characters.
 // ---------------------------------------------------------------------------
 const SUBTABS = [
-  ['mailboxes', 'Naukri & Shine mailboxes'], ['sites', 'Job sites'], ['notify', 'Notifications (Email · SMS · WhatsApp)'], ['screening', 'AI screening'],
+  ['mailboxes', 'Naukri & Shine mailboxes'], ['sites', 'Job sites'], ['notify', 'Notifications (Email · SMS · WhatsApp)'], ['screening', 'AI screening'], ['logins', 'Candidate logins'], ['accounts', 'WhatsApp, social media & AI calling'],
 ];
 const errOf = (e) => {
   const x = e && e.response && e.response.data && e.response.data.error;
@@ -423,6 +427,8 @@ export default function JobPortalSettings({ initial = 'mailboxes', legacy = null
       {sub === 'mailboxes' && <NaukriShineMailboxes />}
       {sub === 'notify' && <Channels />}
       {sub === 'screening' && <Screening />}
+      {sub === 'logins' && <CandidateLogins />}
+      {sub === 'accounts' && <ConnectedAccounts />}
       {sub === 'legacy' && legacy}
     </div>
   );

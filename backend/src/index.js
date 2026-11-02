@@ -308,6 +308,8 @@ app.use('/api/public/interview-prep', require('./routes/interviewPrep').publicRo
 app.use('/api/naukri', require('./routes/naukri'));
 // Naukri & Shine mailboxes (Administration -> Integrations), run by the Job Portal's import engine — routes/portalMailboxes.js.
 app.use('/api/portal-mailboxes', require('./routes/portalMailboxes'));
+// CANDIDATE LOGINS (2026-11-02): every candidate is sent their Job Portal login; the switch + the backlog count live here (utils/candidateLogins.js).
+app.use('/api/candidate-logins', require('./routes/candidateLogins'));
 // The Job Portal's other Integrations settings (job sites, Email/SMS/WhatsApp, AI screening) — routes/portalAdmin.js.
 app.use('/api/portal-admin', require('./routes/portalAdmin'));
 app.use('/api/public', publicRoutes);
@@ -534,6 +536,8 @@ const server = app.listen(PORT, () => {
   require('./utils/jobPortalEmbed').start();
   // Job Portal: a full sync 30s after boot, then hourly (JOB_PORTAL_SYNC_INTERVAL_MS).
   require('./utils/jobPortalBridge').startSchedule();
+  require('./utils/candidateLogins').startSchedule();
+  require('./utils/portalIntegrations').startSchedule(); // the portal sends WhatsApp from TeamLink's own number
   // Codes sent but never entered for a day → HR is told (utils/employeeEmailVerification.js).
   require('./utils/employeeEmailVerification').startSweep();
   // Agreements: 30 / 7-day expiry-or-renewal reminders and EXPIRED after an

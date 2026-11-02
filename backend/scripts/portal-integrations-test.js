@@ -1,0 +1,76 @@
+#!/usr/bin/env node
+/**
+ * The Job Portal uses TeamLink's Integrations by itself (utils/portalIntegrations.js + the bridge's whatsapp/primary door).
+ *   Part 1: the bridge, against a SANDBOX portal (never the live one):  node scripts/portal-integrations-test.js [--portal http://127.0.0.1:4324] [--token testtoken]
+ *   Part 2: the TeamLink side, with the portal replaced by a recorder (nothing is ever sent anywhere).
+ */
+const arg = (n, d) => { const i = process.argv.indexOf(`--${n}`); return i > 0 ? process.argv[i + 1] : d; };
+const PORTAL = arg('portal', 'http://127.0.0.1:4324');
+const TOKEN = arg('token', 'testtoken');
+let failed = 0;
+const check = (name, ok, detail) => { if (!ok) failed += 1; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${!ok && detail !== undefined ? `  -> ${JSON.stringify(detail).slice(0, 300)}` : ''}`); };
+const call = async (path, body, method = 'POST') => {
+  const res = await fetch(`${PORTAL}/api/integrations/teamlink${path}`, { method, headers: { 'content-type': 'application/json', 'x-teamlink-token': TOKEN }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const text = await res.text();
+  let json = null; try { json = JSON.parse(text); } catch { /* */ }
+  return { status: res.status, json, text };
+};
+
+(async () => {
+  // ---- part 1: the portal's door ----------------------------------------------------------------------------------------------
+  let r = await call('/whatsapp/primary', undefined, 'GET');
+  check('the portal says whether it has a WhatsApp number (and never the token)', r.status === 200 && typeof r.json.configured === 'boolean' && !/token|key/i.test(Object.keys(r.json).join(',')), r);
+  r = await call('/whatsapp/primary', { accessToken: '', phoneNumberId: '123456789' });
+  check('a number without a token is refused', r.status === 422, r);
+  r = await call('/whatsapp/primary', { accessToken: 'EAAZZTESTTOKEN', phoneNumberId: 'abc' });
+  check('a phone number ID that is not numeric is refused', r.status === 422, r);
+  r = await call('/whatsapp/primary', { accessToken: 'EAAZZTESTTOKEN0000', phoneNumberId: '109876543210', businessId: '2001' });
+  check('a good number is accepted', r.status === 200 && r.json.configured === true && r.json.phoneNumberId === '…3210', r);
+  check('and the answer never contains the token', !/EAAZZTESTTOKEN/.test(r.text), r.text);
+  r = await call('/whatsapp/primary', undefined, 'GET');
+  check('it reads back as configured, last 4 only', r.json.configured === true && r.json.phoneNumberId === '…3210' && !/EAAZZ/.test(r.text), r);
+  const noTok = await fetch(`${PORTAL}/api/integrations/teamlink/whatsapp/primary`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  check('the door needs the TeamLink token', noTok.status === 401, noTok.status);
+
+  // ---- part 2: TeamLink's side ------------------------------------------------------------------------------------------------
+  process.env.NODE_ENV = 'development';
+  const stub = (rel, exports) => { const p = require.resolve(rel); require.cache[p] = { id: p, filename: p, loaded: true, exports }; };
+  const sent = [];
+  let portalPid = 111;
+  let portalHas = false;
+  stub('../src/utils/sandbox', { isSandbox: () => false });
+  stub('../src/utils/jobPortalBridge', {
+    portalFetch: async (p, o = {}) => {
+      if (o.method === 'POST') { sent.push(o.body); portalHas = true; return { configured: true, phoneNumberId: `…${String(o.body.phoneNumberId).slice(-4)}`, pid: portalPid }; }
+      return { configured: portalHas, phoneNumberId: null, pid: portalPid };
+    },
+  });
+  let cfg = { configured: true, token: 'SECRET-TOKEN-1', phoneId: '555000111', wabaId: 'W1', display: '+91 90000 00000', problems: [] };
+  stub('../src/utils/waNumbers', { hasNumbers: async () => true, defaultConfig: async () => cfg, listRows: async () => [{ label: 'Company', displayNumber: '+91 90000 00000', isDefault: true, active: true, removedAt: null }] });
+  stub('../src/utils/whatsappCloud', { legacyConfig: async () => ({ configured: false, reason: 'not set' }) });
+  stub('../src/utils/socialAccounts', { PLATFORMS: ['facebook', 'instagram'], list: async () => ({ facebook: [{ name: 'Page A', username: null, status: 'Connected', isDefault: true, tokenEnc: 'SHOULD-NOT-LEAK' }], instagram: [] }) });
+  stub('../src/calling/settings', { status: async () => ({ state: 'Connected', detail: 'ok' }) });
+  const P = require('../src/utils/portalIntegrations');
+
+  let out = await P.pushWhatsapp();
+  check('TeamLink hands its default WhatsApp number to the portal', out.pushed === true && sent.length === 1 && sent[0].accessToken === 'SECRET-TOKEN-1' && sent[0].phoneNumberId === '555000111', { out, sent });
+  out = await P.pushWhatsapp();
+  check('nothing changed: it is not sent again', out.unchanged === true && sent.length === 1, { out, sent: sent.length });
+  portalPid = 222; portalHas = false;
+  out = await P.pushWhatsapp();
+  check('the portal started again (new process): it is sent again by itself', out.pushed === true && sent.length === 2, { out, sent: sent.length });
+  cfg = { ...cfg, token: 'SECRET-TOKEN-2' };
+  out = await P.pushWhatsapp();
+  check('the token changed in Integrations: the portal gets the new one', out.pushed === true && sent.length === 3 && sent[2].accessToken === 'SECRET-TOKEN-2', { out, sent: sent.length });
+  cfg = { configured: false, reason: 'no token', problems: ['no token'] };
+  out = await P.pushWhatsapp();
+  check('with no working number in TeamLink nothing is sent (and nothing is invented)', out.configured === false && sent.length === 3, out);
+
+  const snap = await P.snapshot();
+  const text = JSON.stringify(snap);
+  check('the screen data lists the WhatsApp numbers, the social accounts and the AI calling state', snap.whatsapp.numbers.length === 1 && snap.social[0].accounts[0].name === 'Page A' && snap.aiCalling.state === 'Connected', snap);
+  check('no token, no secret and no encrypted value is in what a screen gets', !/SECRET-TOKEN|SHOULD-NOT-LEAK|tokenEnc/.test(text), text);
+
+  console.log(failed ? `\n${failed} FAILED` : '\nALL PASSED');
+  process.exit(failed ? 1 : 0);
+})().catch((e) => { console.error(e); process.exit(2); });

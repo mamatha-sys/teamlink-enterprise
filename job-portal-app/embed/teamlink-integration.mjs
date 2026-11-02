@@ -173,6 +173,20 @@ const ATTR_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'r
 const ATTR_COOKIE = 'tl_attr';
 const ATTR_FILE = join(process.env.JP_PIDFILE ? dirname(process.env.JP_PIDFILE) : join(import.meta.dirname, '..', 'run'), 'attribution.json');
 const ATTR_MAX = 5000;
+// "Send the portal login to every candidate who arrives" (founder 2026-11-02). The portal's own mail import sends the login message
+// only when INTAKE_NOTIFY_CANDIDATES=true (api/src/intake/process.js reads it on every import). TeamLink's switch writes it here, and
+// this file keeps it over a restart, so the portal behaves the same before TeamLink's next call after a restart.
+const AUTO_FILE = join(process.env.JP_PIDFILE ? dirname(process.env.JP_PIDFILE) : join(import.meta.dirname, '..', 'run'), 'candidate-login-auto.json');
+function loadAutoLogins() {
+  try {
+    const v = JSON.parse(readFileSync(AUTO_FILE, 'utf8'));
+    if (v && typeof v.on === 'boolean') process.env.INTAKE_NOTIFY_CANDIDATES = v.on ? 'true' : 'false';
+  } catch { /* never set: the portal's own default stays */ }
+}
+function saveAutoLogins(on) {
+  process.env.INTAKE_NOTIFY_CANDIDATES = on ? 'true' : 'false';
+  try { mkdirSync(dirname(AUTO_FILE), { recursive: true }); writeFileSync(AUTO_FILE, JSON.stringify({ on, at: new Date().toISOString() })); } catch { /* the env var is already set for this run */ }
+}
 let attrMap = null;
 function attrStore() {
   if (attrMap) return attrMap;
@@ -416,6 +430,46 @@ export function teamlinkFrontRouter({ root, express }) {
     return next();
   }, json);
 
+  loadAutoLogins();
+  // GET / POST .../candidates/auto  { on }  -> { on }: whether imported Naukri / Shine candidates are sent their login by the portal itself
+  r.get('/api/integrations/teamlink/candidates/auto', (_req, res) => res.json({ on: /^true$/i.test(String(process.env.INTAKE_NOTIFY_CANDIDATES || '')) }));
+  r.post('/api/integrations/teamlink/candidates/auto', (req, res) => {
+    if (!req.body || typeof req.body.on !== 'boolean') return res.status(422).json({ error: { code: 'VALIDATION_FAILED', message: 'on must be true or false' } });
+    saveAutoLogins(req.body.on);
+    return res.json({ on: req.body.on });
+  });
+  /*
+   * THE PORTAL SENDS WHATSAPP FROM TEAMLINK'S OWN NUMBER (founder 2026-11-02: "job portal loo kudaa ee social media accounts and whtsapp anii
+   * same undalii ... intergrate avalii job portal loo ki automatic gaa"). The portal's primary WhatsApp number is read from its config on
+   * every send (whatsapp/numbers.js credentialsFor), so TeamLink hands it the number it already sends from (its default WhatsApp number,
+   * Administration -> Integrations -> WhatsApp) and the portal's messages (candidate logins, interview invitations) leave from the
+   * same number. Nothing is stored by the portal: it lives in memory, TeamLink sends it again after every portal start and whenever the
+   * number changes (backend/src/utils/portalIntegrations.js). The token is never sent back.
+   *   POST .../whatsapp/primary { accessToken, phoneNumberId, businessId }  ->  { configured, phoneNumberId (last 4) }
+   *   GET  .../whatsapp/primary                                             ->  { configured, phoneNumberId (last 4), pid }
+   */
+  const waInfo = async () => {
+    const cfg = (await import(pathToFileURL(join(ROOT, 'api', 'src', 'config.js')).href)).config;
+    const id = String(cfg.whatsappPhoneId || '');
+    return { configured: !!(cfg.whatsappApiKey && id), phoneNumberId: id ? `…${id.slice(-4)}` : null, pid: process.pid };
+  };
+  r.get('/api/integrations/teamlink/whatsapp/primary', wrap(async (_req, res) => res.json(await waInfo())));
+  r.post('/api/integrations/teamlink/whatsapp/primary', wrap(async (req, res) => {
+    const b = req.body || {};
+    const token = String(b.accessToken || '').trim();
+    const phoneId = String(b.phoneNumberId || '').trim();
+    if (!token || !/^\d{5,24}$/.test(phoneId)) return res.status(422).json({ error: { code: 'VALIDATION_FAILED', message: 'accessToken and a numeric phoneNumberId are required' } });
+    const cfg = (await import(pathToFileURL(join(ROOT, 'api', 'src', 'config.js')).href)).config;
+    cfg.whatsappApiKey = token;
+    cfg.whatsappPhoneId = phoneId;
+    process.env.WHATSAPP_API_KEY = token;
+    process.env.WHATSAPP_PHONE_ID = phoneId;
+    if (b.businessId) { cfg.waBusinessId = String(b.businessId).trim(); process.env.WHATSAPP_BUSINESS_ID = cfg.waBusinessId; }
+    try { (await import(pathToFileURL(join(ROOT, 'api', 'src', 'whatsapp', 'numbers.js')).href)).forgetNumberCredentials(); } catch { /* the cache is only 8 s */ }
+    log('whatsapp: the portal now sends from TeamLink\'s number');
+    return res.json(await waInfo());
+  }));
+
   r.get('/api/integrations/teamlink/ping', (_req, res) => res.json({ ok: true, host: 'teamlink-embed', pid: process.pid }));
 
   /*
@@ -493,6 +547,93 @@ export function teamlinkFrontRouter({ root, express }) {
     const created = results.filter((x) => x.result === 'created').length;
     if (created) log(`recruiters: ${created} portal login(s) made for TeamLink Recruiters / TLs`);
     res.json({ dryRun, results });
+  }));
+
+  /*
+   * CANDIDATE LOGINS FOR TEAMLINK'S OWN CANDIDATES (founder 2026-11-02: "candidate nii add chesina ledhaa import chesina ledhaa ...
+   * login credentials vellaliii"). A candidate typed or imported in the ATS (or brought in from Naukri / Shine there) is not in the
+   * portal's database, so the portal's own invitation never reached them. TeamLink sends who they are; this finds the portal
+   * candidate by email / phone (or makes the row, the way the portal's own import does) and hands them to the portal's OWN
+   * inviteCandidate (api/src/notify/invite.js) - the same routine the portal uses for a recruiter-added candidate: it makes the
+   * candidate account, sends a temporary password by email / SMS / WhatsApp (must be changed at the first sign-in), is never
+   * run twice for one person, skips do-not-contact, and says "sent" only when a provider really accepted the message. The
+   * password is returned to nobody. A candidate login only ever reaches the candidate pages (the portal's role rules).
+   *   POST /api/integrations/teamlink/candidates/invite  { people: [{ ref, name, email, phone }], dryRun }
+   *        ->  { dryRun, counts, results: [{ ref, result: would-invite | invited | not-sent | already | has-login | do-not-contact | no-contact | skipped, ... }] }
+   * dryRun is the DEFAULT: nothing is made or sent unless the caller says dryRun:false.
+   */
+  r.post('/api/integrations/teamlink/candidates/invite', wrap(async (req, res) => {
+    const people = Array.isArray(req.body && req.body.people) ? req.body.people.slice(0, 500) : [];
+    const dryRun = !(req.body && req.body.dryRun === false);
+    const { withUser } = await portal();
+    const txt = (v, max) => { const s = String(v == null ? '' : v).trim(); return s ? s.slice(0, max) : null; };
+    let inviteCandidate = null;
+    let resendCredentials = null;
+    let newId = null;
+    if (!dryRun) {
+      const inv = await import(pathToFileURL(join(ROOT, 'api', 'src', 'notify', 'invite.js')).href);
+      inviteCandidate = inv.inviteCandidate;
+      resendCredentials = inv.resendCredentials;
+      newId = (await import(pathToFileURL(join(ROOT, 'api', 'src', 'ai', 'interview-lifecycle.js')).href)).newId;
+    }
+    const results = [];
+    for (const p of people) {
+      const ref = txt(p && p.ref, 80);
+      const name = txt(p && p.name, 120);
+      const emailRaw = txt(p && p.email, 160);
+      const email = emailRaw && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw) ? emailRaw.toLowerCase() : null;
+      const digits = String((p && p.phone) || '').replace(/\D/g, '').slice(-10);
+      const phone = digits.length === 10 ? digits : null;
+      if (!name || name.length < 2) { results.push({ ref, result: 'skipped', reason: 'no name' }); continue; }
+      if (!email && !phone) { results.push({ ref, result: 'no-contact', reason: 'no email address or mobile number' }); continue; }
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const out = await withUser(SYSTEM, async (c) => {
+          const found = (await c.query(
+            `select c.id, c.name, c.email, c.phone, c.user_id, c.do_not_contact, candidate_invited(c.id) as invited,
+                    exists (select 1 from candidate_invites i where i.candidate_id = c.id and i.status = 'sent') as was_sent,
+                    (u.role = 'candidate' and coalesce(u.must_change_password, false)) as never_signed_in,
+                    exists (select 1 from applications a where a.candidate_id = c.id and a.import_method = 'recruiter_email') as mail_import
+               from candidates c left join users u on u.id = c.user_id
+              where ($1::text is not null and lower(c.email) = $1) or ($2::text is not null and right(regexp_replace(coalesce(c.phone, ''), '\\D', '', 'g'), 10) = $2)
+              order by c.created_at asc limit 1`, [email, phone])).rows[0];
+          if (found && found.do_not_contact) return { ref, result: 'do-not-contact' };
+          // the portal does not write to one person twice in a day (0024): a message that really left = 'already'; one tried and failed in the last 24 h = 'retry-later'
+          if (found && found.invited) return { ref, result: found.was_sent ? 'already' : 'retry-later', candidateId: found.id };
+          // an account exists but nobody ever signed in to it and no message ever left (an earlier send failed): send it again - the portal's
+          // resend writes the new password only AFTER it was sent, so nobody is locked out. A Naukri / Shine mail import is the portal's own list.
+          if (found && found.user_id && !(found.never_signed_in && !found.mail_import)) return { ref, result: 'has-login', candidateId: found.id };
+          if (found && found.user_id) {
+            if (dryRun) return { ref, result: 'would-invite', candidateId: found.id };
+            return { ref, result: 'resend', candidateId: found.id };
+          }
+          if (dryRun) return { ref, result: 'would-invite', candidateId: found ? found.id : null };
+          let id = found && found.id;
+          if (!id) {
+            id = newId('cand');
+            await c.query('insert into candidates (id, name, email, phone) values ($1,$2,$3,$4)', [id, name, email, phone]);
+          }
+          return { ref, result: 'make', candidateId: id };
+        });
+        if (out.result === 'resend') {
+          // eslint-disable-next-line no-await-in-loop
+          const again = await resendCredentials({ id: out.candidateId, name, email, phone }, { invitedBy: 'TeamLink' });
+          results.push({ ref, candidateId: out.candidateId, result: again.sent ? 'invited' : 'not-sent', delivery: again.delivery, reason: again.reason || undefined });
+          continue;
+        }
+        if (out.result !== 'make') { results.push(out); continue; }
+        // eslint-disable-next-line no-await-in-loop
+        const sent = await inviteCandidate({ id: out.candidateId, name, email, phone }, { invitedBy: 'TeamLink' });
+        results.push({ ref, candidateId: out.candidateId, result: sent.invited ? 'invited' : (sent.reason === 'already invited' ? 'already' : sent.reason === 'do not contact' ? 'do-not-contact' : 'not-sent'),
+          accountCreated: !!sent.accountCreated, delivery: sent.delivery, reason: sent.reason || undefined });
+      } catch (err) {
+        results.push({ ref, result: 'not-sent', reason: String(err && err.message || err).slice(0, 200) });
+      }
+    }
+    const counts = {};
+    for (const x of results) counts[x.result] = (counts[x.result] || 0) + 1;
+    if (!dryRun && counts.invited) log(`candidates: ${counts.invited} portal login(s) sent to TeamLink candidates`);
+    res.json({ dryRun, counts, results });
   }));
 
   /*
