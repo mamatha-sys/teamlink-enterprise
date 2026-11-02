@@ -43,7 +43,7 @@ export default function CrmPage() {
   if (!me) return <div className="page"><div className="small-muted">Loading the CRM…</div></div>;
   return (
     <CrmCtx.Provider value={ctx}>
-      <Page />
+      <div className="crm-page"><Page /></div>
       <div className="toast-stack" role="status" aria-live="polite">{toasts.map((t) => <div key={t.id} className="toast">{t.text}</div>)}</div>
     </CrmCtx.Provider>
   );

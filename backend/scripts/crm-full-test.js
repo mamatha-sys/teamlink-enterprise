@@ -103,6 +103,14 @@ async function raw(method, p, token, buf, ctype = 'application/octet-stream') {
     const dd = await Z.call('GET', `/api/crm/deals/${d2.body.deal.id}`, tk.b);
     check('14 Accepted moves the deal to Negotiation and is on the timeline', ac.status === 200 && dd.body.deal.stage === 'Negotiation' && dd.body.activities.some((a) => /Accepted/.test(a.subject)), [ac.status, dd.body.deal && dd.body.deal.stage]);
 
+    // the dashboard at a glance and the activities list (the reference design)
+    const ov = await Z.call('GET', '/api/crm/overview?period=month', tk.b);
+    const c = ov.body && ov.body.cards;
+    check('17 overview: cards (leads, customers, revenue won ₹2,00,000, target ₹4,00,000 = 50%), funnel, 6-month trend, today list, recent deals, flow', ov.status === 200 && c.leads.value >= 1 && c.revenue.value === 200000 && c.target.value === 400000 && c.target.pct === 50 && ov.body.funnel.length === 5 && ov.body.trend.length === 6 && ov.body.todayList.some((x) => x.title === 'Call 1') && ov.body.recentDeals.length >= 1 && ov.body.flow.length === 5, [ov.status, c, ov.body && ov.body.todayList]);
+    const av = await Z.call('GET', '/api/crm/activities?kind=call', tk.b);
+    const av2 = await Z.call('GET', '/api/crm/activities', tk.b2);
+    check('18 activities list: calls only when asked, a salesperson sees only what they logged', av.status === 200 && av.body.rows.length >= 1 && av.body.rows.every((x) => x.kind === 'call' && x.byId === bde.id) && !av2.body.rows.some((x) => x.byId === bde.id), [av.body, av2.body && av2.body.rows.length]);
+
     // the sales team: anybody the Admin / Sales manager adds (founder 2026-11-02: "sales team kosam")
     const exec = await Z.mkUser('exec', { role: 'EMPLOYEE', atsRole: 'RECRUITER', atsDepartment: 'IT', atsScopeDepartments: 'IT' });
     const tkE = await Z.mint(exec);

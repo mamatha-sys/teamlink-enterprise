@@ -16,6 +16,8 @@
 //   GET    /crm/tasks?when=overdue|today|upcoming|open|done[&mine=1]
 //   POST   /crm/tasks                      {title, dueDate, dueTime, leadId|dealId|accountId, ownerId?}
 //   POST   /crm/tasks/:id/done             {note}
+//   GET    /crm/overview?period=month|last_month|quarter|year[&mine=1]   the dashboard cards, funnel, today, recent deals, flow
+//   GET    /crm/activities?kind=&from=&to=&owner=&q=   every call / meeting / email / WhatsApp / note in one list
 //   GET    /crm/reports?month=YYYY-MM      BDE performance vs target, forecast, funnel, deals going cold
 //   PUT    /crm/targets {month, ownerId, amount, deals}     PUT /crm/settings {sources, lostReasons, stageProbability, staleDays}
 //   POST   /crm/leads/bulk {ids, ownerId|status|rating}     POST /crm/leads/import?name=&ownerId=&dryRun=1 (the file as the body)
@@ -53,6 +55,8 @@ router.post('/tasks/:id/done', wrap((req) => CRM.finishTask(req.user, req.params
 router.post('/activities', wrap((req) => CRM.addActivity(req.user, req.body || {})));
 
 // the full CRM (crm/extra.js): reports, targets, settings, import, bulk, export, proposals
+router.get('/overview', wrap((req) => X.overview(req.user, { period: String(req.query.period || ''), mine: String(req.query.mine || '') === '1' })));
+router.get('/activities', wrap((req) => X.activities(req.user, req.query || {})));
 router.get('/reports', wrap((req) => X.reports(req.user, { month: String(req.query.month || '') })));
 router.put('/targets', wrap((req) => X.setTarget(req.user, req.body || {})));
 router.put('/settings', wrap((req) => X.saveSettings(req.user, req.body || {})));

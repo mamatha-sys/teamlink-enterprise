@@ -460,4 +460,119 @@ async function decideProposal(user, id, { status } = {}) {
   return S.okBody({ ok: true });
 }
 
-module.exports = { people, reports, setTarget, saveSettings, bulkLeads, importLeads, exportCsv, proposalDefaults, createProposal, proposalPdf, sendProposal, decideProposal, monthRange };
+// ---- the dashboard at a glance (founder 2026-11-02, the reference design: KPI cards, the sales funnel, activities today,
+// recent deals, the lead-to-customer flow). period: month | last_month | quarter | year (India time), compared with the
+// period before it for the arrows on the cards.
+function periodRange(period) {
+  const ist = new Date(Date.now() + 5.5 * 3600 * 1000);
+  const y = ist.getUTCFullYear(); const m = ist.getUTCMonth();
+  const off = 5.5 * 3600 * 1000;
+  const at = (yy, mm) => new Date(Date.UTC(yy, mm, 1) - off).toISOString();
+  if (period === 'last_month') return { from: at(y, m - 1), to: at(y, m), prevFrom: at(y, m - 2), prevTo: at(y, m - 1), label: 'Last month', months: [addMonths(monthNow(), -1)] };
+  if (period === 'quarter') { const q = Math.floor(m / 3) * 3; return { from: at(y, q), to: at(y, q + 3), prevFrom: at(y, q - 3), prevTo: at(y, q), label: 'This quarter', months: [0, 1, 2].map((i) => new Date(Date.UTC(y, q + i, 1)).toISOString().slice(0, 7)) }; }
+  if (period === 'year') return { from: at(y, 0), to: at(y + 1, 0), prevFrom: at(y - 1, 0), prevTo: at(y, 0), label: 'This year', months: Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2, '0')}`) };
+  return { from: at(y, m), to: at(y, m + 1), prevFrom: at(y, m - 1), prevTo: at(y, m), label: 'This month', months: [monthNow()] };
+}
+const delta = (now, before) => (before ? Math.round(((now - before) / before) * 100) : (now ? null : 0));
+
+async function overview(user, { period, mine } = {}) {
+  const r = S.roleOf(user);
+  const all = S.seesAll(r) && !mine;
+  const own = all ? '1=1' : '"ownerId" = ?';
+  const p = all ? [] : [user.id];
+  const R = periodRange(period);
+  const today = S.istToday();
+  const count = async (sql, ...args) => ((await DB.one(sql, ...args)) || {}).n || 0;
+
+  // the cards
+  const leadsNow = await count(`SELECT COUNT(*) AS "n" FROM "CrmLead" WHERE ${own} AND "createdAt" >= ? AND "createdAt" < ?`, ...p, R.from, R.to);
+  const leadsBefore = await count(`SELECT COUNT(*) AS "n" FROM "CrmLead" WHERE ${own} AND "createdAt" >= ? AND "createdAt" < ?`, ...p, R.prevFrom, R.prevTo);
+  const openLeads = await count(`SELECT COUNT(*) AS "n" FROM "CrmLead" WHERE ${own} AND "status" NOT IN ('Converted', 'Junk')`, ...p);
+  const customers = await count(`SELECT COUNT(*) AS "n" FROM "CrmAccount" WHERE ${own} AND "kind" = 'Client'`, ...p);
+  const wonNow = await DB.one(`SELECT COUNT(*) AS "n", COALESCE(SUM("value"), 0) AS "v" FROM "CrmDeal" WHERE ${own} AND "stage" = 'Won' AND "wonAt" >= ? AND "wonAt" < ?`, ...p, R.from, R.to);
+  const wonBefore = await DB.one(`SELECT COUNT(*) AS "n", COALESCE(SUM("value"), 0) AS "v" FROM "CrmDeal" WHERE ${own} AND "stage" = 'Won' AND "wonAt" >= ? AND "wonAt" < ?`, ...p, R.prevFrom, R.prevTo);
+  const marks = R.months.map(() => '?').join(', ');
+  const target = ((await DB.one(`SELECT COALESCE(SUM("amount"), 0) AS "v" FROM "CrmTarget" WHERE "month" IN (${marks}) AND ${own}`, ...R.months, ...p)) || {}).v || 0;
+  const dueToday = await count(`SELECT COUNT(*) AS "n" FROM "CrmTask" WHERE ${own} AND "status" = 'Open' AND "dueDate" = ?`, ...p, today);
+  const late = await count(`SELECT COUNT(*) AS "n" FROM "CrmTask" WHERE ${own} AND "status" = 'Open' AND "dueDate" < ?`, ...p, today);
+  const pipe = await DB.one(`SELECT COUNT(*) AS "n", COALESCE(SUM("value"), 0) AS "v", COALESCE(SUM("value" * "probability" / 100.0), 0) AS "w" FROM "CrmDeal" WHERE ${own} AND "stage" NOT IN ('Won', 'Lost')`, ...p);
+  const cards = {
+    leads: { value: leadsNow, delta: delta(leadsNow, leadsBefore), open: openLeads },
+    customers: { value: customers, newInPeriod: wonNow.n, delta: delta(wonNow.n, wonBefore.n) },
+    revenue: { value: wonNow.v, delta: delta(wonNow.v, wonBefore.v), deals: wonNow.n },
+    target: { value: target, achieved: wonNow.v, pct: target ? Math.round((wonNow.v / target) * 100) : null },
+    followUps: { today: dueToday, late },
+    pipeline: { open: pipe.n, value: pipe.v, weighted: Math.round(pipe.w) },
+  };
+
+  // the sales funnel of the leads added in the period
+  const fl = await DB.all(`SELECT l."status", d."stage" FROM "CrmLead" l LEFT JOIN "CrmDeal" d ON d."id" = l."dealId" WHERE ${all ? '1=1' : 'l."ownerId" = ?'} AND l."createdAt" >= ? AND l."createdAt" < ?`, ...p, R.from, R.to);
+  const atLeast = (st) => SETTINGS.STAGES.indexOf(st) >= SETTINGS.STAGES.indexOf('Proposal sent') && st !== 'Lost';
+  const funnel = [
+    { step: 'New leads', count: fl.length },
+    { step: 'Contacted', count: fl.filter((l) => l.status !== 'New' && l.status !== 'Junk').length },
+    { step: 'Qualified', count: fl.filter((l) => ['Qualified', 'Converted'].includes(l.status)).length },
+    { step: 'Proposal', count: fl.filter((l) => l.stage && atLeast(l.stage)).length },
+    { step: 'Won', count: fl.filter((l) => l.stage === 'Won').length },
+  ];
+  const conversion = fl.length ? Math.round((funnel[4].count / fl.length) * 1000) / 10 : null;
+
+  // won value, the last 6 months (the small bars beside the funnel)
+  const thisM = monthNow();
+  const trend = [];
+  for (let i = 5; i >= 0; i -= 1) {
+    const ym = addMonths(thisM, -i); const [f, t] = monthRange(ym);
+    // eslint-disable-next-line no-await-in-loop
+    const w = await DB.one(`SELECT COUNT(*) AS "n", COALESCE(SUM("value"), 0) AS "v" FROM "CrmDeal" WHERE ${own} AND "stage" = 'Won' AND "wonAt" >= ? AND "wonAt" < ?`, ...p, f, t);
+    trend.push({ month: ym, won: w.n, value: w.v });
+  }
+
+  // today: what was logged today and the follow-ups due today, in time order
+  const [dayFrom] = [new Date(Date.parse(`${today}T00:00:00Z`) - 5.5 * 3600 * 1000).toISOString()];
+  const dayTo = new Date(Date.parse(dayFrom) + 86400000).toISOString();
+  const rec = (alias) => `COALESCE(d."title", l."company", a."name") AS "recordName", CASE WHEN ${alias}."dealId" IS NOT NULL THEN 'deal' WHEN ${alias}."leadId" IS NOT NULL THEN 'lead' ELSE 'account' END AS "recordKind", COALESCE(${alias}."dealId", ${alias}."leadId", ${alias}."accountId") AS "recordId"`;
+  const joins = (alias) => `LEFT JOIN "CrmDeal" d ON d."id" = ${alias}."dealId" LEFT JOIN "CrmLead" l ON l."id" = ${alias}."leadId" LEFT JOIN "CrmAccount" a ON a."id" = ${alias}."accountId"`;
+  const acts = await DB.all(`SELECT x."id", x."kind", x."subject", x."at", x."byName", ${rec('x')} FROM "CrmActivity" x ${joins('x')} WHERE ${all ? '1=1' : 'x."byId" = ?'} AND x."at" >= ? AND x."at" < ? AND COALESCE(x."subject", '') NOT LIKE 'Stage:%' ORDER BY x."at" DESC LIMIT 20`, ...p, dayFrom, dayTo);
+  const tasks = await DB.all(`SELECT t."id", t."title", t."dueTime", t."status", t."ownerName", ${rec('t')} FROM "CrmTask" t ${joins('t')} WHERE ${all ? '1=1' : 't."ownerId" = ?'} AND t."dueDate" = ? ORDER BY COALESCE(t."dueTime", '99:99') LIMIT 20`, ...p, today);
+  const istTime = (iso) => new Date(Date.parse(iso) + 5.5 * 3600 * 1000).toISOString().slice(11, 16);
+  const todayList = [
+    ...acts.map((x) => ({ type: 'activity', id: x.id, kind: x.kind, time: istTime(x.at), title: x.subject || x.kind, recordName: x.recordName, recordKind: x.recordKind, recordId: x.recordId, by: x.byName, done: true })),
+    ...tasks.map((t) => ({ type: 'task', id: t.id, kind: 'task', time: t.dueTime || null, title: t.title, recordName: t.recordName, recordKind: t.recordKind, recordId: t.recordId, by: t.ownerName, done: t.status === 'Done' })),
+  ].sort((x, y) => String(x.time || '99:99').localeCompare(String(y.time || '99:99')));
+
+  // recent deals
+  const recentDeals = await DB.all(`SELECT x."id", x."title", x."stage", x."value", x."ownerName", x."updatedAt", a."name" AS "accountName" FROM "CrmDeal" x LEFT JOIN "CrmAccount" a ON a."id" = x."accountId" WHERE ${all ? '1=1' : 'x."ownerId" = ?'} ORDER BY x."updatedAt" DESC LIMIT 6`, ...p);
+
+  // the flow from a lead to a customer, as it stands now
+  const flow = [
+    { key: 'leads', label: 'Lead generation', sub: 'New / Contacted leads', count: await count(`SELECT COUNT(*) AS "n" FROM "CrmLead" WHERE ${own} AND "status" IN ('New', 'Contacted')`, ...p), to: '/crm/leads' },
+    { key: 'qualified', label: 'Qualification', sub: 'Qualified leads', count: await count(`SELECT COUNT(*) AS "n" FROM "CrmLead" WHERE ${own} AND "status" = 'Qualified'`, ...p), to: '/crm/leads' },
+    { key: 'convert', label: 'Convert', sub: `Converted (${R.label.toLowerCase()})`, count: await count(`SELECT COUNT(*) AS "n" FROM "CrmLead" WHERE ${own} AND "convertedAt" >= ? AND "convertedAt" < ?`, ...p, R.from, R.to), to: '/crm/leads' },
+    { key: 'pipeline', label: 'Sales pipeline', sub: 'Open deals', count: pipe.n, to: '/crm/deals' },
+    { key: 'customer', label: 'Customer', sub: 'Won accounts', count: customers, to: '/crm/accounts' },
+  ];
+
+  return S.okBody({ period: period || 'month', periodLabel: R.label, scope: all ? 'all' : 'mine', today, cards, funnel, conversion, trend, todayList, recentDeals, flow });
+}
+
+// ---- every call, meeting, email, WhatsApp and note in one list (Dashboard > Activities) -----------------------------------
+async function activities(user, { kind, from, to, owner, q } = {}) {
+  const r = S.roleOf(user);
+  const where = []; const params = [];
+  if (!S.seesAll(r)) { where.push('x."byId" = ?'); params.push(user.id); } else if (owner) { where.push('x."byId" = ?'); params.push(S.clip(owner, 60)); }
+  if (['call', 'meeting', 'email', 'whatsapp', 'note'].includes(kind)) { where.push('x."kind" = ?'); params.push(kind); }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(from || ''))) { where.push('x."at" >= ?'); params.push(new Date(Date.parse(`${from}T00:00:00Z`) - 5.5 * 3600 * 1000).toISOString()); }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(to || ''))) { where.push('x."at" < ?'); params.push(new Date(Date.parse(`${to}T00:00:00Z`) + 86400000 - 5.5 * 3600 * 1000).toISOString()); }
+  const text = S.clip(q, 80);
+  if (text) { where.push('(x."subject" LIKE ? OR x."note" LIKE ? OR d."title" LIKE ? OR l."company" LIKE ? OR a."name" LIKE ?)'); params.push(...Array(5).fill(`%${text}%`)); }
+  where.push('COALESCE(x."subject", \'\') NOT LIKE \'Stage:%\'');
+  const rows = await DB.all(`SELECT x.*, COALESCE(d."title", l."company", a."name") AS "recordName",
+      CASE WHEN x."dealId" IS NOT NULL THEN 'deal' WHEN x."leadId" IS NOT NULL THEN 'lead' ELSE 'account' END AS "recordKind",
+      COALESCE(x."dealId", x."leadId", x."accountId") AS "recordId"
+    FROM "CrmActivity" x LEFT JOIN "CrmDeal" d ON d."id" = x."dealId" LEFT JOIN "CrmLead" l ON l."id" = x."leadId" LEFT JOIN "CrmAccount" a ON a."id" = x."accountId"
+    WHERE ${where.join(' AND ')} ORDER BY x."at" DESC LIMIT 500`, ...params);
+  const byKind = rows.reduce((m, x) => { m[x.kind] = (m[x.kind] || 0) + 1; return m; }, {});
+  return S.okBody({ rows, byKind });
+}
+
+module.exports = { overview, activities, people, reports, setTarget, saveSettings, bulkLeads, importLeads, exportCsv, proposalDefaults, createProposal, proposalPdf, sendProposal, decideProposal, monthRange };

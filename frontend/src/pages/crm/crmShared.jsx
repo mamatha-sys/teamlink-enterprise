@@ -445,7 +445,7 @@ function ProposalBox({ dealId, onChanged }) {
 
 // ---- one record ---------------------------------------------------------------------------------------------
 export function RecordPanel({ kind, id, onClose, onChanged }) {
-  const { me } = useCrm();
+  const { me, toast } = useCrm();
   const navigate = useNavigate();
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
@@ -459,6 +459,15 @@ export function RecordPanel({ kind, id, onClose, onChanged }) {
   const name = row ? (row.company || row.name || row.title) : '';
   const stale = kind === 'deal' && row ? staleDays(row, (d.activities || [])[0], me.lists.staleDays) : 0;
   const link = row ? { [`${kind}Id`]: row.id } : null;
+  const [tab, setTab] = useState('overview');
+  const [notes, setNotes] = useState(null); // the notes being edited, or null
+  useEffect(() => { setTab('overview'); setNotes(null); }, [kind, id]);
+  async function assign(ownerId) {
+    try { await api.put(`/crm/${kind}s/${row.id}`, { ownerId }); toast('Assigned.'); changed(); } catch (e) { toast(errOf(e, 'This could not be assigned.')); }
+  }
+  async function saveNotes() {
+    try { await api.put(`/crm/${kind}s/${row.id}`, { notes }); toast('Notes saved.'); setNotes(null); changed(); } catch (e) { toast(errOf(e, 'The notes could not be saved.')); }
+  }
 
   function addAsClient() {
     const acc = d.account || {}; const ct = d.contact || (d.contacts || [])[0] || {};
@@ -470,23 +479,53 @@ export function RecordPanel({ kind, id, onClose, onChanged }) {
   if (err) body = <div className="notice" role="alert">{err}</div>;
   else if (!d) body = <div className="small-muted">Loading…</div>;
   else {
-    const facts = kind === 'lead'
-      ? [['Contact', [row.contactName, row.designation].filter(Boolean).join(' · ')], ['Phone', row.phone], ['Email', row.email], ['Industry', row.industry], ['City', row.city], ['Source', row.source]]
+    const today = istToday();
+    const openTasks = (d.tasks || []).filter((t) => t.status === 'Open').sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)));
+    const nextTask = openTasks[0];
+    const lastAct = (d.activities || [])[0];
+    const contactLine = kind === 'deal' ? d.contact : (kind === 'lead' ? { name: row.contactName, designation: row.designation, phone: row.phone, email: row.email } : (d.contacts || [])[0]);
+    // left: how to reach them; right: what the record is
+    const reach = [
+      ['📞', contactLine && contactLine.phone ? contactLine.phone : (kind === 'account' ? row.phone : null)],
+      ['✉️', contactLine && contactLine.email ? contactLine.email : (kind === 'account' ? row.email : null)],
+      ['👤', contactLine && contactLine.name ? `${contactLine.name}${contactLine.designation ? ` · ${contactLine.designation}` : ''}` : null],
+      ['📍', kind === 'deal' ? (d.account && d.account.city) : row.city],
+    ].filter(([, v]) => v);
+    const about = kind === 'lead'
+      ? [['Lead source', row.source], ['Industry', row.industry], ['Rating', row.rating && <Pill v={row.rating} />]]
       : kind === 'deal'
-        ? [['Account', d.account ? <Link to={recordLink('account', d.account.id)}>{d.account.name}</Link> : '—'], ['Contact', d.contact ? `${d.contact.name}${d.contact.phone ? ` · ${d.contact.phone}` : ''}` : ''], ['Value', money(row.value)], ['Probability', `${row.probability}%`],
+        ? [['Account', d.account ? <Link to={recordLink('account', d.account.id)}>{d.account.name}</Link> : '—'], ['Deal value', <b>{money(row.value)}</b>], ['Probability', `${row.probability}%`],
           ['Openings × CTC × fee', row.openings ? `${row.openings} × ${money(row.avgCtc)} × ${row.feePercent || 0}%` : ''], ['Expected close', dateOf(row.expectedClose)], ['Next step', row.nextStep], ...(row.stage === 'Lost' ? [['Lost because', row.lostReason]] : [])]
-        : [['Type', <Pill v={row.kind} />], ['Industry', row.industry], ['City', row.city], ['Phone', row.phone], ['Email', row.email], ['Website', row.website], ['Source', row.source],
-          ...(d.client ? [['TeamLink client', <Link to={`/clients/${d.client.id}`}>{d.client.name} ↗</Link>]] : [])];
+        : [['Industry', row.industry], ['Website', row.website], ['Source', row.source], ...(d.client ? [['TeamLink client', <Link to={`/clients/${d.client.id}`}>{d.client.name} ↗</Link>]] : [])];
+    const info = [
+      ...about,
+      ['Next follow-up', nextTask ? <span style={{ color: nextTask.dueDate < today ? 'var(--red)' : undefined, fontWeight: nextTask.dueDate <= today ? 600 : undefined }}>{nextTask.dueDate === today ? 'Today' : dateOf(nextTask.dueDate)} · {nextTask.title}</span> : 'None set'],
+      ['Last touched', lastAct ? `${dateTimeOf(lastAct.at)}${lastAct.byName ? ` · ${lastAct.byName}` : ''}` : 'Never'],
+    ].filter(([, v]) => v);
+    const tabs = [['overview', 'Overview'], ['activities', `Activities (${(d.activities || []).length})`], ['followups', `Follow-ups (${openTasks.length})`], ...(kind === 'deal' ? [['proposals', 'Proposals']] : []), ['notes', 'Notes']];
+    const kindPill = kind === 'lead' ? row.status : kind === 'deal' ? row.stage : row.kind;
     body = (
       <>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 12 }}>
-          {kind === 'lead' && <Pill v={row.status} />}
-          {kind === 'lead' && <Pill v={row.rating} />}
-          {kind === 'deal' && stale > 0 && <span className="status overdue" title={`Nothing logged for ${stale} days`}>💤 {stale} days quiet</span>}
-          <QuickContact phone={kind === 'deal' ? (d.contact && d.contact.phone) : row.phone} email={kind === 'deal' ? (d.contact && d.contact.email) : row.email} />
-          {kind === 'deal' && <Pill v={['Won', 'Lost'].includes(row.stage) ? row.stage : null} />}
-          <span className="small-muted">Owner: {row.ownerName || '—'}</span>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <div className="crm-rec-head">
+          <div className="crm-rec-avatar" aria-hidden="true">{kind === 'lead' ? '🎯' : kind === 'deal' ? '💼' : '🏢'}</div>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <h2 className="crm-rec-title">{name}</h2>
+              <Pill v={kindPill} />
+              {kind === 'deal' && stale > 0 && <span className="status overdue" title={`Nothing logged for ${stale} days`}>💤 {stale} days quiet</span>}
+            </div>
+            <div className="small-muted" style={{ marginTop: 3, display: 'flex', alignItems: 'center', gap: 6 }}>
+              Assigned to:{' '}
+              {me.canAssign && d.canEdit ? (
+                <select value={row.ownerId || ''} onChange={(e) => assign(e.target.value)} style={{ width: 'auto', padding: '2px 6px', fontSize: 12.5 }} aria-label="Assigned to">
+                  {!me.owners.some((o) => o.id === row.ownerId) && <option value={row.ownerId || ''}>{row.ownerName || '—'}</option>}
+                  {me.owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </select>
+              ) : <b>{row.ownerName || '—'}</b>}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <QuickContact phone={contactLine && contactLine.phone ? contactLine.phone : row.phone} email={contactLine && contactLine.email ? contactLine.email : row.email} />
             {d.canEdit && <button type="button" className="btn btn-sm" onClick={() => setEditing({ kind, row })}>Edit</button>}
             {d.canEdit && kind === 'lead' && row.status !== 'Converted' && <button type="button" className="btn btn-primary btn-sm" onClick={() => setConverting(true)}>Convert to deal</button>}
             {kind === 'lead' && row.status === 'Converted' && row.dealId && <Link className="btn btn-sm" to={recordLink('deal', row.dealId)}>Open the deal</Link>}
@@ -498,56 +537,94 @@ export function RecordPanel({ kind, id, onClose, onChanged }) {
         </div>
         {kind === 'deal' && (
           <div className="crm-stages" role="group" aria-label="Deal stage">
-            {me.lists.stages.map((s) => (
-              <button key={s} type="button" disabled={!d.canEdit || s === row.stage} className={`crm-stage${s === row.stage ? ' on' : ''}${s === 'Won' ? ' won' : ''}${s === 'Lost' ? ' lost' : ''}`} onClick={() => move(row, s)}>{s}</button>
+            {me.lists.stages.map((st) => (
+              <button key={st} type="button" disabled={!d.canEdit || st === row.stage} className={`crm-stage${st === row.stage ? ' on' : ''}${st === 'Won' ? ' won' : ''}${st === 'Lost' ? ' lost' : ''}`} onClick={() => move(row, st)}>{st}</button>
             ))}
           </div>
         )}
-        <div className="grid-3" style={{ marginBottom: 12 }}>
-          {facts.filter(([, v]) => v).map(([l, v]) => <div key={l}><div className="small-muted" style={{ fontSize: 11 }}>{l}</div><div style={{ fontSize: 13 }}>{v}</div></div>)}
-        </div>
-        {row.notes && <div className="card" style={{ padding: 10, marginBottom: 12, whiteSpace: 'pre-wrap', fontSize: 13 }}>{row.notes}</div>}
-        {kind === 'deal' && <ProposalBox dealId={row.id} onChanged={changed} />}
-        {kind === 'account' && (
-          <div className="grid-2" style={{ marginBottom: 12 }}>
-            <div className="card" style={{ padding: 12 }}>
-              <div className="section-label" style={{ marginTop: 0 }}>Contacts ({d.contacts.length})</div>
-              {!d.contacts.length && <div className="small-muted">No contacts yet.</div>}
-              {d.contacts.map((c) => (
-                <div key={c.id} style={{ padding: '5px 0', borderBottom: '1px solid var(--line-soft)', fontSize: 13, display: 'flex', gap: 6 }}>
-                  <div style={{ flex: 1 }}><b>{c.name}</b>{c.designation ? ` · ${c.designation}` : ''}{c.role ? <span className="small-muted"> · {c.role}</span> : null}<div className="small-muted">{[c.phone, c.email].filter(Boolean).join(' · ')}</div></div>
-                  {d.canEdit && <button type="button" className="btn btn-sm" onClick={() => setEditing({ kind: 'contact', row: c })}>Edit</button>}
-                </div>
-              ))}
-            </div>
-            <div className="card" style={{ padding: 12 }}>
-              <div className="section-label" style={{ marginTop: 0 }}>Deals ({d.deals.length})</div>
-              {!d.deals.length && <div className="small-muted">No deals yet.</div>}
-              {d.deals.map((x) => (
-                <div key={x.id} style={{ padding: '5px 0', borderBottom: '1px solid var(--line-soft)', fontSize: 13 }}>
-                  <Link to={recordLink('deal', x.id)}>{x.title}</Link> <span className="small-muted">· {x.stage} · {moneyShort(x.value)}</span>
-                </div>
-              ))}
-            </div>
+        <div className="crm-rec-info">
+          <div style={{ flexDirection: 'column', gap: 6 }}>
+            {reach.map(([ic, v]) => <div key={ic}><span aria-hidden="true">{ic}</span><span>{v}</span></div>)}
+            {!reach.length && <span className="small-muted">No phone or email yet. Add a contact.</span>}
           </div>
+          <div style={{ flexDirection: 'column', gap: 6 }}>
+            {info.map(([k, v]) => <div key={k}><span className="k">{k}</span><span style={{ minWidth: 0 }}>{v}</span></div>)}
+          </div>
+        </div>
+        <div className="tabs" role="tablist" style={{ marginBottom: 12 }}>
+          {tabs.map(([k, l]) => <div key={k} role="tab" tabIndex={0} aria-selected={tab === k} className={`tab${tab === k ? ' active' : ''}`} onClick={() => setTab(k)} onKeyDown={(e) => { if (e.key === 'Enter') setTab(k); }}>{l}</div>)}
+        </div>
+        {tab === 'overview' && (
+          <>
+            {kind === 'account' && (
+              <div className="grid-2" style={{ marginBottom: 12 }}>
+                <div className="card" style={{ padding: 12 }}>
+                  <div className="section-label" style={{ marginTop: 0 }}>Contacts ({d.contacts.length})</div>
+                  {!d.contacts.length && <div className="small-muted">No contacts yet.</div>}
+                  {d.contacts.map((c) => (
+                    <div key={c.id} style={{ padding: '5px 0', borderBottom: '1px solid var(--line-soft)', fontSize: 13, display: 'flex', gap: 6 }}>
+                      <div style={{ flex: 1 }}><b>{c.name}</b>{c.designation ? ` · ${c.designation}` : ''}{c.role ? <span className="small-muted"> · {c.role}</span> : null}<div className="small-muted">{[c.phone, c.email].filter(Boolean).join(' · ')}</div></div>
+                      {d.canEdit && <button type="button" className="btn btn-sm" onClick={() => setEditing({ kind: 'contact', row: c })}>Edit</button>}
+                    </div>
+                  ))}
+                </div>
+                <div className="card" style={{ padding: 12 }}>
+                  <div className="section-label" style={{ marginTop: 0 }}>Deals ({d.deals.length})</div>
+                  {!d.deals.length && <div className="small-muted">No deals yet.</div>}
+                  {d.deals.map((x) => (
+                    <div key={x.id} style={{ padding: '5px 0', borderBottom: '1px solid var(--line-soft)', fontSize: 13 }}>
+                      <Link to={recordLink('deal', x.id)}>{x.title}</Link> <span className="small-muted">· {x.stage} · {moneyShort(x.value)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="crm-two">
+              <div>
+                <div className="section-label" style={{ marginTop: 0 }}>Log a call, meeting or note</div>
+                {d.canEdit && <LogActivity link={link} onDone={changed} />}
+                <Timeline activities={(d.activities || []).slice(0, 6)} />
+                {(d.activities || []).length > 6 && <button type="button" className="crm-linkbtn" style={{ marginTop: 6 }} onClick={() => setTab('activities')}>All {(d.activities || []).length} activities →</button>}
+              </div>
+              <div>
+                <div className="section-label" style={{ marginTop: 0 }}>Follow-ups</div>
+                <TaskList tasks={openTasks} link={link} onChanged={changed} canEdit={d.canEdit} />
+              </div>
+            </div>
+          </>
         )}
-        <div className="crm-two">
-          <div>
-            <div className="section-label" style={{ marginTop: 0 }}>Timeline</div>
+        {tab === 'activities' && (
+          <>
             {d.canEdit && <LogActivity link={link} onDone={changed} />}
             <Timeline activities={d.activities || []} />
-          </div>
+          </>
+        )}
+        {tab === 'followups' && <TaskList tasks={d.tasks || []} link={link} onChanged={changed} canEdit={d.canEdit} />}
+        {tab === 'proposals' && kind === 'deal' && <ProposalBox dealId={row.id} onChanged={changed} />}
+        {tab === 'notes' && (
           <div>
-            <div className="section-label" style={{ marginTop: 0 }}>Follow-ups</div>
-            <TaskList tasks={d.tasks || []} link={link} onChanged={changed} canEdit={d.canEdit} />
+            {notes == null ? (
+              <>
+                <div className="card" style={{ padding: 12, whiteSpace: 'pre-wrap', fontSize: 13.5, minHeight: 60 }}>{row.notes || <span className="small-muted">No notes yet.</span>}</div>
+                {d.canEdit && <button type="button" className="btn btn-sm" style={{ marginTop: 8 }} onClick={() => setNotes(row.notes || '')}>Edit notes</button>}
+              </>
+            ) : (
+              <>
+                <textarea rows={8} value={notes} onChange={(e) => setNotes(e.target.value)} aria-label="Notes" />
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <button type="button" className="btn btn-primary btn-sm" onClick={saveNotes}>Save notes</button>
+                  <button type="button" className="btn btn-sm" onClick={() => setNotes(null)}>Cancel</button>
+                </div>
+              </>
+            )}
           </div>
-        </div>
+        )}
       </>
     );
   }
   return (
     <>
-      <Modal title={name || 'CRM'} note={kind === 'lead' ? 'Lead' : kind === 'deal' ? (row ? row.stage : 'Deal') : 'Account'} size="xwide" onClose={onClose}>{body}</Modal>
+      <Modal title={kind === 'lead' ? 'Lead record' : kind === 'deal' ? 'Deal record' : 'Customer record'} size="xwide" onClose={onClose}>{body}</Modal>
       {editing && <RecordForm kind={editing.kind} row={editing.row} preset={editing.preset} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); changed(); }} />}
       {converting && row && <ConvertLead lead={row} onClose={() => setConverting(false)} onDone={(out) => { setConverting(false); changed(); if (out.deal) navigate(recordLink('deal', out.deal.id)); }} />}
       {dialog}

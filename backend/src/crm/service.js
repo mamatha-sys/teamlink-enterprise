@@ -613,6 +613,7 @@ async function me(user) {
   if (!r) return fail(403, 'The CRM is for the sales team. Ask an Admin to add you to the sales team (CRM settings).');
   const st = await SETTINGS.load();
   return okBody({
+    userId: user.id, name: user.name || '',
     role: r, canEdit: mayEdit(r), canAssign: mayAssign(r), seesAll: seesAll(r),
     owners: mayAssign(r) || seesAll(r) ? await ownerOptions() : [],
     salesTeam: mayAssign(r) ? st.salesTeam : [], // the people added in CRM settings (the BDEs / BDE TLs are on the team anyway)
