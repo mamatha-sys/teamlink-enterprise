@@ -15,13 +15,29 @@ import './naukriShineMailboxes.css';
 //   server once and never comes back.
 //   Below: Connected mailboxes (Sync now, Reconnect, View logs, Reassign, Disconnect).
 //   The engine is the Job Portal's import (routes/portalMailboxes.js on the server).
+//
+// NAUKRI HAS TWO WAYS IN (founder 2026-11-02), two separate cards that do not touch each other:
+//   Email Integration    the existing connection: Gmail / Google Workspace (app password) or Outlook / Microsoft 365.
+//   Webmail Integration  the company's own mail server: IMAP server, port, SSL/TLS or STARTTLS, username, mailbox password,
+//                        Test Connection (nothing saved) and Connect (the login is checked again before anything is saved).
+// SHINE keeps its one card exactly as it was (mode 'all').
 // ---------------------------------------------------------------------------
 const BOARD = { naukri: 'Naukri', shine: 'Shine' };
 const PROVIDERS = [['gmail', 'Gmail'], ['outlook', 'Outlook / Microsoft 365'], ['other', 'Other (IMAP)']];
 const FIXED = { gmail: { host: 'imap.gmail.com', port: 993 }, outlook: { host: 'outlook.office365.com', port: 993 } };
 const PROVIDER_LABEL = { gmail: 'Gmail', outlook: 'Outlook / Microsoft 365', other: 'IMAP' };
+// what each card offers: Naukri Email = Gmail / Outlook, Naukri Webmail = the company's IMAP server, Shine = all, as before
+const MODE = {
+  email: { providers: PROVIDERS.filter(([v]) => v !== 'other'), title: 'Email Integration', sub: 'Gmail / Google Workspace or Outlook' },
+  webmail: { providers: [['other', 'Company webmail (IMAP)']], title: 'Webmail Integration', sub: 'Your company mail server' },
+  all: { providers: PROVIDERS },
+};
+const SECURITY = [['ssl', 'SSL/TLS (usually port 993)'], ['starttls', 'STARTTLS (usually port 143)']];
+const SECURITY_LABEL = { ssl: 'SSL/TLS', starttls: 'STARTTLS' };
+const defaultPort = (sec) => (sec === 'starttls' ? 143 : 993);
+const methodOf = (c) => c.method || (c.provider === 'other' ? 'webmail' : 'email');
 const NO_DEPT = '__none';
-const EMPTY = { department: '', team: '', seat: '', address: '', provider: 'gmail', username: '', appPassword: '', host: '', port: '' };
+const EMPTY = { department: '', team: '', seat: '', address: '', provider: 'gmail', username: '', appPassword: '', host: '', port: '', security: 'ssl' };
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const TONE = { connected: 'ok', processing: 'run', disconnected: 'off', error: 'bad' };
 const MAIL_TONE = { processed: 'ok', duplicate: 'off', needs_review: 'warn', needs_mapping: 'warn', failed: 'bad', new: 'run', ignored: 'off' };
@@ -52,14 +68,18 @@ function Field({ id, label, req, err, hint, children }) {
   );
 }
 
-function MailboxCard({ src, data, onConnected }) {
-  const [f, setF] = useState(EMPTY);
+function MailboxCard({ src, data, onConnected, mode = 'all', onAct, rowBusy = {} }) {
+  const M = MODE[mode];
+  const web = mode === 'webmail';
+  const blank = { ...EMPTY, provider: M.providers[0][0] };
+  const [f, setF] = useState(blank);
   const [errs, setErrs] = useState({});
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [show, setShow] = useState(false);
   const going = useRef(false);
-  const id = (k) => `nsm-${src}-${k}`;
+  const id = (k) => `nsm-${src}${mode === 'all' ? '' : `-${mode}`}-${k}`;
   const set = (k) => (e) => { const v = e.target.value; setF((o) => ({ ...o, [k]: v, ...(k === 'department' ? { team: '', seat: '' } : {}), ...(k === 'team' ? { seat: '' } : {}) })); setErrs((o) => ({ ...o, [k]: '' })); };
   // A MAILBOX BELONGS TO A POSITION (founder 2026-10-29: "permanently mapped to the ... department/position, not to an individual
   // recruiter"): Department -> Team (only when it has two or more real HRMS teams) -> Position; the position's holder today gets the
@@ -74,7 +94,10 @@ function MailboxCard({ src, data, onConnected }) {
   const emptySeats = teamSeats.length - seatsOk.length;
   const hasNoDept = (data.recruiters || []).some((r) => r.active && !String(r.department || '').trim());
   const fixed = FIXED[f.provider];
-  const mine = (data.connections || []).filter((c) => c.source === src);
+  const mine = (data.connections || []).filter((c) => c.source === src && (mode === 'all' || methodOf(c) === mode));
+  // the recruiter the chosen position maps to (HRMS holder), with the employee ID - filled in by itself
+  const seatPicked = seatsOk.find((x) => x.code === f.seat);
+  const recPicked = seatPicked && (data.recruiters || []).find((r) => r.id === seatPicked.holderRecruiterId);
   const aria = (k) => (errs[k] ? { 'aria-invalid': true, 'aria-describedby': `${id(k)}-err` } : {});
 
   async function connect(takeOver) {
@@ -86,7 +109,7 @@ function MailboxCard({ src, data, onConnected }) {
     else if (!seatsOk.some((x) => x.code === f.seat)) e.seat = 'Choose a position of the selected department and team that has a recruiter today.';
     if (!EMAIL.test(f.address.trim())) e.address = 'Enter a valid email address.';
     if (!f.appPassword && !(already && already.status !== 'disconnected')) e.appPassword = 'Enter the app password.';
-    if (f.provider === 'other' && !f.host.trim()) e.host = 'Enter the incoming mail server.';
+    if (f.provider === 'other' && !f.host.trim()) e.host = web ? 'Enter the IMAP server.' : 'Enter the incoming mail server.';
     if (f.provider === 'other' && f.port && !(Number(f.port) >= 1 && Number(f.port) <= 65535)) e.port = 'Enter a port between 1 and 65535.';
     setErrs(e); setMsg(null);
     if (Object.keys(e).length) return;
@@ -95,11 +118,12 @@ function MailboxCard({ src, data, onConnected }) {
       const body = {
         source: src, seat: f.seat, address: f.address.trim(), provider: f.provider, appPassword: f.appPassword,
         department: f.department !== NO_DEPT ? f.department : undefined, username: f.username.trim() || undefined,
-        ...(f.provider === 'other' ? { host: f.host.trim(), port: f.port ? Number(f.port) : undefined } : {}),
+        ...(f.provider === 'other' ? { host: f.host.trim(), port: f.port ? Number(f.port) : (web ? defaultPort(f.security) : undefined) } : {}),
+        ...(web ? { security: f.security } : {}),
         ...(takeOver ? { takeOver: true } : {}),
       };
       const { data: out } = await api.post('/portal-mailboxes', body);
-      setF(EMPTY); setShow(false); // the password leaves the page
+      setF(blank); setShow(false); // the password leaves the page
       setMsg({ ok: true, text: out.message || 'Connected.' });
       onConnected();
     } catch (err) {
@@ -115,13 +139,35 @@ function MailboxCard({ src, data, onConnected }) {
     } finally { going.current = false; setBusy(false); }
   }
 
+  // TEST CONNECTION (Webmail): the server logs in with what is typed and opens the inbox; nothing is saved
+  async function testConnection() {
+    if (going.current) return;
+    const e = {};
+    if (!f.host.trim()) e.host = 'Enter the IMAP server.';
+    if (f.port && !(Number(f.port) >= 1 && Number(f.port) <= 65535)) e.port = 'Enter a port between 1 and 65535.';
+    if (!f.username.trim() && !EMAIL.test(f.address.trim())) e.address = 'Enter the webmail email address (or a username).';
+    if (!f.appPassword) e.appPassword = 'Enter the mailbox password.';
+    setErrs(e); setMsg(null);
+    if (Object.keys(e).length) return;
+    going.current = true; setTesting(true);
+    try {
+      const { data: out } = await api.post('/portal-mailboxes/test', {
+        host: f.host.trim(), port: f.port ? Number(f.port) : defaultPort(f.security), security: f.security,
+        username: f.username.trim() || undefined, address: f.address.trim() || undefined, appPassword: f.appPassword,
+      });
+      setMsg({ ok: !!out.ok, text: out.message || (out.ok ? 'Connected.' : 'The login did not work.') });
+    } catch (err) { setMsg({ ok: false, text: errOf(err).message }); } finally { going.current = false; setTesting(false); }
+  }
+
   return (
     <section className={`nsm-card ${src}`} aria-labelledby={id('title')}>
       <div className="nsm-card-hd">
         <span className={`nsm-logo ${src}`} aria-hidden="true">
           <svg viewBox="0 0 24 24" width="18" height="18" focusable="false"><path fill="currentColor" d="M3 5h18a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm1 2.3V17h16V7.3l-8 5.2-8-5.2zM5.6 7l6.4 4.2L18.4 7H5.6z" /></svg>
         </span>
-        <div><h3 id={id('title')}>{BOARD[src]} mailbox</h3><p>Reads the {BOARD[src]} response emails in this mailbox and adds them as {BOARD[src]} applications to the chosen recruiter.</p></div>
+        {mode === 'all'
+          ? <div><h3 id={id('title')}>{BOARD[src]} mailbox</h3><p>Reads the {BOARD[src]} response emails in this mailbox and adds them as {BOARD[src]} applications to the chosen recruiter.</p></div>
+          : <div><h3 id={id('title')}>{BOARD[src]} · {M.title}</h3><p>{M.sub}: reads the {BOARD[src]} response emails in this mailbox and adds them as {BOARD[src]} applications to the chosen recruiter.</p></div>}
       </div>
       {msg && <div className={msg.ok ? 'jp-ok' : 'jp-err'} role={msg.ok ? 'status' : 'alert'}>{msg.text}</div>}
       <div className="nsm-grid">
@@ -147,43 +193,81 @@ function MailboxCard({ src, data, onConnected }) {
             {seatsOk.map((x) => <option key={x.code} value={x.code}>{x.code} · {x.holderName}</option>)}
           </Combo>
         </Field>
-        <Field id={id('address')} label={`${BOARD[src]} Mailbox Email`} req err={errs.address}>
+        {mode !== 'all' && (
+          <div className="nsm-f"><span className="nsm-label">Recruiter (from HRMS)</span>
+            <div className="nsm-fixed">{recPicked ? <>{recPicked.name}{recPicked.employeeId ? <span className="nsm-sub"> · Employee ID {recPicked.employeeId}</span> : null}</> : <span className="nsm-sub">Filled in from the position</span>}</div>
+          </div>
+        )}
+        <Field id={id('address')} label={web ? 'Webmail Email Address' : `${BOARD[src]} Mailbox Email`} req err={errs.address}>
           <input id={id('address')} type="email" autoComplete="off" placeholder="responses@company.com" value={f.address} onChange={set('address')} {...aria('address')} />
           {already && <div className="nsm-past" role="note">Already connected{already.recruiterName ? ` with ${already.recruiterName}` : ''}{already.seat ? ` (${already.seat})` : ''}: it moves to the position you choose, the same connection. {already.status === 'disconnected' ? 'It was disconnected, so enter the app password.' : 'Leave the password empty to keep the saved one.'}</div>}
         </Field>
-        <Field id={id('provider')} label="Email Provider">
-          <Combo id={id('provider')} value={f.provider} onChange={(e) => { setF((o) => ({ ...o, provider: e.target.value || 'gmail' })); setErrs({}); }}>
-            {PROVIDERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </Combo>
-        </Field>
+        {!web && (
+          <Field id={id('provider')} label="Email Provider">
+            <Combo id={id('provider')} value={f.provider} onChange={(e) => { setF((o) => ({ ...o, provider: e.target.value || M.providers[0][0] })); setErrs({}); }}>
+              {M.providers.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </Combo>
+          </Field>
+        )}
+        {web && (
+          <Field id={id('host')} label="IMAP Server / Host" req err={errs.host} hint="As your mail host gives it, for example mail.yourcompany.com.">
+            <input id={id('host')} autoComplete="off" placeholder="mail.yourcompany.com" value={f.host} onChange={set('host')} {...aria('host')} />
+          </Field>
+        )}
+        {web && (
+          <Field id={id('security')} label="Security Type">
+            <Combo id={id('security')} value={f.security} onChange={(e) => { const v = e.target.value || 'ssl'; setF((o) => ({ ...o, security: v })); setErrs((o) => ({ ...o, port: '' })); }}>
+              {SECURITY.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </Combo>
+          </Field>
+        )}
+        {web && (
+          <Field id={id('port')} label="IMAP Port" err={errs.port} hint={`Empty = ${defaultPort(f.security)}.`}>
+            <input id={id('port')} type="number" min="1" max="65535" placeholder={String(defaultPort(f.security))} value={f.port} onChange={set('port')} {...aria('port')} />
+          </Field>
+        )}
         <Field id={id('username')} label="Username" hint="Leave empty to sign in with the mailbox email.">
           <input id={id('username')} autoComplete="off" placeholder={f.address || 'Same as the mailbox email'} value={f.username} onChange={set('username')} />
         </Field>
-        <Field id={id('appPassword')} label="App Password" req={!(already && already.status !== 'disconnected')} err={errs.appPassword}
-          hint={f.provider === 'gmail' ? 'Gmail: Google Account → Security → 2-Step Verification → App passwords (IMAP on).' : 'Use an app password if the account has two-step sign-in.'}>
+        <Field id={id('appPassword')} label={web ? 'Mailbox Password' : 'App Password'} req={!(already && already.status !== 'disconnected')} err={errs.appPassword}
+          hint={f.provider === 'gmail' ? 'Gmail: Google Account → Security → 2-Step Verification → App passwords (IMAP on).' : web ? 'The password of this mailbox (an app password if your mail host asks for one).' : 'Use an app password if the account has two-step sign-in.'}>
           <div className="nsm-pw">
             <input id={id('appPassword')} type={show ? 'text' : 'password'} autoComplete="new-password" spellCheck={false}
-              placeholder={f.provider === 'gmail' ? '16-character Google app password' : 'App password'} value={f.appPassword} onChange={set('appPassword')} {...aria('appPassword')} />
-            <button type="button" className="nsm-eye" onClick={() => setShow((s) => !s)} aria-pressed={show} aria-label={`${show ? 'Hide' : 'Show'} the app password`}>{show ? 'Hide' : 'Show'}</button>
+              placeholder={f.provider === 'gmail' ? '16-character Google app password' : web ? 'Mailbox password' : 'App password'} value={f.appPassword} onChange={set('appPassword')} {...aria('appPassword')} />
+            <button type="button" className="nsm-eye" onClick={() => setShow((s) => !s)} aria-pressed={show} aria-label={`${show ? 'Hide' : 'Show'} the ${web ? 'mailbox' : 'app'} password`}>{show ? 'Hide' : 'Show'}</button>
           </div>
         </Field>
-        <Field id={id('host')} label="Incoming Mail Server" req={f.provider === 'other'} err={errs.host}>
-          <input id={id('host')} placeholder="imap.company.com" value={fixed ? fixed.host : f.host} readOnly={!!fixed} onChange={set('host')} {...aria('host')} />
-        </Field>
-        <Field id={id('port')} label="Incoming Mail Port" err={errs.port}>
-          <input id={id('port')} type="number" min="1" max="65535" placeholder="993" value={fixed ? fixed.port : f.port} readOnly={!!fixed} onChange={set('port')} {...aria('port')} />
-        </Field>
-        <div className="nsm-f"><span className="nsm-label">Connection security</span><div className="nsm-fixed">SSL/TLS (IMAP over SSL)</div></div>
+        {!web && (
+          <Field id={id('host')} label="Incoming Mail Server" req={f.provider === 'other'} err={errs.host}>
+            <input id={id('host')} placeholder="imap.company.com" value={fixed ? fixed.host : f.host} readOnly={!!fixed} onChange={set('host')} {...aria('host')} />
+          </Field>
+        )}
+        {!web && (
+          <Field id={id('port')} label="Incoming Mail Port" err={errs.port}>
+            <input id={id('port')} type="number" min="1" max="65535" placeholder="993" value={fixed ? fixed.port : f.port} readOnly={!!fixed} onChange={set('port')} {...aria('port')} />
+          </Field>
+        )}
+        {!web && <div className="nsm-f"><span className="nsm-label">Connection security</span><div className="nsm-fixed">SSL/TLS (IMAP over SSL)</div></div>}
         <div className="nsm-f"><span className="nsm-label">Connection status</span>
           <div className="nsm-fixed">
-            {mine.length ? mine.map((c) => <div key={c.id}><Chip c={c} /> <span className="nsm-sub">{c.address}{c.recruiterName ? ` · ${c.recruiterName}` : ''}</span></div>)
-              : <span className="nsm-chip off">Not connected</span>}
+            {mine.length ? mine.map((c) => (
+              <div key={c.id}>
+                <Chip c={c} /> <span className="nsm-sub">{c.address}{c.recruiterName ? ` · ${c.recruiterName}` : ''}{web && c.security ? ` · ${SECURITY_LABEL[c.security]}` : ''}</span>
+                {web && onAct && (
+                  <span className="nsm-acts nsm-inline">
+                    <button type="button" className="btn btn-sm" disabled={!!rowBusy[c.id] || c.status === 'disconnected' || c.status === 'processing'} onClick={() => onAct(c, 'sync')}>{rowBusy[c.id] ? 'Syncing…' : 'Sync Now'}</button>
+                    <button type="button" className="btn btn-sm nsm-danger" disabled={!!rowBusy[c.id] || c.status === 'disconnected'} onClick={() => onAct(c, 'disconnect')}>Disconnect</button>
+                  </span>
+                )}
+              </div>
+            )) : <span className="nsm-chip off">Not connected</span>}
           </div>
         </div>
       </div>
       <div className="nsm-card-ft">
-        <span className="nsm-hint">The login is checked with the mail server before anything is saved. The password is stored encrypted and never shown again.</span>
-        <button type="button" className="btn btn-primary" disabled={busy || data.canStoreCredentials === false} aria-busy={busy} onClick={() => connect(false)}>{busy ? 'Verifying login…' : 'Connect'}</button>
+        <span className="nsm-hint">{web ? 'Test Connection logs in and opens the inbox without saving anything. Connect checks the login again, then saves.' : 'The login is checked with the mail server before anything is saved.'} The password is stored encrypted and never shown again.</span>
+        {web && <button type="button" className="btn" disabled={testing || busy} aria-busy={testing} onClick={testConnection}>{testing ? 'Testing…' : 'Test Connection'}</button>}
+        <button type="button" className="btn btn-primary" disabled={busy || testing || data.canStoreCredentials === false} aria-busy={busy} onClick={() => connect(false)}>{busy ? 'Verifying login…' : 'Connect'}</button>
       </div>
     </section>
   );
@@ -228,8 +312,13 @@ export default function NaukriShineMailboxes() {
     <div className="nsm-wrap">
       <p className="jp-note" style={{ margin: 0 }}>Connect the mailbox that receives Naukri responses and the one that receives Shine responses. Each one adds its applications to the recruiter you choose. Posting jobs to Naukri and Shine is set up on the Job portals tab.</p>
       {data.canStoreCredentials === false && <div className="jp-err" role="alert">The Job Portal server cannot store mailbox passwords yet: INTEGRATION_SECRET_KEY is not set there (at least 16 characters). Until it is, Connect is refused.</div>}
+      <h3 className="nsm-group naukri">Naukri</h3>
       <div className="nsm-cards">
-        <MailboxCard src="naukri" data={data} onConnected={load} />
+        <MailboxCard src="naukri" mode="email" data={data} onConnected={load} />
+        <MailboxCard src="naukri" mode="webmail" data={data} onConnected={load} onAct={act} rowBusy={busy} />
+      </div>
+      <h3 className="nsm-group shine">Shine</h3>
+      <div className="nsm-cards">
         <MailboxCard src="shine" data={data} onConnected={load} />
       </div>
       <div className="nsm-tablehd"><h3>Connected mailboxes</h3><button type="button" className="btn" onClick={load}>Refresh</button></div>
@@ -238,7 +327,7 @@ export default function NaukriShineMailboxes() {
       {!rows.length ? <div className="nsm-empty">No Naukri or Shine mailbox is connected yet. Use the cards above.</div> : (
         <div className="nsm-tablewrap">
           <table className="nsm-table">
-            <thead><tr>{['Source', 'Department', 'Position', 'Recruiter', 'Mailbox Email', 'Provider', 'Connection Status', 'Last Successful Sync', 'Emails Processed', 'Imported', 'Duplicates', 'Pending Review', 'Failed', 'Actions'].map((t) => <th key={t} scope="col">{t}</th>)}</tr></thead>
+            <thead><tr>{['Source', 'Department', 'Position', 'Recruiter', 'Mailbox Email', 'Method / Provider', 'Connection Status', 'Last Successful Sync', 'Emails Processed', 'Imported', 'Duplicates', 'Pending Review', 'Failed', 'Actions'].map((t) => <th key={t} scope="col">{t}</th>)}</tr></thead>
             <tbody>
               {rows.map((c) => {
                 const b = !!busy[c.id]; const off = c.status === 'disconnected';
@@ -259,7 +348,10 @@ export default function NaukriShineMailboxes() {
                       )}
                     </td>
                     <td>{c.address}</td>
-                    <td>{PROVIDER_LABEL[c.provider] || c.provider || '—'}{c.host && <div className="nsm-sub">{c.host}{c.port ? `:${c.port}` : ''}</div>}</td>
+                    <td>
+                      {c.source === 'naukri' ? (methodOf(c) === 'webmail' ? 'Webmail' : `Email · ${PROVIDER_LABEL[c.provider] || c.provider}`) : (PROVIDER_LABEL[c.provider] || c.provider || '—')}
+                      {c.host && <div className="nsm-sub">{c.host}{c.port ? `:${c.port}` : ''}{c.source === 'naukri' && methodOf(c) === 'webmail' ? ` · ${SECURITY_LABEL[c.security] || 'SSL/TLS'}` : ''}</div>}
+                    </td>
                     <td><Chip c={c} />{c.lastError && <div className="nsm-rowerr" title={c.lastError}>{c.lastError.length > 90 ? `${c.lastError.slice(0, 90)}…` : c.lastError}</div>}</td>
                     <td>{when(c.lastSuccessfulSyncAt) || '—'}</td>
                     <td className="num">{c.emailsProcessed}</td>

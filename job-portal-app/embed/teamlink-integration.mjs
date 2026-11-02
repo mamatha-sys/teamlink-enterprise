@@ -608,6 +608,46 @@ export function teamlinkFrontRouter({ root, express }) {
     if (dept && String(rec.department || '').trim().toLowerCase() !== dept.toLowerCase()) throw refuse(`${rec.name} is not in the ${dept} department.`);
     return next();
   }));
+  /*
+   * NAUKRI WEBMAIL (2026-11-02): Test Connection (nothing saved) for any IMAP settings, and the company mailboxes on STARTTLS, which
+   * the portal's IMAP client (SSL only) cannot open - read by ./webmail-mailbox.mjs with the portal's own processing and tables.
+   *   POST .../mailboxes/webmail/test            { host, port, security, username?, address, password } -> { ok, message }
+   *   GET  .../mailboxes/webmail/starttls        { ids } the STARTTLS mailboxes
+   *   POST .../mailboxes/webmail/connect         { source, recruiterId, address, username?, password, host, port, takeOver? } (STARTTLS)
+   *   POST .../mailboxes/webmail/:id/reconnect   { password?, username? }     POST .../mailboxes/webmail/:id/sync
+   * A webmail mailbox on SSL/TLS is the portal's own "Other (IMAP)" connection (.../intake/source-connections).
+   */
+  let webmail = null;
+  const wm = async () => {
+    if (!webmail) {
+      const { webmailEngine } = await import(pathToFileURL(join(import.meta.dirname, 'webmail-mailbox.mjs')).href);
+      webmail = webmailEngine({ root: ROOT, withUser: (await portal()).withUser });
+    }
+    return webmail;
+  };
+  const wmSend = (fn) => async (req, res) => {
+    try { res.json(await fn(await wm(), req)); } catch (err) {
+      if (err && err.status && err.code) return res.status(err.status).json({ error: { code: err.code, message: err.message, ...(err.details ? { details: err.details } : {}) } });
+      console.error('[webmail]', String((err && err.message) || err));
+      return res.status(500).json({ error: { code: 'WEBMAIL_FAILED', message: 'The webmail request failed on the server.' } });
+    }
+    return undefined;
+  };
+  r.post(`${MAILBOXES}/webmail/test`, wmSend((w, req) => {
+    const b = req.body || {};
+    const user = String(b.username || '').trim() || String(b.address || '').trim();
+    if (!String(b.host || '').trim() || !user || !b.password) {
+      throw new HttpError(422, 'VALIDATION_FAILED', 'Enter the IMAP server, the username (or email address) and the password.');
+    }
+    return w.testLogin({ host: String(b.host).trim(), port: b.port, security: b.security === 'starttls' ? 'starttls' : 'ssl', user, password: String(b.password) });
+  }));
+  r.get(`${MAILBOXES}/webmail/starttls`, wmSend(async (w) => ({ ids: await w.starttlsIds() })));
+  r.post(`${MAILBOXES}/webmail/connect`, wmSend((w, req) => w.connect(req.body || {})));
+  r.post(`${MAILBOXES}/webmail/:id/reconnect`, wmSend((w, req) => w.reconnect(req.params.id, req.body || {})));
+  r.post(`${MAILBOXES}/webmail/:id/sync`, wmSend((w, req) => w.sync(req.params.id)));
+  // the STARTTLS mailboxes are read every INTAKE_SYNC_MS like the portal's own (not when DISABLE_BACKGROUND_WORK=true)
+  setTimeout(() => { wm().then((w) => w.startTimer()).catch((err) => console.error('[webmail] timer not started:', String(err && err.message))); }, 5000).unref?.();
+
   r.use(MAILBOXES, (req, res, next) => {
     req.session = { ...SYSTEM, profileId: null };
     mailboxes().then((mr) => mr(req, res, next), next);

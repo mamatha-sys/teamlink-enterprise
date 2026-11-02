@@ -14,6 +14,15 @@
 //   POST / with { seat } instead of { recruiterId }: connect a mailbox to a position
 //   GET  /:id/logs
 //
+// NAUKRI WEBMAIL (founder 2026-11-02): Naukri has two ways in - "Email Integration" (Gmail / Google Workspace, Outlook: the
+// existing connection) and "Webmail Integration" (the company's own mail server: IMAP host, port, SSL/TLS or STARTTLS, username,
+// password). Both are the same kind of connection in the same portal table, mailbox -> recruiter, Naukri only; Shine is untouched.
+//   POST /test                 { host, port, security, username?, address?, appPassword }  Test Connection - nothing is saved
+//   POST / with provider 'other' + security 'starttls'   connected by the bridge's STARTTLS reader (job-portal-app/embed/
+//                              webmail-mailbox.mjs), because the portal's own IMAP client speaks SSL/TLS only; SSL/TLS webmail is
+//                              the portal's own "Other (IMAP)" connection. Sync / Reconnect of a STARTTLS mailbox go to that reader.
+//   Every connection in GET / carries method ('email' | 'webmail') and security ('ssl' | 'starttls').
+//
 // Super Admin and Admin (Integrations: view to read, configure to change). Every change is also in TeamLink's audit log.
 // ---------------------------------------------------------------------------
 const express = require('express');
@@ -41,6 +50,10 @@ function send(res, err) {
 }
 const wrap = (fn) => (req, res) => fn(req, res).catch((err) => send(res, err));
 const idPath = (id) => `${CONN}/${encodeURIComponent(String(id))}`;
+const WEBMAIL = `${BASE}/webmail`;
+const wmPath = (id) => `${WEBMAIL}/${encodeURIComponent(String(id))}`;
+// the STARTTLS mailboxes (read by the bridge, not the portal); an older bridge without the route = none
+const starttlsIds = async () => new Set(((await portalFetch(`${WEBMAIL}/starttls`, { timeoutMs: 20000 }).catch(() => null)) || {}).ids || []);
 const audit = (req, action, entityId, toValue) => logAudit({
   userId: req.user.id, action, entity: 'PortalMailbox', entityId: entityId ? String(entityId) : undefined, toValue,
 });
@@ -75,7 +88,7 @@ router.get('/', view, wrap(async (req, res) => {
     require('../utils/jobPortalRecruiters').ensureQuietly().then(() => S.reconcileQuietly()), // eslint-disable-line global-require
     new Promise((r) => { setTimeout(r, 15000); }),
   ]);
-  const [conns, cur, map] = await Promise.all([portalFetch(CONN, { timeoutMs: 20000 }), currentRecruiters(), S.loadMap()]);
+  const [conns, cur, map, stl] = await Promise.all([portalFetch(CONN, { timeoutMs: 20000 }), currentRecruiters(), S.loadMap(), starttlsIds()]);
   const seats = await S.seatsWithRecruiters(cur.all);
   const seatBy = new Map(seats.map((x) => [x.code, x]));
   const byId = new Map(cur.all.map((r) => [r.id, r]));
@@ -86,6 +99,9 @@ router.get('/', view, wrap(async (req, res) => {
     const was = byId.get(c.recruiterId);
     const current = listedIds.has(c.recruiterId);
     const row = { ...c, recruiterDepartment: (cur.listed.find((r) => r.id === c.recruiterId) || was || {}).department || undefined };
+    // Gmail / Outlook = "Email Integration"; the company's own IMAP server = "Webmail Integration"
+    row.method = c.provider === 'other' ? 'webmail' : 'email';
+    row.security = stl.has(c.id) ? 'starttls' : 'ssl';
     const mapped = map[c.id] && seatBy.get(map[c.id].seat);
     if (map[c.id]) {
       // MAPPED TO A POSITION: the mailbox is the seat's; its recruiter is whoever holds the seat today
@@ -160,7 +176,8 @@ router.post('/', change, wrap(async (req, res) => {
     const wasName = had.recruiterName || 'its recruiter';
     const wasSeat = (await S.loadMap())[had.id];
     if (b.appPassword) {
-      await portalFetch(`${idPath(had.id)}/reconnect`, { method: 'POST', body: { appPassword: b.appPassword, ...(b.username ? { username: b.username } : {}) }, timeoutMs: 75000 });
+      if ((await starttlsIds()).has(had.id)) await portalFetch(`${wmPath(had.id)}/reconnect`, { method: 'POST', body: { password: b.appPassword, ...(b.username ? { username: b.username } : {}) }, timeoutMs: 75000 });
+      else await portalFetch(`${idPath(had.id)}/reconnect`, { method: 'POST', body: { appPassword: b.appPassword, ...(b.username ? { username: b.username } : {}) }, timeoutMs: 75000 });
     } else if (had.status === 'disconnected') {
       return res.status(422).json({ error: { code: 'VALIDATION_FAILED', message: `${had.address} was disconnected, so its saved password was erased. Enter the app password.`, details: { appPassword: 'Enter the app password.' } } });
     }
@@ -180,6 +197,17 @@ router.post('/', change, wrap(async (req, res) => {
         : `This mailbox was with ${from} - it is now with ${to}. ${b.appPassword ? 'The new app password was saved. ' : 'The saved app password was kept. '}New imports go to ${nowName}; candidates imported earlier stay with ${wasName}.`,
     });
   }
+  // WEBMAIL ON STARTTLS: the bridge's reader proves the login and saves it in the same portal table (the portal client is SSL only)
+  if (b.provider === 'other' && b.security === 'starttls') {
+    const out = await portalFetch(`${WEBMAIL}/connect`, {
+      method: 'POST', timeoutMs: 75000,
+      body: { source: b.source, recruiterId: b.recruiterId, address: b.address, username: b.username || undefined, password: b.appPassword, host: b.host, port: b.port, takeOver: b.takeOver === true ? true : undefined },
+    });
+    if (b.seat && out.connection && out.connection.id) await S.setSeat(out.connection.id, b.seat, req.user);
+    const who = (out.connection && out.connection.recruiterName) || b.recruiterId;
+    await audit(req, `${BOARD[b.source] || 'Portal'} webmail connected (STARTTLS)`, out.connection && out.connection.id, `${b.address} (${b.host}:${b.port || 143}) -> ${b.seat ? `position ${b.seat} (${who})` : who}`);
+    return res.status(201).json(out);
+  }
   const body = {
     source: b.source, department: b.department || undefined, recruiterId: b.recruiterId, address: b.address, provider: b.provider,
     username: b.username || undefined, appPassword: b.appPassword, host: b.host || undefined, port: b.port || undefined,
@@ -189,8 +217,18 @@ router.post('/', change, wrap(async (req, res) => {
   const out = await portalFetch(CONN, { method: 'POST', body, timeoutMs: 75000 });
   if (b.seat && out.connection && out.connection.id) await S.setSeat(out.connection.id, b.seat, req.user);
   const who = (out.connection && out.connection.recruiterName) || b.recruiterId;
-  await audit(req, `${BOARD[b.source] || 'Portal'} mailbox connected`, out.connection && out.connection.id, `${b.address} -> ${b.seat ? `position ${b.seat} (${who})` : who}`);
+  await audit(req, `${BOARD[b.source] || 'Portal'} ${b.provider === 'other' ? 'webmail' : 'mailbox'} connected`, out.connection && out.connection.id, `${b.address}${b.provider === 'other' ? ` (${b.host}:${b.port || 993}, SSL/TLS)` : ''} -> ${b.seat ? `position ${b.seat} (${who})` : who}`);
   return res.status(201).json(out);
+}));
+
+// TEST CONNECTION (Webmail): log in with the settings typed, open the inbox, log out. Nothing is saved, the password is not kept.
+router.post('/test', change, wrap(async (req, res) => {
+  const b = req.body || {};
+  const out = await portalFetch(`${WEBMAIL}/test`, {
+    method: 'POST', timeoutMs: 75000,
+    body: { host: String(b.host || '').trim(), port: b.port ? Number(b.port) : undefined, security: b.security === 'starttls' ? 'starttls' : 'ssl', username: b.username || undefined, address: b.address || undefined, password: b.appPassword },
+  });
+  res.json({ ok: !!out.ok, message: out.message });
 }));
 
 // MAP A MAILBOX TO A POSITION (or move it to another): the same connection and app password; it goes to that seat's holder now and
@@ -219,7 +257,8 @@ router.post('/:id/position', change, wrap(async (req, res) => {
 
 router.post('/:id/sync', change, wrap(async (req, res) => {
   await require('../utils/mailboxSeats').reconcile({ apply: true, actor: req.user, onlyId: req.params.id }).catch(() => []); // eslint-disable-line global-require
-  const out = await portalFetch(`${idPath(req.params.id)}/sync`, { method: 'POST', body: {}, timeoutMs: 180000 });
+  const stl = (await starttlsIds()).has(req.params.id);
+  const out = await portalFetch(stl ? `${wmPath(req.params.id)}/sync` : `${idPath(req.params.id)}/sync`, { method: 'POST', body: {}, timeoutMs: 180000 });
   // the responses just read go straight into the ATS Applications (utils/mailImports.js), not only into the portal
   const mail = await require('../utils/mailImports').pullQuietly({ sinceDays: 14 }); // eslint-disable-line global-require
   const ats = mail && !mail.error
@@ -230,7 +269,9 @@ router.post('/:id/sync', change, wrap(async (req, res) => {
 
 router.post('/:id/reconnect', change, wrap(async (req, res) => {
   const pw = req.body && req.body.appPassword;
-  const out = await portalFetch(`${idPath(req.params.id)}/reconnect`, { method: 'POST', body: pw ? { appPassword: pw } : {}, timeoutMs: 75000 });
+  const out = (await starttlsIds()).has(req.params.id)
+    ? await portalFetch(`${wmPath(req.params.id)}/reconnect`, { method: 'POST', body: pw ? { password: pw } : {}, timeoutMs: 75000 })
+    : await portalFetch(`${idPath(req.params.id)}/reconnect`, { method: 'POST', body: pw ? { appPassword: pw } : {}, timeoutMs: 75000 });
   await audit(req, 'Portal mailbox reconnected', req.params.id);
   res.json(out);
 }));
