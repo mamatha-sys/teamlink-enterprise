@@ -36,6 +36,15 @@ const apiBase = () => `http://127.0.0.1:${parseInt(process.env.GREENSTART_API_PO
 const enabled = () => String(process.env.GREENSTART_ENABLED || 'true').toLowerCase() !== 'false';
 const sha = (o) => crypto.createHash('sha256').update(JSON.stringify(o)).digest('hex');
 
+// Meta's words for a WhatsApp access token that no longer works (code 190: expired, user logged out, password changed, invalid).
+const TOKEN_DEAD = /error validating access token|access token (?:rejected|has expired|is invalid)|session (?:is invalid|has expired)|\(190\)|code 190|OAuthException/i;
+// TeamLink's WhatsApp card -> "Token rejected by Meta" (the same words the Save step uses), with Meta's reason. Never touches the token.
+async function markWhatsappTokenRejected(words) {
+  try {
+    await prisma.integration.update({ where: { id: 'whatsapp' }, data: { state: 'Token rejected by Meta', error: `Meta refused the WhatsApp access token (${String(words || '').slice(0, 200)}). Paste a new permanent token in Administration > Integrations > WhatsApp Business.` } });
+  } catch { /* the card stays as it was */ }
+}
+
 async function readState() {
   try { const row = await prisma.appSetting.findUnique({ where: { key: STATE_KEY } }); return row ? JSON.parse(row.value) : {}; } catch { return {}; }
 }
@@ -353,6 +362,10 @@ async function sync({ force = false, why = 'manual', by = null } = {}) {
         result.workspaces.push(one);
       }
       const bad = result.workspaces.flatMap((w) => Object.entries(w.channels).filter(([, c]) => c.state === 'failed').map(([ch, c]) => `${w.name} ${NAME[ch]}: ${c.words}`));
+      // 2026-11-02 (founder: "whatsapp connect avvatledu omnichannel lo"): when Meta refused TeamLink's WhatsApp token while giving it to
+      // Omni-Channel (expired / logged out / invalid), TeamLink's own WhatsApp card must not keep saying "Connected".
+      const waDead = result.workspaces.map((w) => w.channels.whatsapp).find((c) => c && c.state === 'failed' && TOKEN_DEAD.test(c.words || ''));
+      if (waDead) await markWhatsappTokenRejected(waDead.words);
       result.ok = !bad.length;
       result.words = bad.length ? `Not everything reached Omni-Channel: ${bad.join(' | ')}` : 'Omni-Channel uses the same Email, SMS, WhatsApp, Facebook and RCS as TeamLink.';
     } catch (err) {
@@ -418,4 +431,4 @@ function start() {
 }
 async function lastResult() { return (await readState()).last || null; }
 
-module.exports = { sync, connections, schedule, start, lastResult, teamlinkChannels, waMapView, saveWaMap, templatesToOmni, STATE_KEY };
+module.exports = { sync, connections, schedule, start, lastResult, teamlinkChannels, waMapView, saveWaMap, templatesToOmni, STATE_KEY, TOKEN_DEAD, markWhatsappTokenRejected };

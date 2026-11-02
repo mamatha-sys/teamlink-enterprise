@@ -2463,7 +2463,8 @@ router.post('/integrations/:id/test-message', requirePerm(null, 'administration'
   await recordEvent(req.params.id, { action: 'Test Message', by: req.user.name, result: summary.slice(0, 480) });
   await prisma.integration.update({
     where: { id: req.params.id },
-    data: { lastTest: new Date(), lastTestResult: summary.slice(0, 480), error: result.ok ? null : String(result.error || '').slice(0, 480), ...(result.ok ? { state: 'Connected', connected: true } : {}) },
+    // a WhatsApp test that Meta refuses because the token is dead (expired / logged out, code 190) shows on the card, not only in the test text
+    data: { lastTest: new Date(), lastTestResult: summary.slice(0, 480), error: result.ok ? null : String(result.error || '').slice(0, 480), ...(result.ok ? { state: 'Connected', connected: true } : (req.params.id === 'whatsapp' && /\(190\)|error validating access token|access token .*(expired|invalid|rejected)|session is invalid/i.test(err) ? { state: 'Token rejected by Meta' } : {})) },
   }).catch(() => {});
   await logAudit({ userId: req.user.id, action: `${channel} test message`, entity: 'Integration', entityId: req.params.id, toValue: result.outcome });
   if (!result.ok) { TEST_MSG_SEEN.delete(dupKey); return res.status(result.notConfigured ? 409 : 502).json({ error: result.error, outcome: result.outcome, status: word, notConfigured: !!result.notConfigured, providerResponse: result.providerResponse || null }); }
