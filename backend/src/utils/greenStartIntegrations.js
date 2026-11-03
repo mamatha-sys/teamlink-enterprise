@@ -159,12 +159,20 @@ async function teamlinkChannels() {
     if (!x) out.x = { none: 'X is not connected in TeamLink (Administration > Integrations > Social Media > X).' };
     else out.x = { body: { ...x.keys }, name: x.name };
   } catch (err) { out.x = { none: `X could not be read: ${err.message}` }; }
+  // LinkedIn (2026-11-02, "linkedin account connect cheyyi ... omnichannel"): the default LinkedIn account of Social Media > LinkedIn
+  // (its ~60-day token from TeamLink's own LinkedIn sign-in, utils/linkedinConnect.js) -> Green Start POST /social/linkedin/connect-token
+  try {
+    const li = await require('./socialAccounts').defaultLinkedin(); // eslint-disable-line global-require
+    if (!li) out.linkedin = { none: 'LinkedIn is not connected in TeamLink (Administration > Integrations > Social Media > LinkedIn).' };
+    else if (li.expired) out.linkedin = { none: 'The LinkedIn sign-in in TeamLink has expired (it lasts about 60 days). Press Connect LinkedIn again in Social Media > LinkedIn.' };
+    else out.linkedin = { body: { accessToken: li.token, ...(li.expiresAt ? { expiresAt: new Date(li.expiresAt).toISOString() } : {}), ...(li.page ? { organization: li.page } : {}) }, name: li.page ? `${li.name} + Company Page ${li.page.name}` : li.name };
+  } catch (err) { out.linkedin = { none: `LinkedIn could not be read: ${err.message}` }; }
   return out;
 }
 
 // ---- one channel into one workspace -----------------------------------------------
-const NAME = { email: 'Email', sms: 'SMS', whatsapp: 'WhatsApp', facebook: 'Facebook', threads: 'Threads', rcs: 'RCS', x: 'X (Twitter)' };
-const ONE_ROW = ['whatsapp', 'facebook', 'threads', 'rcs', 'x']; // channels that are one row in Green Start's integration list (removed by that row's id)
+const NAME = { email: 'Email', sms: 'SMS', whatsapp: 'WhatsApp', facebook: 'Facebook', threads: 'Threads', rcs: 'RCS', x: 'X (Twitter)', linkedin: 'LinkedIn' };
+const ONE_ROW = ['whatsapp', 'facebook', 'threads', 'rcs', 'x', 'linkedin']; // channels that are one row in Green Start's integration list (removed by that row's id)
 const PROVIDER = { rcs: 'smstake_rcs', x: 'twitter' }; // Green Start's provider name where it is not the channel's
 const GONE = ['NOT_CONNECTED', 'DISCONNECTED'];
 async function pushOne(token, ws, channel, want, prev, force) {
@@ -241,6 +249,22 @@ async function pushOne(token, ws, channel, want, prev, force) {
         throw err;
       }
       return { state: 'sent', words: `Same X account as TeamLink now${want.name ? ` (${want.name})` : ''}`, fp };
+    }
+    if (channel === 'linkedin') {
+      // the same rule as Facebook / X: a LinkedIn connection made inside Omni-Channel itself (its own LinkedIn sign-in) is never replaced
+      if (!prev) {
+        const list = await call('GET', '/integrations', { token, ws: ws.id });
+        if ((list || []).some((x) => x.provider === 'linkedin' && x.status && !GONE.includes(x.status))) {
+          return { state: 'skipped', words: 'Omni-Channel already has its own LinkedIn connection, so TeamLink left it as it is.' };
+        }
+      }
+      try {
+        await call('POST', '/social/linkedin/connect-token', { token, ws: ws.id, body: want.body });
+      } catch (err) {
+        if (/404|cannot post|not found/i.test(err.message)) return { state: 'failed', words: 'Omni-Channel does not take a LinkedIn account from TeamLink yet: its LinkedIn update (Green Start branch claude/linkedin-from-teamlink) is not installed on this server.', fp: prev };
+        throw err;
+      }
+      return { state: 'sent', words: `Same LinkedIn account as TeamLink now${want.name ? ` (${want.name})` : ''}`, fp };
     }
     if (channel === 'email') await call('PUT', '/integrations/email', { token, ws: ws.id, body: want.body });
     else if (channel === 'sms') await call('PUT', '/integrations/sms', { token, ws: ws.id, body: want.body });
@@ -369,7 +393,7 @@ async function sync({ force = false, why = 'manual', by = null } = {}) {
       }
       for (const [i, ws] of wss.entries()) {
         const one = { id: ws.id, name: ws.name, main: i === 0, channels: {} };
-        for (const ch of ['email', 'sms', 'whatsapp', 'facebook', 'threads', 'rcs', 'x']) {
+        for (const ch of ['email', 'sms', 'whatsapp', 'facebook', 'threads', 'rcs', 'x', 'linkedin']) {
           const k = `${ws.id}:${ch}`;
           let r;
           if (ch === 'whatsapp' && mapped && ws.waDone) r = ws.waDone;
@@ -378,6 +402,7 @@ async function sync({ force = false, why = 'manual', by = null } = {}) {
           else if (ch === 'threads' && i > 0) r = { state: 'skipped', words: `Threads is given to the main workspace only: "${wss[0].name}".` };
           else if (ch === 'facebook' && i > 0) r = { state: 'skipped', words: `The Facebook Page is given to the main workspace only: "${wss[0].name}".` };
           else if (ch === 'x' && i > 0) r = { state: 'skipped', words: `X is given to the main workspace only: "${wss[0].name}".` };
+          else if (ch === 'linkedin' && i > 0) r = { state: 'skipped', words: `LinkedIn is given to the main workspace only: "${wss[0].name}".` };
           else r = await pushOne(token, ws, ch, want[ch], fps[k] || null, force); // eslint-disable-line no-await-in-loop
           if (r.fp) fps[k] = r.fp; else if (r.fp === null) delete fps[k];
           one.channels[ch] = { state: r.state, words: r.words };
@@ -390,7 +415,7 @@ async function sync({ force = false, why = 'manual', by = null } = {}) {
       const waDead = result.workspaces.map((w) => w.channels.whatsapp).find((c) => c && c.state === 'failed' && TOKEN_DEAD.test(c.words || ''));
       if (waDead) await markWhatsappTokenRejected(waDead.words);
       result.ok = !bad.length;
-      result.words = bad.length ? `Not everything reached Omni-Channel: ${bad.join(' | ')}` : 'Omni-Channel uses the same Email, SMS, WhatsApp, Facebook, Instagram, Threads, RCS and X as TeamLink.';
+      result.words = bad.length ? `Not everything reached Omni-Channel: ${bad.join(' | ')}` : 'Omni-Channel uses the same Email, SMS, WhatsApp, Facebook, Instagram, Threads, RCS, X and LinkedIn as TeamLink.';
     } catch (err) {
       result.words = err.message;
       result.down = !!err.down;

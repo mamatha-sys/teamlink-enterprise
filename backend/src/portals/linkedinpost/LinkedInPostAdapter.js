@@ -6,7 +6,11 @@
 //   password = the LinkedIn access token (w_member_social for a profile, w_organization_social for a Company Page; it lasts 60 days).
 //   Test connection  GET /v2/userinfo  (who the token belongs to, SENDS NOTHING)
 //   Post             POST /rest/posts {author, commentary, visibility PUBLIC, lifecycleState PUBLISHED}  -> 201 + x-restli-id
-//   Post update      POST /rest/posts/{urn} with X-RestLi-Method: PARTIAL_UPDATE  {patch: {$set: {commentary}}}
+//                    (the Posts API "replaces the ugcPosts API" and takes w_member_social for a profile - LinkedIn docs 2026-10).
+//                    A PROFILE post that /rest/posts refuses with 403 (an app LinkedIn did not open the versioned API for) is sent
+//                    once more through POST /v2/ugcPosts - the route the "Share on LinkedIn" product page itself documents. A 403
+//                    means nothing was created, so this can never post twice. ugcPosts text is plain (no little-text escaping).
+//   Post update      POST /rest/posts/{urn} with X-RestLi-Method: PARTIAL_UPDATE  {patch: {$set: {commentary}}} (204)
 // Base address https://api.linkedin.com unless TL_LINKEDIN_API_BASE (or the Admin setting jobpublish.api.linkedinpost.base). The
 // LinkedIn-Version header comes from TL_LINKEDIN_VERSION / the Admin setting jobpublish.api.linkedinpost.version (LinkedIn retires old months).
 // ---------------------------------------------------------------------------
@@ -15,7 +19,8 @@ const { PORTALS, ERRORS } = require('../../jobPublish/constants');
 const { PortalError } = require('../base/errors');
 const S = require('../../jobPublish/settings');
 
-const DEFAULT_VERSION = '202604';
+// the latest version on 2026-11-02 (learn.microsoft.com/linkedin/marketing/versioning); each month is kept at least a year
+const DEFAULT_VERSION = '202610';
 
 // LinkedIn reads | { } @ [ ] ( ) < > # \ * _ ~ in a post as markup (mentions, hashtags): a backslash makes one plain text.
 // A web address is left alone (its _ and ~ are part of the link) and so is # (our hashtags are meant to be hashtags).
@@ -71,6 +76,8 @@ class LinkedInPostAdapter extends ApiPortal {
 
   urlOf(urn) { return `https://www.linkedin.com/feed/update/${encodeURIComponent(urn)}/`; }
 
+  person() { return String(this.author()).startsWith('urn:li:person:'); }
+
   async send(text, ctx = {}) {
     const body = {
       author: this.author(),
@@ -80,7 +87,22 @@ class LinkedInPostAdapter extends ApiPortal {
       lifecycleState: 'PUBLISHED',
       isReshareDisabledByAuthor: false,
     };
-    const r = await this.api('POST', '/rest/posts', { json: body });
+    let r;
+    try {
+      r = await this.api('POST', '/rest/posts', { json: body });
+    } catch (err) {
+      if (!(this.person() && err.code === 'NOT_ADMIN')) throw err;
+      await this.log.info('api', `LinkedIn refused /rest/posts for the profile (${err.apiStatus || '403'}): trying the Share on LinkedIn route /v2/ugcPosts`);
+      r = await this.api('POST', '/v2/ugcPosts', {
+        v2: true,
+        json: {
+          author: this.author(),
+          lifecycleState: 'PUBLISHED',
+          specificContent: { 'com.linkedin.ugc.ShareContent': { shareCommentary: { text: String(text || '') }, shareMediaCategory: 'NONE' } },
+          visibility: { 'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC' },
+        },
+      });
+    }
     const urn = r.header && r.header('x-restli-id');
     if (!urn) throw new PortalError('PORTAL_REJECTED', 'LinkedIn answered but gave no post id, so TeamLink cannot say it is posted.', { retryable: false });
     await this.log.info('api', `LinkedIn answered ${r.status}: post ${urn} created`);
@@ -89,7 +111,14 @@ class LinkedInPostAdapter extends ApiPortal {
   }
 
   async edit(id, text) {
-    const r = await this.api('POST', `/rest/posts/${encodeURIComponent(id)}`, { json: { patch: { $set: { commentary: escapeLittleText(text) } } }, headers: { 'X-RestLi-Method': 'PARTIAL_UPDATE' } });
+    let r;
+    try {
+      r = await this.api('POST', `/rest/posts/${encodeURIComponent(id)}`, { json: { patch: { $set: { commentary: escapeLittleText(text) } } }, headers: { 'X-RestLi-Method': 'PARTIAL_UPDATE' } });
+    } catch (err) {
+      // the ugcPosts route (above) has no edit at all: say so instead of a bare "not allowed"
+      if (this.person() && err.code === 'NOT_ADMIN') throw Object.assign(new PortalError('API_ERROR', 'LinkedIn lets TeamLink make new posts on this profile but not change them. Delete the post on LinkedIn if it is wrong, then post the job again.', { retryable: false }), { apiStatus: err.apiStatus });
+      throw err;
+    }
     await this.log.info('api', `LinkedIn answered ${r.status}: post ${id} updated`);
     return { id, url: this.urlOf(id), apiStatus: String(r.status) };
   }

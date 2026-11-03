@@ -60,6 +60,13 @@ const server = http.createServer((req, res) => {
       fake.nextId += 1;
       return send(201, null, { 'x-restli-id': `urn:li:share:${fake.nextId}` });
     }
+    // the Share on LinkedIn route TeamLink tries once when /rest/posts refuses a profile (403): refused too in the 'forbidden' case
+    if (u.pathname === '/v2/ugcPosts' && req.method === 'POST') {
+      fake.log.push({ kind: 'li-ugc', body: params, headers: req.headers });
+      if (fake.li === 'forbidden') return send(403, { message: 'Not enough permissions to access: POST /ugcPosts', status: 403 });
+      fake.nextId += 1;
+      return send(201, null, { 'x-restli-id': `urn:li:ugcPost:${fake.nextId}` });
+    }
     let m = /^\/rest\/posts\/(.+)$/.exec(u.pathname);
     if (m && req.method === 'POST') { fake.log.push({ kind: 'li-patch', urn: decodeURIComponent(m[1]), body: params, headers: req.headers }); return send(204, null); }
     // ---- Threads

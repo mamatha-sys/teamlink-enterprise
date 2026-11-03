@@ -192,6 +192,22 @@ async function defaultXKeys() {
   try { const k = JSON.parse(tokenOf(a)); return k && k.apiKey && k.apiSecret && k.accessToken && k.accessSecret ? { keys: k, name: a.name } : null; } catch { return null; }
 }
 
+// The default LinkedIn account for Omni-Channel (utils/greenStartIntegrations.js -> Green Start POST /social/linkedin/connect-token).
+// A Company Page default posts with its profile's token: Green Start gets the token and the Page as a second destination.
+async function defaultLinkedin() {
+  const all = await readAll();
+  const a = all.find((x) => x.platform === 'linkedin' && x.isDefault && x.status !== 'Removed');
+  if (!a) return null;
+  const token = tokenOf(a);
+  if (!token) return null;
+  const person = a.kind === 'page' ? all.find((x) => x.platform === 'linkedin' && x.externalId === a.parentId) : a;
+  return {
+    token, expiresAt: a.expiresAt || null, expired: expired(a),
+    name: person ? person.name : a.parentName || a.name,
+    page: a.kind === 'page' ? { urn: a.externalId, name: a.name } : null,
+  };
+}
+
 // Threads default -> the Social Media channel's Threads fields (what utils/greenStartIntegrations.js gives Omni-Channel)
 async function writeThreadsChannel(token, profile) {
   const w = await writeValues('social', { 'Threads access token': token || '-', 'Threads profile': profile || '' });
@@ -270,4 +286,4 @@ async function edit(user, id, { name, token } = {}, { saveFacebook } = {}) {
   return { ok: !result || result.ok !== false, account: shape(acc), tokenChanged: !!t, result };
 }
 
-module.exports = { addX, defaultXKeys, edit, list, addFacebookPages, refreshInstagram, addThreads, addLinkedin, addYoutube, tokenOf, setDefault, remove, writeThreadsChannel, readAll, PLATFORMS };
+module.exports = { addX, defaultXKeys, defaultLinkedin, edit, list, addFacebookPages, refreshInstagram, addThreads, addLinkedin, addYoutube, tokenOf, setDefault, remove, writeThreadsChannel, readAll, PLATFORMS };

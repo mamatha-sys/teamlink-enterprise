@@ -31,8 +31,15 @@ checks it (read-only). It never switches posting ON. Remove the default account 
   **Connect LinkedIn** and sign in on LinkedIn. A **Company Page** also needs LinkedIn's approval of the *Community Management API* for the app and a
   Page administrator: tick the Company Page box and type the Page number. The token lasts **about 60 days** (LinkedIn's rule): the account shows
   *Expired* and posting says so until you press Connect LinkedIn again.
-* The LinkedIn API version header comes from `TL_LINKEDIN_VERSION` (or the Admin setting `jobpublish.api.linkedinpost.version`); LinkedIn retires old months,
-  so set a current `YYYYMM` if LinkedIn ever answers "version not active".
+* The LinkedIn API version header is `202610` by default (the latest month on 2026-11-02; LinkedIn keeps each month at least a year). Override:
+  `TL_LINKEDIN_VERSION` (or the Admin setting `jobpublish.api.linkedinpost.version`) if LinkedIn ever answers "version not active".
+* A profile post goes to `/rest/posts` (LinkedIn's Posts API, which takes `w_member_social`). If LinkedIn refuses that for the profile (403), the same
+  text is sent once through `/v2/ugcPosts`, the route the *Share on LinkedIn* product page documents (a 403 creates nothing, so never two posts).
+  Such a post cannot be changed later (ugcPosts has no edit): "Post update" says so in words.
+* **One sign-in for everything** (2026-11-02): the default LinkedIn account also goes to Omni-Channel by itself (`utils/greenStartIntegrations.js` ->
+  Green Start `POST /social/linkedin/connect-token`, main workspace only, never over a LinkedIn connection made inside Omni-Channel). After a new
+  Connect LinkedIn (every ~60 days) the new token reaches Omni-Channel too. Needs the Green Start branch `claude/linkedin-from-teamlink`.
+  Test: `node backend/scripts/linkedin-omni-test.js` (fake LinkedIn + fake Omni-Channel, own copy of the sandbox DB).
 
 ## What gets posted
 Same rules as Telegram / Facebook (TELEGRAM.md, FACEBOOK.md): the Posting Kit text for that place (no client name, no fee, no agreement), the apply link

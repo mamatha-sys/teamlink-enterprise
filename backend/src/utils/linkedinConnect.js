@@ -7,7 +7,8 @@
 //   2  callback    LinkedIn sends the browser back to  <site>/api/public/linkedin-connect/callback?code=..&state=..  (public route; the state proves it).
 //                  The code is exchanged for a token (it lasts about 60 days), /v2/userinfo says whose it is, and the account is kept in the
 //                  Social Media list (utils/socialAccounts.js addLinkedin). The browser goes back to Integrations > Social Media > LinkedIn.
-//   3  the default LinkedIn account is the one job posts use (utils/socialPosting.js).
+//   3  the default LinkedIn account is the one job posts use (utils/socialPosting.js) and the one Omni-Channel gets (utils/greenStartIntegrations.js,
+//      Green Start POST /social/linkedin/connect-token): one sign-in for TeamLink, job posting and Omni-Channel.
 //
 // The LinkedIn app: Client ID + Client secret typed once on the LinkedIn tab (kept encrypted in AppSetting 'social.linkedin.app'), or
 // LINKEDIN_CLIENT_ID / LINKEDIN_CLIENT_SECRET in the environment. The exact redirect address to register in the LinkedIn app
@@ -106,6 +107,7 @@ async function finish(req, code, base, st) {
   const expiresAt = tok.expires_in ? new Date(Date.now() + Number(tok.expires_in) * 1000).toISOString() : null;
   const out = await SA.addLinkedin(user, { sub: String(me.sub), name: me.name || [me.given_name, me.family_name].filter(Boolean).join(' ') || null, token: tok.access_token, expiresAt, orgId: st.o || null });
   try { await require('./socialPosting').mirror(user); } catch { /* the Social Media screen shows the state */ } // eslint-disable-line global-require
+  try { require('./greenStartIntegrations').schedule('linkedin connected'); } catch { /* the hourly run sends it */ } // eslint-disable-line global-require
   return out;
 }
 
