@@ -1230,7 +1230,11 @@ const REPORT_FEATURE_PRODUCT = {
 // client desk's own rights, for ANY client (utils/scope.js gives them all).
 // 2026-10-29: candidates are back for the BDE TL (the BDE TL check before a profile goes to the client); scope.js still
 // shows them only from the BDE step on (bdeStageWhere), never the recruiters' and TLs' own steps.
-const BDE_TL_HIDDEN_MODULES = ['interviews'];
+const BDE_TL_HIDDEN_MODULES = [];
+// THE INTERVIEW CALENDAR IS BACK FOR THE BDE TL (founder 2026-11-03: "interview calender bde tl ki kuda kanipinchali"):
+// in Interviews the BDE TL has exactly a BDE's rights (the calendar, client feedback, offers, joining), never the
+// recruiters' interview feedback / AI interview a TL has. scope.js still shows client candidates from the BDE step on.
+const BDE_TL_AS_BDE_MODULES = ['interviews'];
 const BDE_TL_RIGHTS = {
   'clients|Add Client|create': true,
   'clients|Client Detail|edit': true,
@@ -1432,6 +1436,7 @@ async function can(user, product, moduleId, feature, action, record = undefined)
   // THE BDE TL SEES BDE WORK ONLY (founder 2026-10-29: "bde tl ki, bde related kanipinchali" - clients and BDE work;
   // no candidates, no interviews: the recruiters' pipeline). effectiveMatrix draws the same.
   if (BDE_TL_HIDDEN_MODULES.includes(moduleId) && require('./scope').isBdeTl(user)) return false; // eslint-disable-line global-require
+  if (BDE_TL_AS_BDE_MODULES.includes(moduleId) && require('./scope').isBdeTl(user)) roles.splice(0, roles.length, 'BDE'); // eslint-disable-line global-require
   // THE BDE TL (user, 2026-10-08) READS the client book — clients and their
   // agreements — as a BDE does; utils/scope.js clientWhere() gives them all of
   // it. Viewing only: adding, editing and the agreement actions stay as set.
@@ -1866,6 +1871,7 @@ async function effectiveMatrix(user) {
       continue;
     }
     const roles = rolesFor(user, isProduct ? owning : null);
+    if (BDE_TL_AS_BDE_MODULES.includes(m.id) && roles.length && require('./scope').isBdeTl(user)) roles.splice(0, roles.length, 'BDE'); // eslint-disable-line global-require
     const key = isProduct ? owning : '*';
     // eslint-disable-next-line no-await-in-loop
     // The same two clamps can() applies, so a button is drawn exactly when the
