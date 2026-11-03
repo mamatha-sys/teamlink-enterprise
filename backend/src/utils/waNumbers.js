@@ -783,6 +783,41 @@ async function tokenNote(cfg) {
     return '';
   } catch { return ''; }
 }
+// The WhatsApp Business Account ids this token may use, as Meta lists them on the token (read-only).
+async function tokenWabaIds(cfg) {
+  try {
+    const r = await graphGet(cfg, `debug_token?input_token=${encodeURIComponent(cfg.token)}`);
+    const scopes = (r.ok && r.json && r.json.data && r.json.data.granular_scopes) || [];
+    const ids = scopes.filter((s) => /^whatsapp_business_(management|messaging)$/.test(String(s.scope || '')))
+      .flatMap((s) => (Array.isArray(s.target_ids) ? s.target_ids : []));
+    return [...new Set(ids.map(String))].slice(0, 25);
+  } catch { return []; }
+}
+const listsPhone = (r, phoneId) => !!(r.ok && r.json && Array.isArray(r.json.data) && r.json.data.some((d) => String(d.id) === String(phoneId)));
+// Is the typed WhatsApp Business ID the account Meta keeps this number in? If not, look for the right one among the accounts
+// the token reaches and, for a number of the Numbers list, save it (what Meta says is the truth; it is logged).
+// Returns null when the typed id is right (or Meta cannot tell), else { text, fixedTo? }.
+async function wabaFix(row, cfg, user) {
+  const typed = String(cfg.wabaId);
+  const wl = await graphGet(cfg, `${encodeURIComponent(typed)}/phone_numbers?fields=id,display_phone_number`);
+  if (listsPhone(wl, cfg.phoneId)) return null;
+  const metaErr = wl.json && wl.json.error;
+  if (!wl.ok && !metaErr) return null; // Meta did not answer: say nothing rather than guess
+  let found = null;
+  for (const id of (await tokenWabaIds(cfg)).filter((x) => x !== typed)) {
+    if (listsPhone(await graphGet(cfg, `${encodeURIComponent(id)}/phone_numbers?fields=id,display_phone_number`), cfg.phoneId)) { found = id; break; }
+  }
+  if (!found) {
+    return { text: `The WhatsApp Business ID ${typed} is not the account of this Phone number ID (Meta: messages fail with "#10 ... not linked"), and the token reaches no account that has this number. In Meta WhatsApp Manager open this number, copy its WhatsApp Business Account ID, and save it here.` };
+  }
+  if (!row || row.credSource === 'legacy' || row.virtual) {
+    return { text: `The WhatsApp Business ID is wrong: Meta keeps this number in account ${found}, not ${typed}. Type ${found} in the WhatsApp Business form (Connections tab) and save.` };
+  }
+  await run('UPDATE "WaNumber" SET "wabaId" = ?, "updatedAt" = ? WHERE "id" = ?', found, nowIso(), row.id);
+  bust();
+  await logAudit({ userId: user ? user.id : null, actorName: user ? user.name : 'System', action: 'WhatsApp number: WhatsApp Business ID corrected from Meta', entity: 'WaNumber', entityId: row.id, fromValue: typed, toValue: `${row.label}: ${found}` });
+  return { fixedTo: found, text: `WhatsApp Business ID corrected: Meta keeps this number in account ${found} (it said ${typed}).` };
+}
 async function graphGet(cfg, path) {
   return core.httpJson(`${cfg.base}/${wa().VERSION}/${path}`, { headers: { authorization: `Bearer ${cfg.token}` } });
 }
@@ -811,11 +846,14 @@ async function check(ref, { subscribe = false, user = null, quiet = false } = {}
     if (r.ok && r.json && (r.json.display_phone_number || r.json.id)) {
       res = statusFromMeta(r.json, row.displayDigits);
       if (res.code === 'connected') { const tn = await tokenNote(cfg); if (tn) res = { ...res, text: `${res.text} ${tn}` }; }
-      // is the number really inside the WhatsApp Business Account that was typed?
-      if (res.code === 'connected' && cfg.wabaId) {
-        const wl = await graphGet(cfg, `${encodeURIComponent(cfg.wabaId)}/phone_numbers?fields=id,display_phone_number`);
-        if (wl.ok && wl.json && Array.isArray(wl.json.data) && !wl.json.data.some((d) => String(d.id) === String(cfg.phoneId))) {
-          res = { ...res, code: 'disconnected', text: 'Meta does not list this Phone number ID in that WhatsApp Business Account. Check both ids.' };
+      // is the number really inside the WhatsApp Business Account that was typed? (also when Meta still asks for the
+      // code: founder 3 Nov 2026, Education - 2 showed "Verification Required" while every send failed with #10
+      // "Messaging account X is not linked to phone number Y")
+      if (res.code !== 'disconnected' && cfg.wabaId) {
+        const fix = await wabaFix(row, cfg, user);
+        if (fix) {
+          if (fix.fixedTo) { cfg.wabaId = fix.fixedTo; res = { ...res, text: `${fix.text} ${res.text}`.trim() }; }
+          else res = { ...res, code: 'disconnected', text: fix.text };
         }
       }
     } else {
@@ -1351,7 +1389,7 @@ module.exports = {
   resolveSender, planNumber, recheck, authorisedRows, mayUse, visibleNumberIds, holdsAccess, departmentsOfUser, rolesOfUser, isAdminLike,
   filterRows, threadNumbers, hiddenPersons, noteMessage, tagThread, numberOfMessage, numbersOfMessages, threadsOfContact, windowOpenOn, openWindowsOn, windowOpenFor, openWindowsFor, windowOpenSystem, anyUsable,
   rowByPhoneId, verifyTokens, appSecretOf, allAppSecrets, noteUnknown, unknownCount,
-  statusFromMeta, check, noteSendOk, afterLegacyTokenChange, tagOf, reconnectAllowed, reconnectLimit: () => RECONNECT_LIMIT, noteSendFailure,
+  statusFromMeta, check, wabaFix, noteSendOk, afterLegacyTokenChange, tagOf, reconnectAllowed, reconnectLimit: () => RECONNECT_LIMIT, noteSendFailure,
   importMain, create, update, setDefault, setActive, remove, setAccess, historyCount,
   adminList, people, departmentCounts, effectivePeople, myNumbers, labelsOf, chipOf, validate, cleanE164,
   ASSIGNABLE_ROLES, WORDS, CHIP, UNKNOWN_PROVIDER, DDL,
