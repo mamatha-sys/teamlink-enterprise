@@ -530,7 +530,10 @@ class Dialogue {
   async hear(textIn, meta = {}) {
     if (this.st.done) return { say: '', done: true };
     const text = String(textIn == null ? '' : textIn).slice(0, 600);
-    const heardAs = meta.heard === 'unclear' ? 'unclear' : (text.trim() ? 'clear' : 'none');
+    // a whole sentence that plainly says "interested" is believed even when the line was a little unclear (real call 2026-11-03:
+    // "I'm interested in the job." -> "Sorry, I couldn't hear you clearly")
+    const plain = meta.heard === 'unclear' && text.trim().split(/\s+/).length >= 3 && SAYS_INTEREST.test(text) && ['yes', 'no'].includes(classify(text).intent);
+    const heardAs = meta.heard === 'unclear' && !plain ? 'unclear' : (text.trim() ? 'clear' : 'none');
     this.st.turns += 1;
     const turn = { who: 'candidate', text: S.clean(text, 300), heard: heardAs, at: new Date().toISOString() };
     if (meta.lang) turn.lang = meta.lang;
