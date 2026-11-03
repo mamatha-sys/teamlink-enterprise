@@ -6,7 +6,7 @@
 # Changes nothing, sends nothing, never prints the RCS login. It shows:
 #   1. the last 8 RCS templates in TeamLink: name, rcssms.in id, type, status, where it was made, when made / last changed;
 #   2. the last 10 RCS template audit rows: what TeamLink did and the status rcssms.in gave at that moment;
-#   3. the last 10 RCS messages: number (last 4 digits only), template id, status, whether rcssms.in gave a message id, its error,
+#   3. the last 10 RCS messages: number (last 4 digits only), template id, the type sent (BASIC / RICH), its variables, status, whether rcssms.in gave a message id, its error,
 #      delivered time and the SMS fallback;
 #   4. whether rcssms.in has called our report address (/api/webhooks/rcs) in the last days (nginx log, the ?token= hidden):
 #      no calls = rcssms.in never sends us delivery reports or template verdicts, so "Sent" can never become "Delivered".
@@ -34,7 +34,7 @@ const parse = (s) => { try { return JSON.parse(s || "{}"); } catch { return {}; 
   }
   console.log("== 3. last 10 RCS messages");
   for (const m of await prisma.rcsMessageLog.findMany({ orderBy: { createdAt: "desc" }, take: 10 })) {
-    console.log(`  ${t(m.createdAt)} | ...${String(m.msisdn).slice(-4)} | tpl ${m.templateId} | ${m.status} | msgid ${m.msgId ? "yes" : "NO"} | error ${m.errorCode || "-"} ${String(m.errorText || "").slice(0, 120)} | delivered ${t(m.deliveredAt)} | SMS fallback ${m.fallbackStatus || "-"}${m.fallbackError ? " (" + String(m.fallbackError).slice(0, 80) + ")" : ""}`);
+    console.log(`  ${t(m.createdAt)} | ...${String(m.msisdn).slice(-4)} | tpl ${m.templateId} | type ${m.rcsType || "-"} | variables ${m.variablesJson ? m.variablesJson.replace(/\d{6,}/g, "...").slice(0, 80) : "none"} | ${m.status} | msgid ${m.msgId ? "yes" : "NO"} | error ${m.errorCode || "-"} ${String(m.errorText || "").slice(0, 120)} | delivered ${t(m.deliveredAt)} | SMS fallback ${m.fallbackStatus || "-"}${m.fallbackError ? " (" + String(m.fallbackError).slice(0, 80) + ")" : ""}`);
   }
   await prisma.$disconnect();
 })().catch((e) => { console.log("  could not read the database: " + String(e.message).slice(0, 200)); process.exit(0); });
