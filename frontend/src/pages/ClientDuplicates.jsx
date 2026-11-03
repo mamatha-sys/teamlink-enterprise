@@ -64,7 +64,8 @@ function manualGroup(focus, other) {
 // Backend: routes/clientMerge.js + utils/clientDedupe.js.
 
 const ADMIN = ['SUPER_ADMIN', 'ADMIN'];
-export const isClientMergeAdmin = (user) => !!user && (ADMIN.includes(user.role) || ADMIN.includes(user.atsRole));
+// The BDE TL reviews and merges duplicate clients too (the server allows it; 2026-11-03).
+export const isClientMergeAdmin = (user) => !!user && (ADMIN.includes(user.role) || ADMIN.includes(user.atsRole) || !!(user.workflow && user.workflow.bdeTl));
 
 const CLASS_INFO = {
   SAFE: 'Same name once punctuation, Pvt/Ltd, brackets and the address part are ignored — nothing contradicts.',
@@ -397,9 +398,12 @@ export default function ClientDuplicates() {
         </div>
         <div className="cdup-head-actions">
           <button type="button" className="btn" onClick={load} disabled={loading}>{loading ? 'Checking…' : 'Re-check'}</button>
-          <button type="button" className="btn btn-primary" disabled={!safeGroups.length || loading} onClick={() => setBulk({ groups: safeGroups, busy: false, result: null, error: '' })}>
-            Merge all SAFE groups ({safeGroups.length})
-          </button>
+          {/* the whole-company merge stays Super Admin / Admin (the server refuses the rest) */}
+          {ADMIN.includes(user && user.role) || ADMIN.includes(user && user.atsRole) ? (
+            <button type="button" className="btn btn-primary" disabled={!safeGroups.length || loading} onClick={() => setBulk({ groups: safeGroups, busy: false, result: null, error: '' })}>
+              Merge all SAFE groups ({safeGroups.length})
+            </button>
+          ) : null}
         </div>
       </div>
 

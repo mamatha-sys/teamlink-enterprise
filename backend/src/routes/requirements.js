@@ -837,7 +837,8 @@ function roleViewDefs(user, q = {}) {
   V.agreement.test = isAgreementPending;
   let keys;
   let def;
-  switch (role) {
+  // The BDE TL reads every client job, so gets the Admin's chips (founder 2026-11-03: "super admin ki bde relate em kanipisthundho, avi mottham bde tl ki kanipinchali").
+  switch (role === 'tl' && isBdeTlUser(user) ? 'admin' : role) {
     case 'recruiter':
       V.mine = {
         ...V.mine,
@@ -1180,7 +1181,7 @@ router.get('/', async (req, res) => {
     od ? od.length : prisma.requirement.count({ where }),
     // §8.4 — the top alert: live jobs in scope that need a TL / a recruiter.
     defs.alert ? Promise.all([
-      defs.role === 'tl' ? 0 : prisma.requirement.count({ where: { AND: [scopeW, NEEDS_TL_WHERE, LIVE_WHERE] } }),
+      defs.role === 'tl' && !isBdeTlUser(req.user) ? 0 : prisma.requirement.count({ where: { AND: [scopeW, NEEDS_TL_WHERE, LIVE_WHERE] } }),
       prisma.requirement.count({ where: { AND: [scopeW, NEEDS_RECRUITER_WHERE, LIVE_WHERE] } }),
     ]).then(([needsTl, needsRec]) => ({ needsTl, needsRecruiter: needsRec })) : null,
   ]);
@@ -2032,7 +2033,7 @@ router.get('/summary', async (req, res, next) => {
       keys.includes('needstl') ? count(within({ AND: [NEEDS_TL_WHERE, LIVE_WHERE] })) : null,
       keys.includes('unassigned') ? count(within({ AND: [NEEDS_RECRUITER_WHERE, LIVE_WHERE] })) : null,
       count(lateWhere),
-      ['admin', 'mgmt', 'bde'].includes(role) ? count(within(AGREEMENT_PENDING_WHERE)) : null,
+      ['admin', 'mgmt', 'bde'].includes(role) || isBdeTlUser(req.user) ? count(within(AGREEMENT_PENDING_WHERE)) : null,
       Promise.resolve(0), // On hold is no longer a state people see (2026-10-13)
       Promise.all(chainKeys.map((k) => count(within(reqDisplay.DISPLAY_WHERE[k])))),
       prisma.requirement.groupBy({ by: ['department'], where: within(OPEN_WHERE), _count: { _all: true } }),

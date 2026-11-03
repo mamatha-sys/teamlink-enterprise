@@ -117,7 +117,7 @@ export function useClientDuplicateCheck({ excludeId = null } = {}) {
 
 // Admin / Super Admin may also compare and merge two clients (Clients > Duplicate clients). Nothing merges by itself.
 const MERGE_ADMIN = ['SUPER_ADMIN', 'ADMIN'];
-export const mayMergeClients = (user) => !!user && (MERGE_ADMIN.includes(user.role) || MERGE_ADMIN.includes(user.atsRole));
+export const mayMergeClients = (user) => !!user && (MERGE_ADMIN.includes(user.role) || MERGE_ADMIN.includes(user.atsRole) || !!(user.workflow && user.workflow.bdeTl));
 export const mergeReviewLink = (focusId, withId) => `/clients/duplicates?focus=${encodeURIComponent(focusId)}${withId ? `&with=${encodeURIComponent(withId)}` : ''}`;
 
 // The friendly box. `form` = the Add / Edit form (the Location typed so far); onNeed(gate) = something is still missing before the

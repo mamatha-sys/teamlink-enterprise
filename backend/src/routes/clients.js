@@ -288,6 +288,10 @@ const LIST_COLUMNS = {
   },
 };
 LIST_COLUMNS.mgmt = LIST_COLUMNS.admin;
+// The BDE TL: the Admin's client columns (founder 2026-11-03: "super admin ki bde relate em kanipisthundho, avi mottham bde tl ki kanipinchali"),
+// without the rupee columns (money stays Admin / Management / Accounts); the invoice STATUS instead.
+const MONEY_COLUMNS = ['revenue', 'invoiced', 'received', 'outstanding', 'overdueDays'];
+LIST_COLUMNS.bdetl = { defaults: LIST_COLUMNS.admin.defaults, extra: [...LIST_COLUMNS.admin.extra.filter((k) => !MONEY_COLUMNS.includes(k)), 'invoiceStatus'] };
 LIST_COLUMNS.am = { defaults: ['bde', 'department', 'activeReqs', 'agreement', 'status'], extra: ['code', 'industry', 'location'] };
 LIST_COLUMNS.stl = LIST_COLUMNS.tl;
 LIST_COLUMNS.client = { defaults: ['activeReqs', 'agreement', 'status'], extra: [] };
@@ -300,6 +304,8 @@ const LIST_FILTERS = {
   admin: ['owner', 'expiring', 'unassigned', 'industry', 'status', 'department', 'location', 'agreement', 'hasOpen'],
   client: [],
 };
+LIST_FILTERS.bdetl = LIST_FILTERS.admin;
+const listRoleOf = (user, role) => (role === 'bde' && isBdeTl(user) ? 'bdetl' : role);
 LIST_FILTERS.mgmt = LIST_FILTERS.admin;
 LIST_FILTERS.am = ['industry', 'status', 'owner', 'department', 'location', 'agreement', 'hasOpen'];
 LIST_FILTERS.stl = LIST_FILTERS.tl;
@@ -911,7 +917,7 @@ router.get('/meta', async (req, res) => {
   const global = !!scopeOf(user).global;
   const level = clientLevelFor(user);
   const noteCreate = await can(user, 'ats', 'clients', 'Client Notes', 'create');
-  const cols = LIST_COLUMNS[role] || { defaults: [], extra: [] };
+  const cols = LIST_COLUMNS[listRoleOf(user, role)] || { defaults: [], extra: [] };
   const lifecycleBase = await clientLifecycle.baseRights(user);
 
   // §8.3 — "N clients' agreements expire in 30 days" (Admin, BDE), counted
@@ -945,7 +951,7 @@ router.get('/meta', async (req, res) => {
     defaultView: DEFAULT_VIEW[role] || 'all',
     columns: [...cols.defaults, ...cols.extra],
     defaultColumns: cols.defaults,
-    filters: LIST_FILTERS[role] || [],
+    filters: LIST_FILTERS[listRoleOf(user, role)] || [],
     tabs: tabsFor(role),
     invoiceMode: invoiceModeOf(role),
     expiring,

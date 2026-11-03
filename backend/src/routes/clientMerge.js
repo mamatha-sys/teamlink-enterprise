@@ -25,7 +25,8 @@ async function bdeMergeIds(u) {
 }
 router.use(async (req, res, next) => {
   if (isSaAdmin(req.user)) return next();
-  if (isBdeUser(req.user) && ['/groups', '/count', '/preview', '/merge', '/undo', '/history'].includes(req.path)
+  const paths = require('../utils/scope').isBdeTl(req.user) ? ['/groups', '/count', '/preview', '/merge', '/undo', '/history', '/plan'] : ['/groups', '/count', '/preview', '/merge', '/undo', '/history']; // eslint-disable-line global-require
+  if (isBdeUser(req.user) && paths.includes(req.path)
     && await require('../middleware/auth').can(req.user, 'ats', 'clients', 'Client Merge Request', 'create')) { // eslint-disable-line global-require
     req.bdeOwn = await bdeMergeIds(req.user);
     return next();

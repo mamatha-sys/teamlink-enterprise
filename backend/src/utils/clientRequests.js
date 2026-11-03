@@ -126,7 +126,8 @@ async function listFor(user, { onlyMine = false, take = 150 } = {}) {
     const mine = r.userId === user.id;
     const status = r.approvalStatus || 'Pending';
     const canDecide = status === 'Pending' && !mine && !!client && inScope.has(client.id) && mayDecideKind(user, kind, client);
-    if (!(mine || canDecide)) continue; // eslint-disable-line no-continue
+    const bdeTlSees = !!client && inScope.has(client.id) && require('./scope').isBdeTl(user); // eslint-disable-line global-require
+    if (!(mine || canDecide || bdeTlSees)) continue; // eslint-disable-line no-continue
     if (onlyMine && !mine) continue; // eslint-disable-line no-continue
     out.push({
       id: r.id,

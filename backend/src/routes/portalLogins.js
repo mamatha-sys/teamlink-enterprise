@@ -483,8 +483,9 @@ router.get('/review', wrap(async (req, res) => {
   const u = req.user;
   const base = await baseRights(u);
   const adminQueue = isAdmin(u) && await can(u, 'ats', 'candidates', 'Candidate Portal Invite', 'approve');
-  if (!base.approve && !adminQueue) return res.status(403).json({ error: 'The client login review is for the Admin and Managers.' });
-  const clients = base.approve ? (await prisma.client.findMany({
+  const bdeTlView = require('../utils/scope').isBdeTl(u); // the BDE TL looks at every client login too (2026-11-03) // eslint-disable-line global-require
+  if (!base.approve && !adminQueue && !bdeTlView) return res.status(403).json({ error: 'The client login review is for the Admin and Managers.' });
+  const clients = base.approve || bdeTlView ? (await prisma.client.findMany({
     where: { AND: [clientWhere(u), { users: { some: { OR: [{ role: 'CLIENT' }, { atsRole: 'CLIENT' }] } } }] },
     select: { id: true, name: true, clientType: true, ownerDepartment: true, agreementStatus: true, agreementEnd: true },
   })).filter((c) => c.clientType !== 'Internal' && departmentOk(u, c)) : [];

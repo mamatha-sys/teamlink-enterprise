@@ -208,6 +208,8 @@ const SORTS = [
 // answer the server gives (data.viewRole), known before the first response.
 function roleOf(user) {
   const r = (user && user.scopeRoles && user.scopeRoles.ats) || productRole(user, 'ats');
+  // The BDE TL reads every client job as an Admin does (2026-11-03); the server still cuts money and recruiter-side data.
+  if (user && user.workflow && user.workflow.bdeTl) return 'admin';
   if (['SUPER_ADMIN', 'ADMIN'].includes(r) || ['SUPER_ADMIN', 'ADMIN'].includes(user && user.role)) return 'admin';
   return {
     MANAGER: 'mgmt', ASSISTANT_MANAGER: 'mgmt', RECRUITER: 'recruiter', TL: 'tl', BDE: 'bde', ACCOUNTANT: 'accounts',

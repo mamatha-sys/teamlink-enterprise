@@ -2255,6 +2255,8 @@ function serialize(reportId, { spec, f, ctx, out }, user) {
   if (user && require('../utils/clientRedact').privacyFlagsFor(user)?.bde) { // eslint-disable-line global-require
     out.sections.forEach((s) => { s.columns = s.columns.filter((c) => !['recruiter', 'tl', 'stl'].includes(c.key)); });
   }
+  // The BDE TL's Recruiter & BDE performance is the BDE-wise part only (the recruiter rows are the recruiters' business).
+  if (reportId === 'recruiters' && user && require('../utils/scope').isBdeTl(user)) out.sections = out.sections.filter((s) => s.id === 'bdes'); // eslint-disable-line global-require
   // Everyday words on every label (spec §2: Job, Step, Late, People in process).
   const W = PLUSX.plainWords;
   const val = (v) => (v instanceof Cell ? v.n : v);
@@ -2401,7 +2403,7 @@ router.get('/options', VIEW, guarded(async (req, res) => {
     recruiters: OWN.isOwnOnly(req.user) ? OWN.onlySelf(req.user, listOf(recruiters), (o) => o.id) : isBdeTeam(req.user) ? [] : listOf(recruiters),
     tls: OWN.isOwnOnly(req.user) || isBdeTeam(req.user) ? [] : listOf(tls),
     stls: OWN.isOwnOnly(req.user) || isBdeTeam(req.user) ? [] : listOf(stls),
-    bdes: OWN.isOwnOnly(req.user) || isBdeTeam(req.user) ? [] : await require('../utils/bdeSeats').labelBdeOptions(listOf(bdes)), // eslint-disable-line global-require
+    bdes: OWN.isOwnOnly(req.user) || (isBdeTeam(req.user) && !require('../utils/scope').isBdeTl(req.user)) ? [] : await require('../utils/bdeSeats').labelBdeOptions(listOf(bdes)), // eslint-disable-line global-require
     locations: [...new Set(reqs.map((r) => r.location).filter((l) => clean(l)))].sort(),
     sources: [...sources.values()].sort((a, b) => a.localeCompare(b)),
     statuses: [
@@ -2620,8 +2622,17 @@ router.get('/recruiter-revenue/export', guarded(async (req, res) => {
 const BDE_REPORTS = ['funnel', 'requirements', 'clients', 'interviews', 'joining'];
 const BDE_PEOPLE_FILTERS = ['recruiter', 'tl', 'stl', 'bde', 'team', 'positionCode', 'section'];
 const isBdeTeam = (user) => { const fl = require('../utils/clientRedact').privacyFlagsFor(user); return !!(fl && fl.bde); }; // eslint-disable-line global-require
+// THE BDE TL SEES THE BDE SIDE AS AN ADMIN DOES (founder 2026-11-03: "super admin ki bde relate em kanipisthundho, avi mottham bde tl ki kanipinchali"): the BDE-wise
+// performance and the client promises (SLA) too, and every report filters by BDE. Recruiter / TL filters stay cut.
+const BDE_TL_REPORTS = [...BDE_REPORTS, 'recruiters', 'sla'];
+const bdeTlOf = (user) => require('../utils/scope').isBdeTl(user); // eslint-disable-line global-require
 router.param('report', (req, res, next, id) => {
   if (!isBdeTeam(req.user)) return next();
+  if (bdeTlOf(req.user)) {
+    if (!BDE_TL_REPORTS.includes(id)) return res.status(403).json({ error: 'This report is not part of the BDE view.' });
+    BDE_PEOPLE_FILTERS.filter((k) => k !== 'bde').forEach((k) => { delete req.query[k]; });
+    return next();
+  }
   if (!BDE_REPORTS.includes(id)) return res.status(403).json({ error: 'This report is not part of the BDE view. Your reports are client-wise: Clients, Requirements, Interviews, Joining and the Funnel.' });
   BDE_PEOPLE_FILTERS.forEach((k) => { delete req.query[k]; });
   return next();
