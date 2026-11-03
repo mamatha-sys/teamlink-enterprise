@@ -113,8 +113,8 @@ const PH = {
     thatsFine: "That's fine.",
     langSwitched: "Sure, let's continue in English.",
     // SPOKEN LIKE A PERSON (founder 2026-10-30: "oka person laaga matladali"): a short acknowledgement of what they said
-    ackName: "Okay, thank you.",
-    ackTime: "Thanks.",
+    ackName: "Great.",
+    ackTime: "",
     ackInterest: "Good.",
     ackExp: "Okay, {yrs}.",
     ackFresher: "Okay, a fresher.",
@@ -228,8 +228,8 @@ const PH = {
     thatsFine: "कोई बात नहीं।",
     langSwitched: 'ठीक है, हिंदी में बात करते हैं।',
     // SPOKEN LIKE A PERSON (founder 2026-10-30: "oka person laaga matladali"): a short acknowledgement of what they said
-    ackName: "ओके, थैंक्यू।",
-    ackTime: "थैंक्यू।",
+    ackName: "जी, अच्छा।",
+    ackTime: "",
     ackInterest: "बढ़िया।",
     ackExp: "ओके, {yrs}।",
     ackFresher: "अच्छा, आप फ्रेशर हैं।",
@@ -343,8 +343,8 @@ const PH = {
     thatsFine: "పర్లేదు.",
     langSwitched: 'సరే, తెలుగులో మాట్లాడుకుందాం.',
     // SPOKEN LIKE A PERSON (founder 2026-10-30: "oka person laaga matladali"): a short acknowledgement of what they said
-    ackName: "ఓకే, థాంక్స్.",
-    ackTime: "థాంక్స్.",
+    ackName: "మంచిది.",
+    ackTime: "",
     ackInterest: "మంచిది.",
     ackExp: "ఓకే, {yrs}.",
     ackFresher: "ఓకే, ఫ్రెషర్ అన్నమాట.",
@@ -442,11 +442,11 @@ const VARIANTS = {
       "Sorry, I couldn't hear you properly."
     ],
     "ackName": [
-      "Thanks for picking up."
+      "Great.",
+      "Nice."
     ],
     "ackTime": [
-      "Okay, thank you.",
-      "Thanks a lot."
+      ""
     ],
     "ackInterest": [
       "Great.",
@@ -516,11 +516,11 @@ const VARIANTS = {
       "సారీ, మీ మాట క్లియర్‌గా వినపడలేదు."
     ],
     "ackName": [
-      "కాల్ లిఫ్ట్ చేసినందుకు థాంక్స్."
+      "మంచిది.",
+      "గుడ్."
     ],
     "ackTime": [
-      "సరే, థాంక్స్.",
-      "థాంక్స్."
+      ""
     ],
     "ackInterest": [
       "సూపర్.",
@@ -590,11 +590,11 @@ const VARIANTS = {
       "सॉरी, आपकी आवाज़ साफ़ नहीं आई।"
     ],
     "ackName": [
-      "कॉल उठाने के लिए थैंक्यू।"
+      "जी, अच्छा।",
+      "अच्छा जी।"
     ],
     "ackTime": [
-      "ठीक है, थैंक्यू।",
-      "थैंक्यू जी।"
+      ""
     ],
     "ackInterest": [
       "अच्छा है।",

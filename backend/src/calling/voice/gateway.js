@@ -327,6 +327,7 @@ function handle(sock, engines, opts = {}) {
   let row = null; let d = null; let ended = false; let saved = false; let busy = false; let pending = null; let gen = 0;
   let lastVoice = Date.now(); let quietTimer = null;
   let spoken = null; // the Telugu / Hindi this person has spoken in this call
+  let lastFillTurn = 0; // the turn the last "okay" filler was said on
   // the talk so far, after every turn (a dropped line or a restart keeps it); never blocks or breaks the call
   const keepTurns = () => (row && d ? require('../outcomes').saveTurns(row.id, d.transcript()).catch(() => false) : Promise.resolve(false)); // eslint-disable-line global-require
   // the result is saved exactly once: at the assistant's own goodbye, or when the line drops (even during that goodbye)
@@ -400,11 +401,13 @@ function handle(sock, engines, opts = {}) {
         fillT = setTimeout(async () => {
           const sp = await speechP.catch(() => null);
           if (over || ended || !d || sock.destroyed || speaker.busy || speaker.timer) return;
+          // not every turn (2026-11-03: "okay ... prathi sari"): at most once in three answers
+          if (lastFillTurn && d.st.turns - lastFillTurn < 3) return;
           if (sp && Number.isFinite(sp.speechMs) && sp.speechMs < NOISE_MS) return;
           const key = `${d.language}|${FILLERS[d.language] || FILLERS[cur]}`;
           const pcmF = cache.get(key) || diskGet(engines, key);
           if (!pcmF || !pcmF.length) return;
-          speaker.add(pcmF); speaker.add(E.silence(GAP_MS));
+          speaker.add(pcmF); speaker.add(E.silence(GAP_MS)); lastFillTurn = d.st.turns || 1;
           if (DEBUG && row) debug(`${row.id} filler after ${Date.now() - t0} ms`);
         }, FILLER_MS);
       }
@@ -540,7 +543,8 @@ function handle(sock, engines, opts = {}) {
     } catch (e) {
       // the brain / an engine / the database failed on this answer: say a safe line and wait for the next one
       log('turn failed:', e.message);
-      if (!ended && d && !sock.destroyed) await say(d.P.notClear).catch(() => {});
+      // (not "sorry, I couldn't hear you" - they were heard; the fault is ours. 2026-11-03: "sorry ... every time")
+      if (!ended && d && !sock.destroyed) { let q = ''; try { q = d.again(''); } catch { q = ''; } if (q) await say(q).catch(() => {}); }
     } finally {
       over = true; if (fillT) clearTimeout(fillT);
       busy = false;

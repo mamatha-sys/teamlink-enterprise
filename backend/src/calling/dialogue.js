@@ -143,6 +143,9 @@ const LANG_NAMES = [
   ['Hindi', /\bhindi\b|हिंदी|हिन्दी|హిందీ/i],
   ['English', /\benglish\b|इंग्लिश|अंग्रेज़?ी|ఇంగ్లీష్|ఇంగ్లిష్|ఆంగ్ల/i],
 ];
+// "I'm interested" in any of the three languages (an interest said at "shall I tell you about it?")
+const SAYS_INTEREST = /interest|ఇంట్రెస్ట్|ఆసక్తి|इंटरेस्ट|इंट्रेस्ट|रुचि|दिलचस्पी/i;
+
 function detectLanguage(textIn) {
   const raw = String(textIn == null ? '' : textIn).normalize('NFKC');
   const t = norm(raw);
@@ -437,7 +440,7 @@ class Dialogue {
 
   speak(...parts) {
     if (this.prefix) { parts.unshift(this.prefix); this.prefix = ''; } // e.g. the brain's short lead-in, once, before the next sentence
-    const text = this.oneSorry(this.guard(parts.filter(Boolean).join(' ')));
+    const text = this.oneOkay(this.oneSorry(this.guard(parts.filter(Boolean).join(' '))));
     this.st.transcript.push({ who: 'assistant', text: text.slice(0, 600) });
     this.st.lastAsk = text;
     return text;
@@ -452,6 +455,12 @@ class Dialogue {
     }
     const out = text.replace(OPEN, (m, lead) => lead).replace(/(^|[.!?]\s+)([a-z])/g, (m, lead, ch) => lead + ch.toUpperCase()).trim();
     return out || text;
+  }
+  // one "Okay" per reply ("ఓకే, 30 రోజుల నోటీస్. ఓకే, ముందుకు వెళ్దామా?" -> the second "ఓకే," is left out)
+  oneOkay(text) {
+    let seen = false;
+    const out = text.replace(/(^|[.!?।]\s+)(?:okay|ok|ఓకే|సరే|ओके|ठीक है)\s*[,.!।]\s*/gi, (m, lead) => { if (!seen) { seen = true; return m; } return lead; });
+    return out.replace(/(^|[.!?]\s+)([a-z])/g, (m, lead, ch) => lead + ch.toUpperCase()).trim() || text;
   }
   finish(say, why) {
     this.st.done = true; this.st.ended = why;
@@ -517,15 +526,25 @@ class Dialogue {
     if (meta.lang) turn.lang = meta.lang;
     if (meta.conf) turn.conf = meta.conf;
     this.st.transcript.push(turn);
-    if (this.st.turns > this.maxTurns) return this.close(this.fallback(), 'too many turns');
     const st = this.st;
+    if (st.turns > this.maxTurns) return this.close(this.fallback(), 'too many turns');
     // 0. not heard reliably: never guessed, never a language switch - asked again (2 tries, then a polite end)
+    // ...except a QUESTION (founder 2026-11-03: "teluvanidhi adigithey naaku vinipistaledhu ledha tarvata call chestha antundhi"):
+    // it is kept for the recruiter and answered "our team will tell you", then the same question again
+    if (heardAs === 'unclear' && st.step !== 'identity' && A.looksQuestion(text) && String(text).trim().split(/\s+/).length >= 2) {
+      turn.understood = 'question'; turn.answered = 'to confirm';
+      const q = S.clean(text, 200); if (q && st.pending.length < 5 && !st.pending.includes(q)) st.pending.push(q);
+      return this.answered(this.P.noInfo);
+    }
     if (heardAs === 'unclear') { turn.understood = 'not_clear'; return this.unheard(); }
     // 1. the person's language: from this sentence on, every answer is in it
     const lg = this.autoLanguage ? detectLanguage(text) : null;
     // A LANGUAGE SWITCH IS NOT ANNOUNCED (founder 2026-10-30: "sare telugu lo matladkundham ani cheppakunda, direct
     // conversation"): the next sentence is simply in their language, like a person who speaks both would do.
-    const shortEnglish = lg && lg.lang === 'English' && this.language !== 'English' && !lg.only && String(text).trim().split(/\s+/).length < 4;
+    // (2026-11-03 "tone kuda okate maintain cheyali": once they spoke Telugu / Hindi, only a real English sentence - 6+ words -
+    // turns the call, and its voice, back to English; every switch changes the voice)
+    if (lg && lg.lang !== 'English' && !lg.only) st.spokeNative = true;
+    const shortEnglish = lg && lg.lang === 'English' && this.language !== 'English' && !lg.only && String(text).trim().split(/\s+/).length < (st.spokeNative ? 6 : 4);
     if (lg && lg.lang !== this.language && !shortEnglish) this.setLanguage(lg.lang);
     if (lg && lg.only) { turn.understood = 'language'; this.prefix = ''; return { say: this.again(''), done: false }; }
     // 1b. THE BRAIN (brain.js): what they meant in the context of the last question, the facts in it, and a short natural
@@ -536,7 +555,7 @@ class Dialogue {
       if (b) {
         turn.brain = { intent: b.intent, ms: b.ms };
         // a switch the word check missed (a Teluglish / Hinglish sentence): the brain read the language from the words
-        if (this.autoLanguage && b.language && b.language !== this.language && !lg && text.trim().split(/\s+/).length >= 3) {
+        if (this.autoLanguage && b.language && b.language !== this.language && !lg && text.trim().split(/\s+/).length >= (b.language === 'English' && st.spokeNative ? 6 : 3)) {
           this.setLanguage(b.language);
         }
       }
@@ -616,7 +635,7 @@ class Dialogue {
     if (b && b.intent === 'question' && st.step !== 'why_not') {
       if (b.question && !b.answeredFromFacts && st.pending.length < 5 && !st.pending.includes(b.question)) st.pending.push(b.question);
       this.prefix = '';
-      return { say: this.again(b.leadIn || this.P.noInfo), done: false };
+      return this.answered(b.leadIn || this.P.noInfo, !!b.answeredFromFacts);
     }
     // nothing about the job before the person is confirmed (the step cannot be anything else after identity)
     // (at "why not interested?" a salary / location remark IS the reason: it goes to the step)
@@ -638,13 +657,20 @@ class Dialogue {
         turn.answered = qa.unknown ? 'to confirm' : (qa.fromRecruiter ? 'recruiter answer' : 'from the ATS');
         if (qa.unknown && st.pending.length < 5) { const q = S.clean(text, 200); if (q && !st.pending.includes(q)) st.pending.push(q); }
         if (qa.topic === 'eligibility' && st.answers.experienceYears == null) { const y = readYears(text); if (y != null) st.answers.experienceYears = y; }
-        return { say: this.again(qa.say), done: false };
+        return this.answered(qa.say, !qa.unknown);
       }
     }
     return this[`on_${st.step}`](k, text);
   }
 
   fallback() { return this.purpose.startsWith('Interview') ? 'No Response' : 'Unclear'; }
+
+  // After answering their question: the question we were on, again. At "shall I tell you about the job?" a question about it
+  // means yes - so the next thing is "is this job interesting?", not the intro again (2026-11-03: "interest undha 2 times").
+  answered(say, aboutJob = false) {
+    if (aboutJob && this.st.step === 'intro' && S.screenLike(this.purpose)) { this.st.step = 'interest'; this.st.tries = 0; }
+    return { say: this.again(say), done: false };
+  }
 
   // MEMORY ACROSS CALLS (2026-10-30): what the person already told on an earlier call about THIS application is not asked
   // again. Only the plain answers are carried over (years, city, notice period) - never an interest or an outcome.
@@ -860,8 +886,13 @@ class Dialogue {
     return this.retry(k);
   }
 
-  on_intro(k) {
+  on_intro(k, text) {
     const st = this.st;
+    if (k.intent === 'yes' && SAYS_INTEREST.test(String(text || ''))) {
+      st.interest = 'yes'; st.tries = 0;
+      this.prefix = [this.prefix, this.P.ackInterest, this.B.brief].filter(Boolean).join(' ');
+      return this.ask('qExp');
+    }
     if (k.intent === 'yes') { st.step = 'interest'; return { say: this.speak(this.B.brief, this.P.interestQ), done: false }; }
     if (k.intent === 'no') return this.notInterested();
     if (k.intent === 'later') { st.callback = true; st.step = 'later_when'; return { say: this.speak(this.P.laterAsk), done: false }; }
