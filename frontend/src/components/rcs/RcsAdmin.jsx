@@ -216,7 +216,7 @@ function TemplateForm({ edit, onClose, onSaved }) {
         <>
           <div className="cm-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
             <Field label="Title"><input value={f.title} onChange={(e) => set('title', e.target.value)} /></Field>
-            <Field label="Image / video link"><input value={f.media_url} onChange={(e) => set('media_url', e.target.value)} placeholder="https://" /></Field>
+            <Field label="Image / video link" hint="A direct link ending in .jpg, .png or .mp4 (rcssms.in takes nothing else)."><input value={f.media_url} onChange={(e) => set('media_url', e.target.value)} placeholder="https://…/picture.jpg" /></Field>
             <Field label="Image height"><Combo value={f.mediaheight} onChange={(e) => set('mediaheight', e.target.value)}><option>Low</option><option>Medium</option><option>High</option></Combo></Field>
             <Field label="Card layout"><Combo value={f.cardorientation} onChange={(e) => set('cardorientation', e.target.value)}><option>Vertical</option><option>Horizontal</option></Combo></Field>
           </div>

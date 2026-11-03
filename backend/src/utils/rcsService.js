@@ -27,6 +27,8 @@ const crypto = require('crypto');
 const core = require('./messagingCore');
 
 const TYPES = ['BASIC', 'RICH', 'RICHCASOUREL']; // the provider's own spelling of carousel
+const MEDIA_FILE = /\.(jpg|png|mp4)$/i;
+const MEDIA_FILE_TEXT = 'The image / video link must be a direct link to a .jpg, .png or .mp4 file (it must end in .jpg, .png or .mp4: not a web page, Google Drive or WhatsApp link). rcssms.in takes nothing else.';
 const MAX_PER_REQUEST = 500;
 const TOKEN_TTL_MS = 24 * 3600 * 1000;
 const PRIVATE_NAME = /^(localhost|.*\.(local|internal|lan|home|corp|intranet|localdomain))$/i;
@@ -379,6 +381,8 @@ function templateFields(type, p) {
   if (t === 'RICH') {
     const mediaUrl = String(p.media_url || p.mediaUrl || '').trim();
     if (!httpsUrl(mediaUrl)) return { error: 'A rich card needs an image / video link that starts with https://' };
+    // rcssms.in takes only a direct .jpg / .png / .mp4 file (3 Nov, live: 022 "only jpg,png,mp4 file allowed")
+    if (!MEDIA_FILE.test(mediaUrl.split(/[?#]/)[0])) return { error: MEDIA_FILE_TEXT };
     const mediaheight = HEIGHTS.find((h) => h.toLowerCase() === String(p.mediaheight || 'Medium').toLowerCase());
     const cardorientation = ORIENT.find((h) => h.toLowerCase() === String(p.cardorientation || 'Vertical').toLowerCase());
     if (!mediaheight) return { error: 'Image height is Low, Medium or High.' };
@@ -432,7 +436,12 @@ async function createTemplate(type, payload) {
   const templateid = d && (d.templateid || d.templateId || d.template_id) ? String(d.templateid || d.templateId || d.template_id).trim() : null;
   if (!templateid) {
     const r = parseReply(res.json, res.text);
-    return { ok: false, errorCode: r.errorCode || null, error: r.errorCode ? friendly(r.errorCode) : `rcssms.in did not give a template id (HTTP ${res.status}: ${scrub(res.json ? JSON.stringify(res.json) : res.text).replace(/\s+/g, ' ').slice(0, 200)}).` };
+    // rcssms.in sends 022 for more than a wrong login (3 Nov, live: 022 "only jpg,png,mp4 file allowed"): its own words decide
+    const desc = r.errorDesc ? scrub(String(r.errorDesc)).replace(/\s+/g, ' ').trim().slice(0, 160) : '';
+    if (r.errorCode === '22' && desc && !/user|pass|login|token|secret/i.test(desc)) {
+      return { ok: false, errorCode: '22', error: /jpg|jpeg|png|mp4|file|media|image|video/i.test(desc) ? `rcssms.in refused the image / video link ("${desc}"). ${MEDIA_FILE_TEXT}` : `rcssms.in refused the template: "${desc}".` };
+    }
+    return { ok: false, errorCode: r.errorCode || null, error: r.errorCode ? `${friendly(r.errorCode)}${desc ? ` rcssms.in said: "${desc}".` : ''}` : `rcssms.in did not give a template id (HTTP ${res.status}: ${scrub(res.json ? JSON.stringify(res.json) : res.text).replace(/\s+/g, ' ').slice(0, 200)}).` };
   }
   const st = String((d && d.status) || (j && j.status) || 'PENDING').toUpperCase();
   return { ok: true, templateid, status: ['APPROVED', 'REJECTED'].includes(st) ? st : 'PENDING', fields: f.fields };
