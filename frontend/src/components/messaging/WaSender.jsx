@@ -41,10 +41,15 @@ export function WaSenderView({ state, chosen, onChange, planned }) {
     const n = planned && planned.label ? planned : state.usable[0];
     return <div className="cm-line cm-green" data-wa-sender="one">Sending from <b>{n.label}</b> ({fmtNumber(n.displayNumber)})</div>;
   }
+  // THE LIST SHOWS THE NUMBER REALLY USED (founder 2026-11-03: the list said "Main number" while the message went from the number
+  // picked for this chat, 7979, so choosing Main number changed nothing). Untouched = the server's pick for this chat when it is one of
+  // the person's numbers; choosing another one sends that one.
+  const plannedId = planned && planned.id && state.usable.some((u) => u.id === planned.id) ? planned.id : null;
+  const shown = chosen || plannedId || state.selected;
   return (
     <div className="cm-line cm-green wa-sender-pick" data-wa-sender="many">
       <label htmlFor="wa-sender-pick" style={{ fontSize: 12.5, fontWeight: 600, display: 'block', marginBottom: 3 }}>Sending from</label>
-      <Combo id="wa-sender-pick" value={chosen || state.selected} onChange={(e) => onChange(e.target.value)} emptyText="No such number">
+      <Combo id="wa-sender-pick" value={shown} onChange={(e) => onChange(e.target.value)} emptyText="No such number">
         {state.usable.map((n) => <option key={n.id} value={n.id}>{n.label} ({fmtNumber(n.displayNumber)})</option>)}
       </Combo>
       {planned && planned.label && !chosen && <div className="cm-sub">Picked for this chat: {planned.label} ({fmtNumber(planned.displayNumber)}). Choose another number from your list if you want.</div>}
