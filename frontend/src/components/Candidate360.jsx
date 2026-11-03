@@ -213,8 +213,8 @@ export const PIPELINE_STEPS = [
 ];
 export const INTERNAL_PIPELINE_STEPS = [
   SCREENING_STEP,
-  { id: 'recruiter_review', label: 'Check by HR', stages: ['RECRUITER_REVIEW', 'RECRUITER_APPROVED'] },
-  { id: 'tl_review', label: 'Dept head / team lead', stages: ['TL_REVIEW'] },
+  // HR does it all, start to end - no team lead / dept head step (founder 2026-11-03: "tls dhi evaridhi em vundadhu ... hr ey chustharu")
+  { id: 'recruiter_review', label: 'Check by HR', stages: ['RECRUITER_REVIEW', 'RECRUITER_APPROVED', 'TL_REVIEW'] },
   { id: 'interview', label: 'Interview', stages: ['INTERVIEW_SCHEDULED'], groups: ['interview'] },
   { id: 'feedback', label: 'Feedback', stages: ['INTERVIEW_COMPLETED'], groups: ['interview'] },
   { id: 'selected', label: 'Selected', stages: ['SELECTED'] },
