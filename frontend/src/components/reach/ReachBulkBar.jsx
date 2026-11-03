@@ -13,9 +13,10 @@ import './reach.css';
 // Every button has an icon and a word. It sticks to the top while the list scrolls (bottom on a phone),
 // and the groups stack on a narrow screen.
 //   manage / also : [{ key, label, icon, onClick, danger }]
+//   aiCall        : { onClick, count } - "AI call" beside Call / WhatsApp (founder 2026-11-03: bulk AI calls from this page)
 // ---------------------------------------------------------------------------
 export default function ReachBulkBar({
-  selected, people, items, selectAll = null, onCancel, onDone, manage = [], also = [], note = null, children = null,
+  selected, people, items, selectAll = null, onCancel, onDone, manage = [], also = [], note = null, children = null, aiCall = null,
 }) {
   const rights = useReachRights();
   const btn = (b) => (
@@ -33,10 +34,17 @@ export default function ReachBulkBar({
         <button type="button" className="btn btn-sm rch-b-cancel" onClick={onCancel}>Cancel</button>
       </div>
       <div className="rch-groups">
-        {rights.loaded && rights.one && (
+        {((rights.loaded && rights.one) || aiCall) && (
           <div className="rch-group is-contact">
             <div className="rch-cap">Contact them</div>
-            <ReachButtons items={items} onDone={onDone} />
+            <div className="rch-btns">
+              {rights.loaded && rights.one && <ReachButtons items={items} onDone={onDone} />}
+              {aiCall && (
+                <button type="button" className="btn btn-sm rch-m" onClick={aiCall.onClick} title="The AI assistant phones them from TeamLink's line, a few at a time, and records each answer">
+                  <span aria-hidden="true">🤖</span> {`AI call${aiCall.count > 1 ? ` (${aiCall.count})` : ''}`}
+                </button>
+              )}
+            </div>
           </div>
         )}
         {manage.length > 0 && (

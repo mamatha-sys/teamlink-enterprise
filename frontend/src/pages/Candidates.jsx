@@ -19,6 +19,7 @@ import {
 } from '../atsVocab';
 import { STAGE_GROUPS } from '../pipelineView';
 import { useAuth } from '../context/AuthContext.jsx';
+import AiCallDialog from '../components/aicalling/AiCallDialog.jsx'; // bulk AI calls from this list (2026-11-03)
 import {
   can, canModule, canMoveToStage, workflowStages, productRole, canSeePortalApplications,
 } from '../permissions';
@@ -833,6 +834,12 @@ export default function Candidates() {
     requirementTitle: card.requirementTitle, clientName: card.clientName, stageLabel: card.stageLabel,
   });
   const selectedItems = [...selected.values()];
+  // BULK AI CALLS RIGHT HERE (founder 2026-11-03: "naaku ee page lo ney vundali. bulk lo kuda send cheyyadaniki"): the ticked
+  // applications go to the same AI call window as the AI Calling tab (purpose, preview, "Call N candidates with AI (phone)").
+  const selectedAppIds = [...new Set(selectedItems.map((i) => i && (i.latestApplicationId || i.rowId || i.applicationId)).filter(Boolean))];
+  const [aiCallIds, setAiCallIds] = useState(null);
+  const [aiCallOn, setAiCallOn] = useState(false);
+  useEffect(() => { api.get('/ai-calling/status').then(() => setAiCallOn(true)).catch(() => setAiCallOn(false)); }, []);
   const selectedCandidateIds = [...new Set(selectedItems.map((x) => x.id))];
 
   // What this login may do in bulk — hidden, not disabled.
@@ -2174,6 +2181,7 @@ export default function Candidates() {
               selectAll={fresh && selected.size < fresh.total ? { label: `Select all ${fresh.total.toLocaleString('en-IN')}`, onClick: selectAllMatching } : null}
               onCancel={clearSelection}
               onDone={() => { clearSelection(); reload(); }}
+              aiCall={aiCallOn && selectedAppIds.length ? { count: selectedAppIds.length, onClick: () => setAiCallIds(selectedAppIds) } : null}
               manage={[
                 may.assign && { key: 'assign', icon: '👤', label: 'Assign recruiter', onClick: () => setBulkKind('assign') },
                 may.stage && { key: 'stage', icon: '➡️', label: 'Move step', onClick: () => setBulkKind('stage') },
@@ -2191,6 +2199,7 @@ export default function Candidates() {
             />
           )}
 
+          {aiCallIds && <AiCallDialog applicationIds={aiCallIds} onClose={() => setAiCallIds(null)} onDone={() => { reload(); }} />}
           {!onBoard && loadError && <div className="error-text">{loadError}</div>}
           {!onBoard && (
           <>
