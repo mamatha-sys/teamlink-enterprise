@@ -12,6 +12,9 @@
 #      no calls = rcssms.in never sends us delivery reports or template verdicts, so "Sent" can never become "Delivered".
 #   5-7. (3 Nov) the same for Omni-Channel (Green Start, its own database): its RCS templates with their TYPE (basic / rich /
 #      plain = never on rcssms.in), its RCS messages (Communication "Send now") and its last RCS actions and errors.
+#   5. each Omni-Channel workspace's rcssms.in connection: same username / password / bot id as TeamLink's working login? (yes/no only)
+#   5b. each workspace's RCS templates (is "tpm" in every workspace?)
+#   8. TeamLink's login on the rcssms.in TEMPLATE API, with a request that cannot make a template (no message, no credit).
 #   Every list is newest first and short: paste the WHOLE output.
 # ---------------------------------------------------------------------------
 $ErrorActionPreference = 'Stop'
@@ -63,10 +66,31 @@ const mask = (s) => String(s == null ? "" : s).replace(/\d{6,}/g, "...").replace
 (async () => {
   if (!m) { console.log("== 5-7. Omni-Channel: DATABASE_URL not found in gs-api/.env"); return; }
   const c = new Client({ connectionString: m[1] }); await c.connect();
-  console.log("== 5. Omni-Channel: last 6 RCS templates (newest first)");
-  for (const r of (await c.query(`select t.name, t.provider, t.status, t."providerTemplateId" as pid, t.meta->'rcsCarrier'->'shape'->>'kind' as kind, t.meta->'rcsCarrierDraft'->'failure'->>'message' as fail, w.name as ws, t."updatedAt" as at
-      from templates t join workspaces w on w.id = t."workspaceId" where t.channel = 'rcs' order by t."updatedAt" desc limit 6`)).rows) {
-    console.log(`  ${r.name} | ${r.ws} | ${r.provider} | ${r.status} | SMSTAKE id ${r.pid || "-"} | type ${r.kind || "plain (not on rcssms.in)"} | changed ${t(r.at)}${r.fail ? " | not submitted: " + mask(r.fail).slice(0, 120) : ""}`);
+  // TeamLink's working rcssms.in login, compared (yes / no only) with what each workspace holds. Values are never printed.
+  const tlEnv = require("/opt/teamlink-enterprise/backend/node_modules/dotenv").parse(fs.readFileSync("/opt/teamlink-enterprise/backend/.env", "utf8"));
+  const gsKey = (/^ENCRYPTION_KEY="?([^"\s]+)"?/m.exec(fs.readFileSync(".env", "utf8")) || [])[1];
+  let decrypt = null;
+  for (const p of ["./dist/common/lib/crypto.util.js", "./dist/src/common/lib/crypto.util.js"]) { try { decrypt = require(p).decryptSecret; break; } catch { /* next */ } }
+  const tlMode = String(tlEnv.RCS_AUTH_MODE || "password").trim().toLowerCase() === "token" ? "api_key" : "login";
+  const tlSecret = tlMode === "api_key" ? tlEnv.RCS_CLIENT_SECRET : tlEnv.RCS_PASSWORD;
+  const yn = (b) => (b ? "yes" : "NO");
+  console.log(`== 5. Omni-Channel: the rcssms.in connection of each workspace, compared with TeamLink's working login (TeamLink uses ${tlMode})`);
+  const wsAll = (await c.query(`select id, name from workspaces order by "createdAt"`)).rows;
+  for (const w of wsAll) {
+    const rows = (await c.query(`select provider, status, "displayName" as dn, metadata, "accessTokenEnc" as enc, "lastError" as err, "updatedAt" as at from integrations where "workspaceId" = $1 and provider in ('smstake_rcs', 'rcssms_in', 'google_rbm')`, [w.id])).rows;
+    if (!rows.length) { console.log(`  ${w.name}: NO RCS connection`); continue; }
+    for (const r of rows) {
+      const md = r.metadata || {};
+      let same = "?";
+      if (r.enc && decrypt && gsKey) { try { same = yn(decrypt(r.enc, gsKey) === tlSecret); } catch { same = "cannot read"; } }
+      console.log(`  ${w.name}: ${r.provider} | ${r.status} | ${r.dn || "-"} | login mode ${md.authMode || "-"} | same username ${yn(md.username === tlEnv.RCS_USERNAME)} | same password/secret ${same} | same bot id ${yn(String(md.rcsId || "") === String(tlEnv.RCS_ID || ""))} | changed ${t(r.at)}${r.err ? " | last error " + mask(r.err).slice(0, 120) : ""}`);
+    }
+  }
+  console.log("== 5b. Omni-Channel: the RCS templates of each workspace");
+  for (const w of wsAll) {
+    const rows = (await c.query(`select t.name, t.status, t."providerTemplateId" as pid, t.meta->'rcsCarrier'->'shape'->>'kind' as kind, t.meta->'rcsCarrierDraft'->'failure'->>'message' as fail
+        from templates t where t."workspaceId" = $1 and t.channel = 'rcs' order by t."updatedAt" desc limit 12`, [w.id])).rows;
+    console.log(`  ${w.name}: ${rows.length ? rows.map((r) => `${r.name} (${r.status}, ${r.pid ? "SMSTAKE id " + r.pid : "no SMSTAKE id"}, ${r.kind || "plain"}${r.fail ? ", not submitted" : ""})`).join("; ") : "none"}`);
   }
   console.log("== 6. Omni-Channel: last 6 RCS messages (newest first)");
   for (const r of (await c.query(`select m."createdAt" as at, w.name as ws, m.provider, m.status, m."providerMessageId" is not null as mid, m."errorReason" as err, m.content->>'to' as to, t.name as tpl, t.meta->'rcsCarrier'->'shape'->>'kind' as kind, t."providerTemplateId" as pid
@@ -79,6 +103,21 @@ const mask = (s) => String(s == null ? "" : s).replace(/\d{6,}/g, "...").replace
     console.log(`  ${t(r.at)} | ${r.action} | ${r.success ? "ok" : "FAILED"} | ${mask(r.summary).slice(0, 180)}`);
   }
   await c.end();
+  console.log("== 8. TeamLink's login on the rcssms.in TEMPLATE API (type ZZCHECK, no text: no template can be made, nothing is sent)");
+  try {
+    const base = String(tlEnv.RCS_BASE_URL || "https://web.rcssms.in").replace(/\/+$/, "");
+    const body = { username: tlEnv.RCS_USERNAME, password: tlEnv.RCS_PASSWORD, rcstype: "ZZCHECK", rcsid: tlEnv.RCS_ID, cname: "zz_login_check", description: "" };
+    const r = await fetch(`${base}/rcsapi/rcscreatetemplate.jsp`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(20000) });
+    let txt = await r.text();
+    for (const s of [tlEnv.RCS_PASSWORD, tlEnv.RCS_USERNAME]) if (s && s.length >= 3) txt = txt.split(s).join("***");
+    console.log(`  rcssms.in answered: HTTP ${r.status} ${mask(txt).slice(0, 200)}`);
+    const code = (/ErrorCode"?\s*:\s*"?0*(\d+)/i.exec(txt) || [])[1];
+    if (/templateid/i.test(txt)) console.log("  => it MADE a template (zz_login_check): delete it in the rcssms.in panel. The login works on the template API.");
+    else if (code === "22") console.log("  => the TEMPLATE API refuses this login (sending accepts it): ask rcssms.in to switch on template creation by API for this account.");
+    else if (code === "21") console.log("  => the TEMPLATE API does not know this username: ask rcssms.in.");
+    else if (code === "10" && !(tlEnv.RCS_USERNAME && tlEnv.RCS_PASSWORD && tlEnv.RCS_ID)) console.log("  => TeamLink's RCS login is not complete in backend/.env (username, password or RCS id missing).");
+    else console.log(`  => the login is accepted on the template API (error ${code || "none"} is about the deliberately wrong request, not the login).`);
+  } catch (e) { console.log("  could not reach rcssms.in: " + mask(e.message).slice(0, 150)); }
 })().catch((e) => console.log("  could not read the Omni-Channel database: " + mask(e.message).slice(0, 200)));
 EOF_GS
 fi
