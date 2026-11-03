@@ -207,14 +207,14 @@ function Card({ card, job, can, user, engineData, onChanged, flash }) {
           {posting && posting.state.key !== 'TAKEN_DOWN' && (
             <div className="dx-link">
               {posting.postUrl && <a href={posting.postUrl} target="_blank" rel="noopener noreferrer">See your post</a>}
-              <span>{`Marked ${fmtDateTime(posting.postedAt)}${posting.expiresAt ? ` · expires ${fmtDate(posting.expiresAt)}` : ''}`}</span>
+              <span>{`${posting.postedByName === 'TeamLink (seen live)' ? 'Seen live' : 'Marked'} ${fmtDateTime(posting.postedAt)}${posting.expiresAt ? ` · expires ${fmtDate(posting.expiresAt)}` : ''}`}</span>
               {posting.notes && <span>{`· ${posting.notes}`}</span>}
             </div>
           )}
           {can.post && !mark && (
             <div className="dx-acts">
-              {(!posting || posting.state.key === 'TAKEN_DOWN') && <button type="button" className="btn btn-primary" onClick={() => setMark(true)}>Mark as posted</button>}
-              {posting && posting.state.key !== 'TAKEN_DOWN' && <button type="button" className="btn btn-sm" onClick={() => setMark(true)}>{['EXPIRED', 'EXPIRING'].includes(posting.state.key) ? 'I posted it again' : 'Change'}</button>}
+              {/* no "Mark as posted" (founder 2026-11-03: nobody marks it by hand): the first person from this link marks it Live (jobDist/signals.js) */}
+              {(!posting || posting.state.key === 'TAKEN_DOWN') && <span className="dx-hint">{`Post it with the text above. It shows Posted by itself when the first person comes from ${card.name} through the TeamLink link.`}</span>}
               {posting && posting.state.key !== 'TAKEN_DOWN' && <button type="button" className="btn btn-sm" disabled={!!busy} onClick={() => { if (window.confirm(`Is it really removed from ${card.name}?`)) dxRun('down', () => dx.post(`/jobs/${job.id}/platforms/${card.key}/taken-down`), `Saved. Taken down from ${card.name}.`); }}>I took it down</button>}
               {posting && <button type="button" className="btn btn-sm btn-ghost" disabled={!!busy} onClick={() => { if (window.confirm('Remove this mark? The place goes back to Not posted.')) dxRun('undo', () => dx.del(`/jobs/${job.id}/platforms/${card.key}/posted`), 'Done. Back to Not posted.'); }}>I marked the wrong place</button>}
             </div>

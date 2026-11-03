@@ -150,20 +150,9 @@ export default function PostingStatusPanel({ requirementId, code, title, onClose
                 <div className="pc-steps">
                   <button type="button" className="btn btn-sm btn-primary" disabled={!h} onClick={() => copyJob(s)}>Copy job text</button>
                   <a className="btn btn-sm" href={(h && h.openUrl) || (s.hand && s.hand.openUrl) || '#'} target="_blank" rel="noreferrer">Open {s.name} ↗</a>
-                  <button type="button" className="btn btn-sm" onClick={() => { setLinkFor(linkFor === s.id ? null : s.id); setUrl(''); }}>I posted it</button>
+                  <span className="small-muted">{`Shows Live by itself when the first person comes from ${s.name}.`}</span>
                 </div>
-                {linkFor === s.id && (
-                  <div className="pc-link">
-                    <label htmlFor={`pc-url-${s.id}`}>Paste the link of the live requirement from {s.name} (you can leave it empty)</label>
-                    <input id={`pc-url-${s.id}`} type="url" inputMode="url" placeholder={`https://… (from ${s.name})`} value={url} onChange={(e) => setUrl(e.target.value)} />
-                    <div className="pc-steps">
-                      <button type="button" className="btn btn-sm btn-primary" disabled={busy === `done-${s.id}`} onClick={() => posted(s)}>
-                        {busy === `done-${s.id}` ? 'Saving…' : `Yes, it is live on ${s.name}`}
-                      </button>
-                      <button type="button" className="btn btn-sm btn-ghost" onClick={() => setLinkFor(null)}>Not yet</button>
-                    </div>
-                  </div>
-                )}
+                {/* the old "Yes, it is live" link box is gone: jobDist/signals.js marks it Live (2026-11-03) */}
               </>
             )}
           </div>

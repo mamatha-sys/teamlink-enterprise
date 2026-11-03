@@ -96,15 +96,10 @@ export default function PostWalkthrough({ pairs, onClose, onChanged }) {
                   <button type="button" className="btn btn-primary" onClick={doCopy}>1. Copy job text</button>
                   <a className="btn" href={h.openUrl} target="_blank" rel="noreferrer">2. Open {cur.boardName} ↗</a>
                 </div>
-                <div className="field">
-                  <label htmlFor="pw-url">3. Paste the link of the live requirement (optional), then press the button</label>
-                  <input id="pw-url" type="url" inputMode="url" placeholder={`https://… (from ${cur.boardName})`} value={url} onChange={(e) => setUrl(e.target.value)} />
-                </div>
                 <div className="pw-btns">
-                  <button type="button" className="btn btn-primary" disabled={busy || !h.live} onClick={posted}>{busy ? 'Saving…' : 'I posted it'}</button>
-                  <button type="button" className="btn btn-ghost" disabled={busy} onClick={skip}>Skip for now</button>
+                  <button type="button" className="btn btn-primary" disabled={busy} onClick={skip}>3. Next site</button>
                 </div>
-                <div className="small-muted">Press &ldquo;I posted it&rdquo; only after you really posted it. It then reads &ldquo;Posted (by hand)&rdquo; with your name and the time.</div>
+                <div className="small-muted">{`Paste the text on ${cur.boardName} and post it. ` + 'TeamLink marks it Live by itself when the first person comes from ' + cur.boardName + ' (opens or applies through the TeamLink link in the text) - nobody presses "posted".'}</div>
               </>
             )}
             {note && <div className="jobops-ok" role="status">{note}</div>}

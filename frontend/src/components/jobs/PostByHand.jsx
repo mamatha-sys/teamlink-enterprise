@@ -156,15 +156,8 @@ export default function PostByHand({ requirementId, source, name, onClose, onCha
                       <label key={k} className="pbh-check"><input type="checkbox" checked={!!ticks[k]} onChange={(e) => setTicks((t) => ({ ...t, [k]: e.target.checked }))} /> {label}</label>
                     ))}
                   </div>
-                  <div className="field">
-                    <label htmlFor="pbh-url">Link of the live requirement (optional)</label>
-                    <input id="pbh-url" type="url" inputMode="url" placeholder={`https://… (from ${name})`} value={url} onChange={(e) => setUrl(e.target.value)} />
-                  </div>
-                  <div className="pbh-row">
-                    <button type="button" className="btn btn-primary" disabled={!!busy || !h.live || (!allTicked && !isAdmin)} onClick={posted}>{busy === 'done' ? 'Saving…' : 'I posted it'}</button>
-                    {!allTicked && <span className="small-muted">{isAdmin ? 'Tick all five, or press and confirm.' : 'Tick all five checks first.'}</span>}
-                  </div>
-                  <div className="small-muted">Only press this after you really posted it. It will read &ldquo;Posted by hand by you&rdquo; with the time. People who apply through {name} reach TeamLink by the usual routes (Job Portal mailbox, upload) with Source = {name}.</div>
+                  {/* No "I posted it" (founder 2026-11-03: "memu manual ga posted ani click cheyyakudadhu"): jobDist/signals.js marks it Live */}
+                  <div className="notice blue" role="status">{`Post it on ${name} with the text above - it carries TeamLink's link. ` + 'TeamLink marks it Live by itself when the first person comes from ' + name + ' (opens or applies through the TeamLink link in the text) - nobody presses "posted".'}</div>
                 </>
               )}
             </>

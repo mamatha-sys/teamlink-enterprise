@@ -200,7 +200,8 @@ export default function CareersJob() {
   useEffect(() => {
     let live = true;
     setJob(null); setMissing(false); setError('');
-    api.get(`/public/careers/jobs/${encodeURIComponent(id)}`)
+    // ?src= goes with the read so TeamLink sees the post on that site is live (jobDist/signals.js); the page's address is the "ref"
+    api.get(`/public/careers/jobs/${encodeURIComponent(id)}`, { params: src ? { src, ref: document.referrer || undefined } : undefined })
       .then((r) => {
         if (!live) return;
         // An old /careers/<id> link moves to the readable one (?src= kept).

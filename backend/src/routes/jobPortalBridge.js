@@ -48,6 +48,8 @@ router.get('/go/:idOrSlug', async (req, res) => {
     if (typeof req.query[k] === 'string' && req.query[k].trim()) extra[k] = req.query[k].trim().slice(0, 100);
   });
   const listQs = new URLSearchParams({ ...(src ? { src } : {}), ...extra }).toString();
+  // a person (not a crawler) arriving through a site's tracked link: the post there is live (jobDist/signals.js, 2026-11-03)
+  if (r && (src || extra.utm_source) && !CRAWLER.test(String(req.get('user-agent') || ''))) require('../jobDist/signals').record(r.id, src || extra.utm_source, 'visit', { referrer: req.get('referer') }).catch(() => {}); // eslint-disable-line global-require
   const to = r ? bridge.jobUrl(r.id, src || null, extra) : `${bridge.portalUrl()}/${listQs ? `?${listQs}` : ''}`;
   // GOOGLE FOR JOBS (job distribution 2026-10-14): the portal's job page is a hash-routed page, so a crawler that follows this
   // link would find no job markup. A crawler is therefore shown a small page with the job's JobPosting markup (the same

@@ -802,7 +802,7 @@ async function siteStatuses(r, user = null) {
     if (handRow && isTicked && live) {
       const when = new Date(row.postedAt || row.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
       // posted by TeamLink's own automation and checked live on the site (jobPublish/legacyBridge.js) - not a person's word
-      if (/^Posted by TeamLink automation/.test(row.errorMessage || '')) {
+      if (/^(Posted by TeamLink automation|Seen live by TeamLink)/.test(row.errorMessage || '')) {
         return { ...base, status: STATUS.POSTED, tone: TONE[STATUS.POSTED] || 'green', reason: `Live on ${s.label} since ${when} - posted and checked by TeamLink.`, canRetry: false };
       }
       return { ...base, status: STATUS.HAND_DONE, tone: TONE[STATUS.HAND_DONE], reason: `${row.errorMessage || 'Posted by hand'} on ${when}. TeamLink cannot see whether ${s.label} still shows it.`, canRetry: false };

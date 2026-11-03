@@ -139,13 +139,12 @@ function create(deps = {}) {
         await run('UPDATE "JobPostFlow" SET "status"=?, "lastError"=NULL, "updatedAt"=? WHERE "requirementId"=? AND "platform"=?', L.STATUS.SAVED, Date.now(), job.id, 'shine');
       }
     }
-    // The recruiter's own confirmation is the only thing that records "posted by hand" on the real board row.
+    // NOBODY'S WORD MAKES IT "POSTED" ANY MORE (founder 2026-11-03: "memu manual ga posted ani click cheyyakudadhu ... posted
+    // ani automatic ga raavali"): "Next: Shine" / "Done with Shine" only move this walkthrough on. The board row keeps its
+    // by-hand task open and turns Live by itself when the first person comes from that board's TeamLink link
+    // (jobDist/signals.js). The board is still ticked on the requirement.
     const boardDone = (platform === 'naukri' && event === 'confirm') || (platform === 'shine' && event === 'complete');
-    if (boardDone && from !== to) {
-      const out = await byHand.markDone(job, platform, user, b.url);
-      if (out && out.error) return { error: out.error, status: out.status || 400, ...(await snapshot(job)) };
-      await tick(job, platform);
-    }
+    if (boardDone && from !== to) await tick(job, platform);
 
     const now = Date.now();
     const failing = ['fail', 'action'].includes(event);

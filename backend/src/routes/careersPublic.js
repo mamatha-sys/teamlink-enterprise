@@ -294,6 +294,9 @@ router.get('/jobs/:id', readLimit, async (req, res) => {
     .filter((s) => s.rank > 0).sort((a, b) => b.rank - a.rank).slice(0, 3)
     .map((s) => cardOf(s.x));
   res.set('Cache-Control', 'no-store');
+  // Somebody opened the job from a site's tracked link (?src=<place>): the post there is live (jobDist/signals.js, 2026-11-03).
+  // A signed-in TeamLink login opening its own link does not count.
+  if (req.query.src && !req.headers.authorization) require('../jobDist/signals').record(r.id, String(req.query.src), 'visit', { referrer: req.query.ref || req.get('referer') }).catch(() => {}); // eslint-disable-line global-require
   return res.json({
     ...cardOf(r),
     // B9.5: null = no widget (honeypot + rate limit only); else { provider, siteKey, field }.
@@ -510,6 +513,8 @@ router.post('/jobs/:id/apply', async (req, res) => {
     title: 'New application from the job portal',
     message: `${candidate.name} → ${job.title}`,
   }).catch(() => null);
+  // An application through a site's tracked link proves the post there is live (jobDist/signals.js, 2026-11-03)
+  if (src || fields.utm_source) require('../jobDist/signals').record(job.id, src || fields.utm_source, 'apply').catch(() => {}); // eslint-disable-line global-require
   return res.status(201).json({
     ok: true,
     message: 'Application sent. Our team will call you if your profile fits.',

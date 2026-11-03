@@ -52,6 +52,14 @@ const { prisma, check, RUN } = Z;
     const one = fb.body && ((fb.body.results || fb.body.portals || [])[0] || fb.body);
     check('7 Facebook (an API place) runs at once: the answer comes back finished, not "Queued" (dry run)', fb.status < 300 && one && one.mode !== 'queued' && one.entry && one.entry.status !== 'QUEUED' && Date.now() - t0 < 60000, [fb.status, one && one.mode, one && one.reason, one && one.entry && one.entry.status]);
 
+    // D2. a place that cannot be checked (LinkedIn Jobs): no "I posted it" - the first person through its TeamLink link makes it Live
+    await prisma.requirementPosting.upsert({ where: { requirementId_source: { requirementId: rq.id, source: 'linkedin' } }, create: { requirementId: rq.id, source: 'linkedin', status: 'Integration Required' }, update: { status: 'Integration Required' } });
+    const staffVisit = await fetch(`${Z.API}/api/public/job-portal/go/${rq.id}?src=linkedin`, { redirect: 'manual', headers: { 'User-Agent': 'Mozilla/5.0' } });
+    await new Promise((r) => { setTimeout(r, 800); });
+    const lp = await prisma.requirementPosting.findUnique({ where: { requirementId_source: { requirementId: rq.id, source: 'linkedin' } } });
+    const sig = await prisma.$queryRawUnsafe('SELECT "kind", "count" FROM "PostingSignal" WHERE "requirementId" = ? AND "place" = ?', rq.id, 'linkedin');
+    check('8 someone opens the job from the LinkedIn post\'s TeamLink link: LinkedIn turns Live by itself ("Seen live by TeamLink")', staffVisit.status === 302 && lp.status === 'Posted by hand' && /^Seen live by TeamLink/.test(lp.errorMessage || '') && sig.length === 1, [staffVisit.status, lp && [lp.status, lp.errorMessage], sig]);
+
     // E. responses: shared equally between the recruiters the TL ticks
     const sp = await Z.call('POST', `/api/requirements/${rq.id}/assign`, tk.tl1, { recruiterId: r1.id, recruiterIds: [r2.id], responseSplit: 'even' });
     check('4 the TL chooses "share the responses equally" between two recruiters', sp.status < 300, [sp.status, sp.body && sp.body.error]);
@@ -82,6 +90,7 @@ const { prisma, check, RUN } = Z;
   }
   try {
     await prisma.appSetting.deleteMany({ where: { key: { in: Z.made.reqs.flatMap((id) => [`respsplit.${id}`, `reqreq.${id}`]) } } });
+    for (const id of Z.made.reqs) await prisma.$executeRawUnsafe('DELETE FROM "PostingSignal" WHERE "requirementId" = ?', id).catch(() => {}); // eslint-disable-line no-await-in-loop
     for (const id of Z.made.reqs) await require('../src/utils/reqTeamLeads').setExtras(id, null, []).catch(() => {}); // eslint-disable-line no-await-in-loop, global-require
     await prisma.applicationFollowUp.deleteMany({ where: { applicationId: { in: Z.made.apps } } }).catch(() => {});
     await prisma.notification.deleteMany({ where: { userId: { in: Z.made.users } } });

@@ -48,6 +48,8 @@ const opts = (req) => ({
 const needAdmin = async (req, res) => { if (await access.isCredentialAdmin(req.user)) return true; res.status(403).json({ error: 'Only a Super Admin or an Admin can do this.' }); return false; };
 
 // ---- commands
+// a NEEDS_CHECK post (Naukri's review) turns Live by itself once its listing shows the job (jobPublish/recheck.js, 2026-11-03)
+require('../jobPublish/recheck').start(); // eslint-disable-line global-require
 router.post('/jobs/:id/publish', limit, wrap(async (req, res) => send(res, await svc.publish(req.user, req.params.id, portalsOf(req.body), opts(req)))));
 router.post('/jobs/:id/republish', limit, wrap(async (req, res) => send(res, await svc.republish(req.user, req.params.id, portalsOf(req.body), opts(req)))));
 router.post('/jobs/:id/unpublish', limit, wrap(async (req, res) => send(res, await svc.unpublish(req.user, req.params.id, portalsOf(req.body), opts(req)))));

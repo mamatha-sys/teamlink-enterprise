@@ -206,18 +206,13 @@ export function HandHelp({ jobId, id, name, fallbackText, onChanged }) {
   return (
     <div className="ps-login pw-hand" role="group" aria-label={`Post on ${name} yourself`}>
       <b className="ps-login-t">{`Saved and ready. Post it on ${name} yourself.`}</b>
-      <div className="ps-hint">{`Press Copy text, then Open ${name}, sign in and paste it. Come back and press "I posted it" only after the requirement is really live on ${name}.${id === 'naukri' ? ' If Naukri asks for its "Naukri Launcher" app, install that first.' : ''}`}</div>
+      <div className="ps-hint">{`Press Copy text, then Open ${name}, sign in and paste it. ` + 'TeamLink marks it Live by itself when the first person comes from ' + name + ' (opens or applies through the TeamLink link in the text) - nobody presses "posted".' + (id === 'naukri' ? ' If Naukri asks for its "Naukri Launcher" app, install that first.' : '')}</div>
       <div className="pw-handbtns">
         <button type="button" className="btn btn-primary" disabled={!text} onClick={copy}>Copy text</button>
         <a className="btn" href={(h && h.openUrl) || '#'} target="_blank" rel="noreferrer" aria-disabled={!(h && h.openUrl)}>{`Open ${name}`}</a>
       </div>
       {h && h.fields && h.fields.length > 0 && <FieldByFieldCopy fields={h.fields} siteName={name} />}
-      {!isDone && (
-        <div className="pw-handbtns">
-          <input className="rsp-in pw-url" placeholder={`Link of the live requirement on ${name} (if you have it)`} value={url} onChange={(e) => setUrl(e.target.value)} aria-label={`Link of the live requirement on ${name}`} />
-          <button type="button" className="btn" disabled={busy} onClick={done}>{busy ? 'Saving…' : 'I posted it'}</button>
-        </div>
-      )}
+      {/* no "I posted it" here any more (2026-11-03): jobDist/signals.js marks it Live from the first person who comes */}
       {msg && <div className="ps-info" role="status">{msg}</div>}
       {err && <div className="ps-bad" role="alert">{err}</div>}
     </div>
@@ -389,18 +384,15 @@ export function FlowScreen({
             <>
               <div className="ps-info" role="status">{naukriTabOpen ? 'Naukri is open in another tab.' : 'Naukri was opened in another tab. If you cannot see it, press Open Naukri again.'} Sign in on Naukri, fill the extra fields, check the requirement and submit it there. Come back here when it is done.</div>
               <div className="pw-handbtns">
-                <input className="rsp-in pw-url" placeholder="Link of the live requirement on Naukri (if you have it)" value={url} onChange={(e) => setUrl(e.target.value)} aria-label="Link of the live requirement on Naukri" />
-              </div>
-              <div className="pw-handbtns">
-                <button type="button" className="btn btn-primary" disabled={busy || ask === 'naukri'} onClick={() => setAsk('naukri')}>I posted it on Naukri ✓</button>
+                <button type="button" className="btn btn-primary" disabled={busy || ask === 'naukri'} onClick={() => setAsk('naukri')}>Next: Shine</button>
                 <button type="button" className="btn" disabled={busy} onClick={onOpenNaukri}>Open Naukri again</button>
                 <button type="button" className="btn" disabled={busy} onClick={onNotFinished}>I did not finish</button>
               </div>
-              {ask === 'naukri' && <Sure text="Is it really submitted on Naukri, and do you see it there? Only then it is called Posted here, and Shine opens next." yes="Yes, it is posted on Naukri" no="No, not yet" busy={busy} onYes={() => { setAsk(''); onConfirmNaukri(url.trim()); }} onNo={() => setAsk('')} />}
-              <div className="ps-hint">Press the first button only after the requirement is really submitted on Naukri. Shine does not open before that.</div>
+              {ask === 'naukri' && <Sure text="Did you submit it on Naukri? Shine opens next. Naukri reads Live here by itself when the first person comes from it." yes="Yes, open Shine" no="Not yet" busy={busy} onYes={() => { setAsk(''); onConfirmNaukri(''); }} onNo={() => setAsk('')} />}
+              <div className="ps-hint">Naukri shows Live here by itself when the first person comes from it (the TeamLink link in the text) - nobody presses "posted".</div>
             </>
           )}
-          {naukriConfirmed && <div className="ps-good" role="status">Naukri: posted by hand (you confirmed it).</div>}
+          {naukriConfirmed && <div className="ps-good" role="status">Naukri: done here. It reads Live by itself when the first person comes from Naukri.</div>}
           {naukriConfirmed && !shineDone && onUndo && (ask === 'undo-naukri'
             ? <Sure text="Take Naukri back to Not posted? Use this if you pressed the button by mistake." yes="Yes, undo it" busy={busy} onYes={() => { setAsk(''); onUndo('naukri'); }} onNo={() => setAsk('')} />
             : <button type="button" className="rsp-link" disabled={busy} onClick={() => setAsk('undo-naukri')}>Not posted after all? Undo</button>)}
@@ -420,19 +412,16 @@ export function FlowScreen({
             <>
               <div className="ps-info" role="status">{shineTabOpen ? 'Shine is open in the other tab.' : 'Shine was opened earlier, but its tab is not here now. Press Open Shine again.'} Nothing was sent to Shine. Sign in there, copy the requirement parts from below, and post it yourself.</div>
               <div className="pw-handbtns">
-                <input className="rsp-in pw-url" placeholder="Link of the live requirement on Shine (if you have it)" value={surl} onChange={(e) => setSurl(e.target.value)} aria-label="Link of the live requirement on Shine" />
-              </div>
-              <div className="pw-handbtns">
-                <button type="button" className="btn btn-primary" disabled={busy || ask === 'shine'} onClick={() => setAsk('shine')}>I posted it on Shine ✓</button>
+                <button type="button" className="btn btn-primary" disabled={busy || ask === 'shine'} onClick={() => setAsk('shine')}>Done with Shine</button>
                 <button type="button" className="btn" disabled={busy} onClick={onOpenShine}>Open Shine again</button>
               </div>
-              {ask === 'shine' && <Sure text="Is it really submitted on Shine, and do you see it there? Only then it is called Posted here." yes="Yes, it is posted on Shine" no="No, not yet" busy={busy} onYes={() => { setAsk(''); onShineDone(surl.trim()); }} onNo={() => setAsk('')} />}
+              {ask === 'shine' && <Sure text="Did you submit it on Shine? It reads Live here by itself when the first person comes from Shine." yes="Yes, done" no="Not yet" busy={busy} onYes={() => { setAsk(''); onShineDone(''); }} onNo={() => setAsk('')} />}
             </>
           )}
         </div>
       )}
 
-      {shineDone && <div className="ps-good" role="status">Shine: posted by hand (you confirmed it).</div>}
+      {shineDone && <div className="ps-good" role="status">Shine: done here. It reads Live by itself when the first person comes from Shine.</div>}
       {shineDone && onUndo && (ask === 'undo-shine'
         ? <Sure text="Take Shine back to Not posted? Use this if you pressed the button by mistake." yes="Yes, undo it" busy={busy} onYes={() => { setAsk(''); onUndo('shine'); }} onNo={() => setAsk('')} />
         : <button type="button" className="rsp-link" disabled={busy} onClick={() => setAsk('undo-shine')}>Not posted after all? Undo</button>)}
