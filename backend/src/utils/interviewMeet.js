@@ -176,6 +176,20 @@ const WORDS = {
   updated: { head: 'was updated (see the details below)', subj: 'Interview updated', cancel: false },
 };
 
+// A DESIGNED MAIL, NOT ONLY TEXT (founder 2026-11-03: "malli text format lo ney vellindhi msg"): the TeamLink header, the
+// interview facts in a box, a big "Join interview" button and the plain text kept for mail apps that show text only.
+function interviewHtml({ title, hello, headline, rows, link, linkLabel = 'Join interview', notes = [], hasLogo = false }) {
+  const PR = require('./passwordReset'); // eslint-disable-line global-require
+  const box = rows.length
+    ? `<table cellpadding="0" cellspacing="0" style="width:100%;margin:14px 0;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px">${rows.map(([k, v]) => `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;width:110px;vertical-align:top">${PR.esc(k)}</td><td style="padding:8px 12px;font-size:14px;color:#111827;font-weight:600">${PR.esc(v)}</td></tr>`).join('')}</table>`
+    : '';
+  const join = link
+    ? `${PR.btn(link, linkLabel)}${PR.para(`Button not working? Open this link:<br><a href="${PR.esc(link)}" style="color:#1d4ed8;word-break:break-all;font-size:12px">${PR.esc(link)}</a>`)}`
+    : '';
+  const inner = [PR.para(PR.esc(hello)), PR.para(headline), box, join, ...notes.map((n) => PR.para(PR.esc(n), 'color:#4b5563'))].join('');
+  return PR.shell({ title, inner, hasLogo });
+}
+
 function candidateMail(app, event, ctx) {
   const w = WORDS[event];
   const r = app.requirement || {};
@@ -198,7 +212,24 @@ function candidateMail(app, event, ctx) {
   }
   lines.push('', '— TeamLink');
   const subject = `${w.subj}: ${job} — ${when.date}, ${when.time}`;
-  return { subject: event === 'cancelled' ? `${w.subj}: ${job}` : subject, text: lines.join('\n'), summary: `Interview: ${job}`, description: lines.slice(2, -2).join('\n') };
+  const PR = require('./passwordReset'); // eslint-disable-line global-require
+  const html = (hasLogo) => interviewHtml({
+    title: subject,
+    hello: `Hi ${first},`,
+    headline: event === 'cancelled'
+      ? `Your interview for <b>${PR.esc(job)}</b> at ${PR.esc(company)} is <b>cancelled</b>. Your recruiter will contact you about a new time.`
+      : `Your interview for <b>${PR.esc(job)}</b> at ${PR.esc(company)} ${PR.esc(w.head)}.`,
+    rows: event === 'cancelled' ? [] : [
+      ['Date', when.date], ['Time', when.time], ['Mode', whereWords(app)],
+      ...(event === 'rescheduled' && ctx.fromSlot ? [['Old time', `${istParts(ctx.fromSlot).date}, ${istParts(ctx.fromSlot).time}`]] : []),
+      ...(isOnline(app) && !app.interviewMeetingLink ? [['Meeting link', 'We will send it to you before the interview.']] : []),
+    ],
+    link: event !== 'cancelled' && isOnline(app) ? app.interviewMeetingLink : null,
+    notes: event === 'cancelled' ? ['Questions? Reply to this email and your TeamLink recruiter will answer.']
+      : ['Please join 5 minutes early. If you cannot make it, reply to this email or tell your recruiter as soon as you can.', 'The calendar invite is attached: add it to your calendar.'],
+    hasLogo,
+  });
+  return { subject: event === 'cancelled' ? `${w.subj}: ${job}` : subject, text: lines.join('\n'), html, summary: `Interview: ${job}`, description: lines.slice(2, -2).join('\n') };
 }
 
 function staffMail(app, event, ctx, role) {
@@ -216,7 +247,22 @@ function staffMail(app, event, ctx, role) {
     if (role === 'Interviewer') lines.push('', 'Use "Start interview" on the interview in TeamLink (it opens 15 minutes before) or the Meet link above.');
   } else if (ctx.reason) lines.push(`Reason: ${ctx.reason}`);
   lines.push('', `Questions? Ask ${ctx.askName || 'the client manager (BDE) of this requirement'}.`, '', '— TeamLink');
-  return { subject: `${w.subj}: ${cName} — ${r.title || 'Requirement'}${event === 'cancelled' ? '' : ` — ${when.date}, ${when.time}`}`, text: lines.join('\n'), summary: `Interview: ${cName} — ${r.title || 'Requirement'}`, description: lines.slice(2, -3).join('\n') };
+  const PR = require('./passwordReset'); // eslint-disable-line global-require
+  const html = (hasLogo) => interviewHtml({
+    title: `${w.subj}: ${cName}`,
+    hello: 'Hello,',
+    headline: `The interview of <b>${PR.esc(cName)}</b> for <b>${PR.esc(r.title || 'the requirement')}</b>${company ? ` (${PR.esc(company)})` : ''} ${PR.esc(w.head)}.`,
+    rows: event === 'cancelled' ? (ctx.reason ? [['Reason', ctx.reason]] : []) : [
+      ['Date', when.date], ['Time', when.time], ['Mode', whereWords(app)], ['Round', String(app.interviewRound || 1)],
+      ...(event === 'rescheduled' && ctx.fromSlot ? [['Old time', `${istParts(ctx.fromSlot).date}, ${istParts(ctx.fromSlot).time}`]] : []),
+      ...(ctx.reason ? [['Reason', ctx.reason]] : []),
+    ],
+    link: event !== 'cancelled' && isOnline(app) ? app.interviewMeetingLink : null,
+    linkLabel: 'Join the interview',
+    notes: [role === 'Interviewer' ? 'You can also use "Start interview" on the interview in TeamLink (it opens 15 minutes before).' : '', `Questions? Ask ${ctx.askName || 'the client manager (BDE) of this requirement'}.`].filter(Boolean),
+    hasLogo,
+  });
+  return { subject: `${w.subj}: ${cName} — ${r.title || 'Requirement'}${event === 'cancelled' ? '' : ` — ${when.date}, ${when.time}`}`, text: lines.join('\n'), html, summary: `Interview: ${cName} — ${r.title || 'Requirement'}`, description: lines.slice(2, -3).join('\n') };
 }
 
 // Everyone who should get a mail for this interview: [{ key, role, name, email, kind }]
@@ -329,9 +375,12 @@ async function sendInvites(appId, event, opts = {}) {
           app, method: WORDS[event].cancel ? 'CANCEL' : 'REQUEST', sequence, summary: WORDS[event].cancel ? `Cancelled: ${m.summary}` : m.summary, description: m.description, organizer, attendee: { name: rc.name, email: rc.email },
         });
         // eslint-disable-next-line no-await-in-loop
+        // eslint-disable-next-line no-await-in-loop, global-require
+        const logo = await require('./passwordReset').logoAttachment().catch(() => []);
+        // eslint-disable-next-line no-await-in-loop
         const r = await sendOne({
-          to: rc.email, subject: m.subject, text: m.text, useEmployeeFrom: false, fromName: 'TeamLink Interviews', senderEmail: organizer.email || undefined,
-          attachments: [{ filename: 'interview.ics', content: ics, contentType: `text/calendar; charset=utf-8; method=${WORDS[event].cancel ? 'CANCEL' : 'REQUEST'}` }],
+          to: rc.email, subject: m.subject, text: m.text, html: m.html ? m.html(logo.length > 0) : undefined, useEmployeeFrom: false, fromName: 'TeamLink Interviews', senderEmail: organizer.email || undefined,
+          attachments: [...logo, { filename: 'interview.ics', content: ics, contentType: `text/calendar; charset=utf-8; method=${WORDS[event].cancel ? 'CANCEL' : 'REQUEST'}` }],
         }).catch((err) => ({ ok: false, error: err.message }));
         if (r && r.ok) row = { ...base, status: 'sent', detail: 'Email sent with a calendar invite' };
         else row = { ...base, status: 'not_sent', detail: plainReason(r || {}), notConfigured: !!(r && r.notConfigured) };

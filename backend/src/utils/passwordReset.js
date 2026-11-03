@@ -658,5 +658,5 @@ module.exports = {
   tokenIsStale, dropGate, readSetting, writeSetting, notifyPasswordChange, afterPasswordChange, hadPasswordBefore,
   buildResetEmail, buildMultiResetEmail, buildAlertEmail, captureDir, normEmail, looksLikeEmail, hit, whereText,
   // shared with utils/loginActivation.js (the activation mail of a separate login)
-  roleText, shell, btn, para, esc, whenText, deliver,
+  roleText, shell, btn, para, esc, whenText, deliver, logoAttachment,
 };
