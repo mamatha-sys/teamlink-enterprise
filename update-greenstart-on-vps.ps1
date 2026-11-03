@@ -104,14 +104,15 @@ if [ "$ok" != 1 ]; then
   exit 1
 fi
 rm -f "$SRC"
-echo "GREEN START UPDATED: release d2f52bce + Keyword Research + Search Console + RCS templates. Old code kept in $OLD (delete it after a few good days)."
+echo "GREEN START UPDATED with __PKG__ (the whole Green Start code; only what this package changed is new). Old code kept in $OLD (delete it after a few good days)."
 systemctl is-active green-start-api green-start-worker green-start-gate | paste -sd' '
 '@
 $mode = if ($Apply) { 'apply' } else { 'dry' }
-$script = $script.Replace('__MODE__', $mode).Replace("`r", '')
+$pkg = Split-Path $Archive -Leaf
+$script = $script.Replace('__MODE__', $mode).Replace('__PKG__', $pkg).Replace("`r", '')
 Write-Host "[2/2] $(if ($Apply) { 'Updating Green Start on the VPS (backup, build next to live, short stop, health check)...' } else { 'DRY RUN on the VPS: building next to live, nothing is switched...' })" -ForegroundColor Cyan
 # tr: PowerShell ends the piped text with a Windows line end, which bash would read as a command
 $script | ssh $VpsHost 'tr -d ''\r'' | bash -s'
 if ($LASTEXITCODE -ne 0) { throw 'The update on the VPS stopped (see the lines above). If it said ROLLED BACK, the old Green Start is running again.' }
 if (-not $Apply) { Write-Host "`nDRY RUN finished. If it built fine, run:  .\update-greenstart-on-vps.ps1 -Apply" -ForegroundColor Yellow }
-else { Write-Host "`nDone. Open https://greenstart.teamlinks.in (from TeamLink > Omni-Channel) > SEO > Search Console (press Sync now once), and Manage Templates > RCS." -ForegroundColor Green }
+else { Write-Host "`nDone: Green Start now runs $pkg. Open https://greenstart.teamlinks.in (from TeamLink > Omni-Channel) and check what this package changed." -ForegroundColor Green }
