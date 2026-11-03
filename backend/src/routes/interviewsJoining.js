@@ -1468,6 +1468,11 @@ router.post('/interviews/:id/book', mayBookHere, async (req, res) => {
       if (made.ok) meetingLink = made.url; else autoLinkNote = made.needsAccount ? 'Google Calendar auto-link is on but not connected (Administration > Integrations > Calendar Sync), so no link was made.' : made.error;
     } catch { autoLinkNote = 'The Meet link could not be made automatically.'; }
   }
+  if (mode === 'Online' && !meetingLink) {
+    const fb = await IMEET.fallbackLink(app);
+    meetingLink = fb.url;
+    autoLinkNote = `No link was given, so ${fb.provider} is used: ${fb.url}`;
+  }
   await prisma.application.update({
     where: { id: app.id },
     data: {

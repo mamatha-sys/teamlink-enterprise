@@ -597,6 +597,14 @@ router.post('/interviews/:id/meeting-link', async (req, res) => {
     description: `Round ${app.interviewRound || 1}. Interviewer(s): ${app.interviewer || 'to be confirmed'}. Booked in TeamLink.`,
     start: app.interviewAt,
   });
+  if (made.needsAccount || !made.ok) {
+    // no Google / Teams account: the company Meet link, else a Jitsi room - saved and mailed to the candidate at once (2026-11-03)
+    const fb = await require('../utils/interviewMeet').fallbackLink(app); // eslint-disable-line global-require
+    await prisma.application.update({ where: { id: app.id }, data: { interviewMeetingLink: fb.url } });
+    await logAudit({ userId: req.user.id, action: `Meeting link created — ${fb.provider}`, entity: 'Application', entityId: app.id, fromValue: app.interviewMeetingLink || '—', toValue: fb.url });
+    await require('../utils/interviewMeet').sendInvites(app.id, 'rescheduled', { actor: req.user, reason: 'The meeting link is added' }).catch(() => null); // eslint-disable-line global-require
+    return respondWith(res, app.id, { message: `${fb.provider} link created, saved and sent to the candidate.`, meetingLink: fb.url });
+  }
   if (made.needsAccount) {
     return res.status(409).json({
       needsAccount: true,

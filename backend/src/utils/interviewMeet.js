@@ -430,7 +430,17 @@ function startState(ctx, user, app, panelUserIds, now = new Date()) {
   };
 }
 
+// AN ONLINE INTERVIEW NEVER GOES OUT WITHOUT A LINK (founder 2026-11-03: "meeting raaledhu keerthi ki, just interview vundhi ani
+// text message vachindhi mail ki"): nothing pasted and no Google account -> the company's Default Meet link, else a free
+// Jitsi Meet room of its own for this interview (no account needed for the candidate).
+async function fallbackLink(app) {
+  const s = await loadSettings().catch(() => ({}));
+  if (s && s.defaultMeetLink) return { url: s.defaultMeetLink, provider: 'the company Meet link' };
+  const code = String((app && (app.interviewCode || app.id)) || '').replace(/[^A-Za-z0-9]/g, '').slice(-10) || 'Interview';
+  return { url: `https://meet.jit.si/TeamLink-${code}-${require('crypto').randomBytes(4).toString('hex')}`, provider: 'Jitsi Meet' }; // eslint-disable-line global-require
+}
+
 module.exports = {
-  KEY, MAIL_PREFIX, DEFAULTS, loadSettings, saveSettings, checkLink, maskEmail, buildIcs, icsUid, candidateMail, staffMail, sendInvites, mailStatus, removeRecord,
+  fallbackLink, KEY, MAIL_PREFIX, DEFAULTS, loadSettings, saveSettings, checkLink, maskEmail, buildIcs, icsUid, candidateMail, staffMail, sendInvites, mailStatus, removeRecord,
   setMailer, startCtx, startState, mayStart, isNamedInterviewer, readRecord, plainReason, isAdminUser, STARTABLE, isOnline,
 };
