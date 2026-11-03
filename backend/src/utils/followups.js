@@ -372,7 +372,8 @@ const AUTO_FOLLOWUPS = {
   CLIENT_SHORTLISTED: { purpose: 'Interview confirmation', action: 'Confirm the interview with the client' },
   INTERVIEW_SCHEDULED: { purpose: 'Interview confirmation', action: 'Confirm the candidate is attending' },
   INTERVIEW_COMPLETED: { purpose: 'Interview feedback', action: 'Chase the client for feedback' },
-  SELECTED: { purpose: 'Joining confirmation', action: 'Agree and confirm the joining date' },
+  // (internal hiring only - a client job's offer is the client's): the offer comes first, the joining date is in it (2026-11-03)
+  SELECTED: { purpose: 'Offer', action: 'Prepare and send the offer letter (Offers tab)' },
   OFFER_ACCEPTED: { purpose: 'Joining confirmation', action: 'Confirm joining', dayBeforeJoining: true },
 };
 
