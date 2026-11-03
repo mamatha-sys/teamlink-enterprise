@@ -999,6 +999,13 @@ export function teamlinkFrontRouter({ root, express }) {
         params.push(since.toISOString());
         sql += ` and a.applied_at >= $${params.length}`;
       }
+      // ?aiSince= : only the applications whose AI interview started / finished since then, whenever they applied
+      // (TeamLink asks every 2 minutes, so a finished interview shows in the ATS at once - founder 2026-11-03)
+      const aiSince = req.query.aiSince ? new Date(String(req.query.aiSince)) : null;
+      if (aiSince && !Number.isNaN(aiSince.getTime())) {
+        params.push(aiSince.toISOString());
+        sql += ` and exists (select 1 from ai_interviews i where i.application_id = a.id and coalesce(i.completed_at, i.started_at, i.created_at) >= $${params.length})`;
+      }
       params.push(limit);
       sql += ` order by a.applied_at desc limit $${params.length}`;
       const found = (await c.query(sql, params)).rows;

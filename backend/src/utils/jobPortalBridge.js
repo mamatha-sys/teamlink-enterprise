@@ -466,6 +466,36 @@ let lastRun = null;
 //   abandoned / not_started -> no status change; the portal deadline is copied so reminder calls know it
 // Returns true when something changed. Never fatal for the sync.
 const AI_FINAL = ['Completed', 'Manual Review Requested', 'Expired'];
+// THE AI INTERVIEW IS DONE ON THE JOBS SITE -> THE ATS MOVES BY ITSELF (founder 2026-11-03: "akkada candidate ai interview
+// ipoganey ikkada update avvali. malli manual ga update cheyyakudadhu"; "same applies for client hiring also"): "AI interview
+// booked / needed" -> "AI interview done", on its history as the system, and the recruiter / TL (and for an internal opening
+// the HR desk) get a bell. The 65% rule (utils/autoSendToAts.js) still runs after it, as before.
+async function aiInterviewDone(applicationId, score) {
+  const a = await prisma.application.findUnique({ where: { id: applicationId }, include: { candidate: true, requirement: { include: { client: true } } } });
+  if (!a || !['AI_INTERVIEW_REQUIRED', 'AI_INTERVIEW_SCHEDULED'].includes(a.stage)) return false;
+  const moved = await prisma.application.updateMany({ where: { id: a.id, stage: a.stage }, data: { stage: 'AI_INTERVIEW_COMPLETED' } });
+  if (!moved.count) return false;
+  const r = a.requirement || {};
+  const said = `AI interview done on the jobs site${score != null ? ` (score ${score}%)` : ''}`;
+  await prisma.applicationStageEvent.create({
+    data: {
+      applicationId: a.id, candidateId: a.candidateId, fromStage: a.stage, toStage: 'AI_INTERVIEW_COMPLETED', action: said,
+      comment: 'Updated by itself from the jobs site - nobody had to press anything.',
+      actorUserId: null, actorName: 'TeamLink (jobs site)', actorRole: 'SYSTEM',
+      requirementId: a.requirementId, requirementTitle: r.title || null, clientId: r.clientId || null,
+      clientName: r.internal ? 'TeamLink Internal' : (r.client && r.client.name) || null,
+    },
+  }).catch(() => {});
+  const internal = !!r.internal || r.hiringType === 'TeamLink Internal Hire';
+  const hr = internal ? (await prisma.user.findMany({ where: { status: 'Active', atsRole: 'HR' }, select: { id: true } })).map((u) => u.id) : [];
+  // eslint-disable-next-line global-require
+  await require('./notify').notifyUsers([a.ownerRecruiterId, r.recruiterId, r.tlId, ...hr], {
+    title: `${a.candidate ? a.candidate.name : 'A candidate'} finished the AI interview`,
+    message: `${score != null ? `Score ${score}% · ` : ''}${r.title || ''}${internal ? ' — TeamLink Internal' : ''}. Check it and take the next step.`,
+  }).catch(() => {});
+  return true;
+}
+
 async function syncAiInterview(applicationId, iv) {
   if (!iv || typeof iv !== 'object') return false;
   const app = await prisma.application.findUnique({ where: { id: applicationId }, select: { id: true, aiInterviewStatus: true, aiInterviewScore: true, aiInterviewDeadline: true } });
@@ -478,11 +508,15 @@ async function syncAiInterview(applicationId, iv) {
   if (iv.status === 'completed' && !AI_FINAL.includes(app.aiInterviewStatus) && app.aiInterviewScore == null) {
     data.aiInterviewStatus = 'Completed';
     if (score != null) data.aiInterviewScore = score;
+  } else if (iv.status === 'completed' && app.aiInterviewStatus === 'Completed' && app.aiInterviewScore == null && score != null) {
+    data.aiInterviewScore = score; // the score the jobs site worked out after the interview, on a later sync
   } else if (iv.status === 'in_progress' && ['Required', 'Scheduled', null, undefined].includes(app.aiInterviewStatus)) {
     data.aiInterviewStatus = 'Started';
   }
-  if (!Object.keys(data).length) return false;
+  // finished on the jobs site: the stage follows, also when the score came in on an earlier sync
+  if (!Object.keys(data).length) return iv.status === 'completed' ? aiInterviewDone(app.id, app.aiInterviewScore).catch(() => false) : false;
   await prisma.application.update({ where: { id: app.id }, data });
+  if (iv.status === 'completed') await aiInterviewDone(app.id, data.aiInterviewScore != null ? data.aiInterviewScore : app.aiInterviewScore).catch((e) => console.warn('[job-portal] AI interview done:', e.message)); // eslint-disable-line no-console
   if (data.aiInterviewStatus) {
     await prisma.auditLog.create({
       data: {
@@ -607,6 +641,36 @@ async function fullSync({ requirementIds = null, pullDays = 90, actor = 'system'
   return out;
 }
 
+// EVERY 2 MINUTES (not only hourly): the applications whose AI interview started / finished lately, so "done on the jobs site"
+// shows in the ATS within minutes. Runs only while somebody is waiting for an AI interview. JOB_PORTAL_AI_POLL_MS (0 = off).
+let aiLast = null; let aiBusy = false;
+async function pollAiInterviews() {
+  if (aiBusy || !syncToken()) return { skipped: true };
+  aiBusy = true;
+  try {
+    const waiting = await prisma.application.count({ where: { stage: { in: ['AI_INTERVIEW_REQUIRED', 'AI_INTERVIEW_SCHEDULED'] } } });
+    if (!waiting) return { skipped: true };
+    const since = aiLast ? new Date(aiLast.getTime() - 10 * 60000) : new Date(Date.now() - 7 * 86400000);
+    const started = new Date();
+    const pulled = await portalFetch(`/integrations/teamlink/applications?aiSince=${encodeURIComponent(since.toISOString())}&limit=300`, { timeoutMs: 20000 });
+    const out = { checked: 0, updated: 0 };
+    for (const a of (pulled && pulled.applications) || []) {
+      // eslint-disable-next-line no-await-in-loop
+      const r = await ingestApplication(a).catch(() => null);
+      if (!r || !r.body || !r.body.applicationId) continue;
+      out.checked += 1;
+      // eslint-disable-next-line no-await-in-loop
+      if (await syncAiInterview(r.body.applicationId, a.application && a.application.aiInterview).catch(() => false)) out.updated += 1;
+      // eslint-disable-next-line no-await-in-loop, global-require
+      await require('./autoSendToAts').checkQuietly(r.body.applicationId, { portalAppId: a.application && a.application.id });
+    }
+    aiLast = started;
+    return out;
+  } catch (e) {
+    return { error: e.message };
+  } finally { aiBusy = false; }
+}
+
 let timer = null;
 function startSchedule() {
   if (timer || !syncToken()) {
@@ -622,6 +686,8 @@ function startSchedule() {
   setTimeout(() => run('startup'), 30000).unref();
   if (every > 0) timer = setInterval(() => run('hourly'), every);
   if (timer) timer.unref();
+  const aiEvery = process.env.JOB_PORTAL_AI_POLL_MS === undefined ? 120000 : Number(process.env.JOB_PORTAL_AI_POLL_MS);
+  if (aiEvery > 0) setInterval(() => { pollAiInterviews().catch(() => {}); }, aiEvery).unref();
 }
 
 function status() {
@@ -649,4 +715,5 @@ async function ping() {
 module.exports = {
   portalUrl, portalJobId, jobUrl, secretMatches, pushRequirement, ingestApplication, fullSync, syncAiInterview,
   startSchedule, status, ping, findCandidateByContact, PORTAL_STAGE_OF, portalJobLive, portalApi, portalFetch, syncAiInterview,
+  pollAiInterviews, aiInterviewDone,
 };

@@ -274,16 +274,21 @@ export default function JobPortalCandidates({ onSentToAts }) {
                       );
                     }
                     const blocked = next.kind === 'send' && a.screening && !a.screening.readyToSend;
+                    // internal hiring: HR's words, not "ATS" (2026-11-03); what still stops it is SAID, not only on hover
+                    const label = next.kind === 'send' && a.hiring === 'Internal' ? 'Approve → book interview' : next.label;
                     return (
-                      <button
-                        type="button"
-                        className={`btn btn-sm${next.kind === 'send' ? ' btn-primary' : ''}`}
-                        disabled={busy === a.id || blocked}
-                        title={blocked ? (a.screening.blockers || []).join('; ') : ''}
-                        onClick={() => screen(a, next.kind)}
-                      >
-                        {next.label}
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className={`btn btn-sm${next.kind === 'send' ? ' btn-primary' : ''}`}
+                          disabled={busy === a.id || blocked}
+                          title={blocked ? (a.screening.blockers || []).join('; ') : ''}
+                          onClick={() => screen(a, next.kind)}
+                        >
+                          {label}
+                        </button>
+                        {blocked && <div className="small-muted" style={{ marginTop: 4 }}>First: {(a.screening.blockers || []).join('; ')}</div>}
+                      </>
                     );
                   })()}
                 </td>

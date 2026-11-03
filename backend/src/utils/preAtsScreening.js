@@ -54,7 +54,9 @@ function screeningOf(app, events) {
   const scoreEv = mine.find((e) => e.action.startsWith(RESUME_SCORE_ACTION));
   const sent = mine.find((e) => e.action.startsWith(SENT_TO_ATS_ACTION));
   const resumeScore = app.resumeScore != null ? app.resumeScore : null;
-  const aiDone = app.aiInterviewStatus === 'Completed' && app.aiInterviewScore != null;
+  // done = the candidate finished it; the score may come later (a finished interview with no score yet never blocks the
+  // recruiter / HR - founder 2026-11-03: "asalu next step ki vellatledhu")
+  const aiDone = app.aiInterviewStatus === 'Completed';
   const aiManual = app.aiInterviewStatus === 'Manual Review Requested';
   const blockers = [];
   if (!dup) blockers.push('Run the duplicate check');
