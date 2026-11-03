@@ -1241,11 +1241,23 @@ router.post('/bulk', async (req, res, next) => {
         fromValue: open ? open.ownerName || '—' : '—',
         toValue: target.name,
       });
-      // Seen by the new owner only if their seat or the requirement reaches it
-      // — said, rather than left for them to discover.
+      // THE RESPONSE BECOMES THE RECRUITER'S (founder 2026-11-03: "avaati nunchi vachey responses evariki kanipinchalo, valla
+      // ahh recruiters assign chestharu, appudu avi valla dhaanlo kanipinchali"): a recruiter sees only the responses they own
+      // (utils/scope.js), so the owner moves to them, and they are put on the requirement's team when they are not on it yet.
       const r = app.requirement || {};
-      const onRequirement = r.recruiterId === target.id || String(r.recruiterIds || '').split(',').includes(target.id)
+      let onRequirement = r.recruiterId === target.id || String(r.recruiterIds || '').split(',').includes(target.id)
         || r.tlId === target.id || r.stlId === target.id;
+      if (target.atsRole === 'RECRUITER') {
+        // eslint-disable-next-line no-await-in-loop
+        await prisma.application.update({ where: { id: app.id }, data: { ownerRecruiterId: target.id } });
+        if (!onRequirement && r.id) {
+          const ids = [...new Set([...String(r.recruiterIds || '').split(',').map((x) => x.trim()).filter(Boolean), target.id])];
+          // eslint-disable-next-line no-await-in-loop
+          await prisma.requirement.update({ where: { id: r.id }, data: { recruiterIds: ids.join(','), ...(r.recruiterId ? {} : { recruiterId: target.id }) } });
+          r.recruiterIds = ids.join(',');
+          onRequirement = true;
+        }
+      }
       results.push({
         ...base,
         ok: true,

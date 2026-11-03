@@ -1168,7 +1168,9 @@ export default function RequirementDetail() {
             <b>{`New requirement request from ${clientName}.`}</b>
             {needsAccept
               ? <>{' The client gave the main details. Press '}<b>Accept request</b>{' to take it. Then Create requirement opens.'}</>
-              : <>{r.requestAcceptedBy ? ` Accepted by ${r.requestAcceptedBy}.` : ''}{' Press '}<b>Create requirement</b>{', fill in the rest (description, skills, departments, team leads), then press Save & Post.'}</>}
+              : <>{r.requestAcceptedBy ? ` Accepted by ${r.requestAcceptedBy}.` : ''}{' Press '}<b>Create requirement</b>{user && (user.atsRole === 'BDE' || user.role === 'BDE')
+                ? ', fill in the rest (description, skills, departments), pick the team lead(s) and press Send to team leads - the team lead posts it.'
+                : ', fill in the rest (description, skills, departments, team leads), then press Save & Post.'}</>}
           </span>
         </div>
       )}

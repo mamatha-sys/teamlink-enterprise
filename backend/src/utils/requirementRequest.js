@@ -115,6 +115,14 @@ async function createRequirementRequest(body, { user, via }) {
     const refusal = lc && lc.newWorkRefusal ? lc.newWorkRefusal(client, 'a new requirement request') : null;
     if (refusal) return { status: 409, body: refusal };
   } catch { /* lifecycle helper not installed */ }
+  // A CLIENT asks for requirements only once they are officially Active (founder 2026-11-03: "client official ga active loki
+  // vachaka, client oka req request ni post chestharu"): the agreement must be Active and not past its end date.
+  if (via === 'Client portal') {
+    const gate = require('./portalLogins').agreementGate(client); // eslint-disable-line global-require
+    if (!gate.active) {
+      return { status: 409, body: { error: `Your agreement with TeamLink is ${gate.words.toLowerCase()}. Requirements can be sent once it is active - please contact your TeamLink manager.`, code: 'AGREEMENT_NOT_ACTIVE' } };
+    }
+  }
   const openings = Math.max(1, Math.min(500, Number(b.openings) || 1));
   const department = clean(b.department, 80) || client.ownerDepartment || null;
   // THE TWIN CHECK (2026-10-13, utils/jobDupGuard.js): the same job already on file for this client -> a plain card (409), unless

@@ -3692,6 +3692,10 @@ router.post('/:id/assign', requirePerm('ats', 'requirements', 'Requirement Detai
       : (req.body.recruiterIds || null);
   }
   if (req.body.accountManager !== undefined) data.accountManager = req.body.accountManager || null;
+  // "One recruiter gets every response" (one) or "share them equally among the recruiters" (even) - 2026-11-03, utils/applicationOwner.js
+  if (req.body.responseSplit === 'even' || req.body.responseSplit === 'one') {
+    await require('../utils/applicationOwner').setSplitMode(prisma, req.requirement.id, req.body.responseSplit); // eslint-disable-line global-require
+  }
   // SEVERAL TEAM LEADS (2026-10-14): tlIds = [main, also...] (the 'Change team' dialog).
   const wantTlExtras = extraTlsOf(req.body);
   if (Array.isArray(req.body.tlIds)) {

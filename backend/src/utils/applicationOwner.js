@@ -15,6 +15,33 @@ function defaultOwnerOf(requirement) {
   if (!requirement) return null;
   return requirement.recruiterId || csv(requirement.recruiterIds)[0] || null;
 }
+// SHARED EVENLY (founder 2026-11-03: "avaati nunchi vachey responses evariki kanipinchalo, valla ahh recruiters assign
+// chestharu"): when the TL chose "share the responses equally" for a requirement (AppSetting respsplit.<requirementId> =
+// 'even', set with POST /requirements/:id/assign), a new response goes to the job's recruiter who has the fewest of its
+// responses so far, in turn. Otherwise (the default) every response goes to the main recruiter, as before.
+const SPLIT_PREFIX = 'respsplit.';
+const splitCache = new Map(); // requirementId -> { mode, at }
+async function splitModeOf(prisma, requirementId) {
+  const hit = splitCache.get(requirementId);
+  if (hit && Date.now() - hit.at < 30000) return hit.mode;
+  const row = await prisma.appSetting.findUnique({ where: { key: SPLIT_PREFIX + requirementId } }).catch(() => null);
+  const mode = row && row.value === 'even' ? 'even' : 'one';
+  splitCache.set(requirementId, { mode, at: Date.now() });
+  return mode;
+}
+async function setSplitMode(prisma, requirementId, mode) {
+  const key = SPLIT_PREFIX + requirementId;
+  if (mode === 'even') await prisma.appSetting.upsert({ where: { key }, create: { key, value: 'even' }, update: { value: 'even' } });
+  else await prisma.appSetting.deleteMany({ where: { key } });
+  splitCache.set(requirementId, { mode: mode === 'even' ? 'even' : 'one', at: Date.now() });
+}
+async function evenOwnerOf(prisma, requirementId, requirement) {
+  const team = [...new Set([requirement.recruiterId, ...csv(requirement.recruiterIds)].filter(Boolean))];
+  if (team.length < 2) return defaultOwnerOf(requirement);
+  const counts = await prisma.application.groupBy({ by: ['ownerRecruiterId'], where: { requirementId, ownerRecruiterId: { in: team } }, _count: { _all: true } }).catch(() => []);
+  const n = new Map(counts.map((c) => [c.ownerRecruiterId, c._count._all]));
+  return team.reduce((best, id) => ((n.get(id) || 0) < (n.get(best) || 0) ? id : best), team[0]);
+}
 const onJob = (requirement, userId) => !!userId && !!requirement
   && (requirement.recruiterId === userId || csv(requirement.recruiterIds).includes(userId));
 
@@ -26,7 +53,8 @@ async function before(prisma, params) {
   const reqId = data.requirementId || (data.requirement && data.requirement.connect && data.requirement.connect.id);
   if (!reqId) return;
   const r = await prisma.requirement.findUnique({ where: { id: reqId }, select: { recruiterId: true, recruiterIds: true } });
-  const owner = defaultOwnerOf(r);
+  let owner = defaultOwnerOf(r);
+  try { if (r && (await splitModeOf(prisma, reqId)) === 'even') owner = await evenOwnerOf(prisma, reqId, r); } catch { /* default owner */ }
   if (owner) data.ownerRecruiterId = owner;
 }
 
@@ -97,4 +125,5 @@ function ownerRecruiter(app) {
   return r && r.recruiter && r.recruiter.name ? { id: r.recruiter.id || r.recruiterId || null, name: r.recruiter.name } : null;
 }
 
-module.exports = { defaultOwnerOf, onJob, before, csv, warmNames, warmSeats, seatOf, warmMiddleware, ownerRecruiter };
+module.exports = {
+  splitModeOf, setSplitMode, defaultOwnerOf, onJob, before, csv, warmNames, warmSeats, seatOf, warmMiddleware, ownerRecruiter };

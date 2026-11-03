@@ -1684,9 +1684,15 @@ async function leadHome(c, b, k) {
     // a job site (our own Job Portal / Website get it by themselves, so they do not count).
     let postW = null;
     try {
+      // Every team lead the BDE ticked sees it (not only the main one), and the 30 days count from when it was sent / last
+      // changed, not from the client's first request (2026-11-03, the client -> BDE -> TL flow).
+      const RT = require('./reqTeamLeads'); // eslint-disable-line global-require
+      await RT.ensure();
+      const since = new Date(Date.now() - 30 * 86400000);
       const fresh = await prisma.requirement.findMany({
         where: {
-          tlId: c.user.id, status: { in: V.REQUIREMENT_LIVE_STATUSES }, createdAt: { gte: new Date(Date.now() - 30 * 86400000) },
+          AND: [RT.tlArm([c.user.id]), { OR: [{ createdAt: { gte: since } }, { updatedAt: { gte: since } }] }],
+          status: { in: V.REQUIREMENT_LIVE_STATUSES },
           NOT: { postings: { some: { source: { notIn: ['jobportal', 'website'] }, status: { in: ['Posted', 'Submitted to feed'] } } } },
         },
         select: { id: true, title: true, client: { select: { name: true } }, recruiter: { select: { name: true } } },
