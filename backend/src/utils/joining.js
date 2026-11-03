@@ -158,9 +158,13 @@ async function raiseJoiningInvoice({
 }
 
 // ---------------------------------------------------------------------------
-// TeamLink internal hire -> HRMS. One employee = one user = one login, so the
-// employee record is created here and Administration -> Users issues the login
-// against it; nothing about a client placement ever reaches this function.
+// TeamLink internal hire -> HRMS. One employee = one user = one login. The
+// employee record is created here, and (2026-11-03, founder: "join ayyaka, HRMS
+// employee kinda generate ipoyyi, offer letter, joining letter, onboarding & login
+// credentials velthai") the joining pack goes out at once: login + set-password
+// email, the joining letter PDF, the welcome email with the first-day checklist,
+// bells for HR and the manager (utils/internalOnboarding.js). Nothing about a
+// client placement ever reaches this function.
 // ---------------------------------------------------------------------------
 const DEFAULT_ONBOARDING_TASKS = [
   'Offer letter signed', 'ID proof collected', 'PAN card collected',
@@ -211,6 +215,15 @@ async function createHrmsEmployee({ application, candidate, requirement, userId 
   // login retires and frees the email for the employee login.
   // eslint-disable-next-line global-require
   try { await require('./portalLogins').retireCandidateLogin({ candidateId: candidate.id, employeeId: employee.id, userId }); } catch { /* ignore */ }
+  // The joining pack (login, joining letter, welcome email, bells). Never blocks the employee record; the Joining screen
+  // shows what went out and offers "Send joining pack" again.
+  try {
+    // eslint-disable-next-line global-require
+    employee.joiningPack = await require('./internalOnboarding').sendJoiningPack({ employeeId: employee.id, applicationId: application.id, actorId: userId });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[joining] the joining pack did not go out:', err.message);
+  }
   return employee;
 }
 

@@ -3870,3 +3870,5 @@ router.post('/bulk-import', rawUpload, requirePerm(null, 'hrms', 'Employee Manag
 });
 
 module.exports = router;
+// Internal hiring (2026-11-03): the new hire's login is made the same way as "Create login" (utils/internalOnboarding.js).
+module.exports.createLoginFor = createLoginFor;

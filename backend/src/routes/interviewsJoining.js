@@ -1248,8 +1248,35 @@ router.post('/internal-hiring/:id/create-employee', requirePerm('ats', 'intervie
     employee: employee
       ? { id: employee.id, employeeCode: employee.employeeCode, name: employee.name, department: employee.department, designation: employee.designation }
       : null,
+    joiningPack: employee ? employee.joiningPack || null : null,
     message: employee ? `HRMS employee ${employee.employeeCode} created. No invoice — an internal hire is not billable.` : 'No employee created.',
   });
+});
+
+// "Send joining pack" (2026-11-03): login (or the sign-in link again), the joining letter, the welcome email - for an internal
+// hire who is an employee already (a retry, or after HR fixed the email). utils/internalOnboarding.js
+router.post('/internal-hiring/:id/joining-pack', requirePerm('ats', 'interviews', 'Internal Hiring', 'approve'), async (req, res) => {
+  const app = await loadScoped(req, res);
+  if (!app) return;
+  if (!isInternalHire(app, app.requirement)) return res.status(409).json({ error: 'A client placement joins the client; there is no TeamLink joining pack.' });
+  if (!app.hrmsEmployeeId) return res.status(409).json({ error: 'Make the employee first (Add as employee), then send the joining pack.' });
+  // eslint-disable-next-line global-require
+  const pack = await require('../utils/internalOnboarding').sendJoiningPack({ employeeId: app.hrmsEmployeeId, applicationId: app.id, actorId: req.user.id, resend: true });
+  if (pack.error) return res.status(404).json({ error: pack.error });
+  res.json({ ok: true, joiningPack: pack });
+});
+
+// The joining letter as a PDF (HR / the employee's managers): GET /ats/internal-hiring/:id/joining-letter
+router.get('/internal-hiring/:id/joining-letter', requirePerm('ats', 'interviews', 'Internal Hiring', 'view'), async (req, res) => {
+  const app = await loadScoped(req, res);
+  if (!app) return;
+  if (!app.hrmsEmployeeId) return res.status(409).json({ error: 'There is no employee yet for this candidate.' });
+  const employee = await prisma.employee.findUnique({ where: { id: app.hrmsEmployeeId } });
+  // eslint-disable-next-line global-require
+  const pdf = await require('../utils/internalOnboarding').joiningLetterPdf({ employee, application: app });
+  res.set('Content-Type', 'application/pdf');
+  res.set('Content-Disposition', `inline; filename="Joining-letter-${employee.employeeCode}.pdf"`);
+  res.send(pdf);
 });
 
 // Hiring type is normally inherited from the requirement. A lead can correct

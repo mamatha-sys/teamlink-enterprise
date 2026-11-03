@@ -204,7 +204,26 @@ export default function Joining() {
                         <button type="button" className="btn btn-sm" onClick={() => setDialog({ kind: 'checklist', id: r.id })}>Set a new date</button>
                       )}
                       {canAct && v === 'joined' && internal && canHire && !r.hrmsEmployeeId && (
-                        <button type="button" className="btn btn-sm btn-primary" onClick={() => act(() => api.post(`/ats/internal-hiring/${r.id}/create-employee`), `Saved. ${first(r.candidate.name)} added as an employee.`)}>Add as employee</button>
+                        <button type="button" className="btn btn-sm btn-primary" onClick={() => act(() => api.post(`/ats/internal-hiring/${r.id}/create-employee`), `Saved. ${first(r.candidate.name)} added as an employee; the joining pack (login, joining letter, welcome email) went out.`)}>Add as employee</button>
+                      )}
+                      {/* Internal hire who is an employee (2026-11-03): the joining pack again (login link, joining letter, welcome email), and the letter itself */}
+                      {canAct && internal && canHire && r.hrmsEmployeeId && (
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            title="Login (or the sign-in link again), the joining letter and the welcome email"
+                            onClick={async () => {
+                              try {
+                                const res = await api.post(`/ats/internal-hiring/${r.id}/joining-pack`);
+                                const p = res.data.joiningPack || {};
+                                setNotice(`Joining pack for ${first(r.candidate.name)} - login: ${p.login}; joining letter: ${p.joiningLetter}; welcome email: ${p.welcome}.`);
+                                load();
+                              } catch (e) { setNotice((e.response && e.response.data && e.response.data.error) || 'The joining pack could not be sent.'); }
+                            }}
+                          >Send joining pack</button>
+                          <button type="button" className="btn btn-sm btn-ghost" onClick={() => openLetter(`/ats/internal-hiring/${r.id}/joining-letter`)}>Joining letter</button>
+                        </>
                       )}
                       {canAct && v === 'joined' && !internal && !LEFT.includes(r.joiningStatus) && (
                         <button type="button" className="btn btn-sm" onClick={() => setDialog({ kind: 'left', id: r.id })}>Left the job</button>
