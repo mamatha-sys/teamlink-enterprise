@@ -113,7 +113,8 @@ export function nextActionsFor(user, stage, app = null) {
   // Applications & screening tab, ending in Send to ATS.
   if (app && isPreAtsApplication(app)) {
     if (['RECRUITER_REVIEW', 'RECRUITER_APPROVED'].includes(stage) && is('recruiter', 'hr')) {
-      out.push({ id: 'send_to_ats', label: 'Send to ATS', kind: 'send_to_ats' });
+      // internal hiring: no "ATS" words for HR - the same step, said as what it means (founder 2026-11-03: "send to ats ani endhuku vasthundhi. internal ki")
+      out.push({ id: 'send_to_ats', label: isInternalApp(app) ? 'Approve → book interview' : 'Send to ATS', kind: 'send_to_ats' });
     } else if (is('recruiter', 'hr')) {
       out.push({ id: 'screening', label: 'Open Job Portal screening', kind: 'screening' });
     }
@@ -633,7 +634,7 @@ export function CandidateActions({
     else if (a.kind === 'move') move(a.to);
     else if (a.kind === 'return') setReturning(true);
     else if (a.kind === 'schedule') setSchedule(true);
-    else if (a.kind === 'send_to_ats') post(`/job-portal/applications/${app.id}/send-to-ats`, (r) => `Sent to the ATS — now at ${r.data.stageLabel}.`);
+    else if (a.kind === 'send_to_ats') post(`/job-portal/applications/${app.id}/send-to-ats`, (r) => (isInternalApp(app) ? `Approved — now at ${r.data.stageLabel}. Book the interview next.` : `Sent to the ATS — now at ${r.data.stageLabel}.`));
     else if (a.kind === 'hrms') post(`/ats/internal-hiring/${app.id}/create-employee`, (r) => r.data.message || 'Saved. Added as an employee.');
     else if (a.kind === 'screening') window.location.assign('/requirements/job-portal?view=apps');
     else if (a.kind === 'link') window.location.assign(a.href);
