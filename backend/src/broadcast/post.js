@@ -117,7 +117,7 @@ async function status(user, jobId) {
         if (q && q.status === 'RUNNING') state = 'running';
         if (q && ['NEEDS_HUMAN'].includes(q.status)) state = 'needs_help';
         if (p.waitingForPerson) state = 'needs_help';
-        if (p.mode === 'by_hand' && state !== 'posted') state = state === 'idle' ? 'idle' : 'needs_help';
+        if ((p.mode === 'by_hand' || p.mode === 'manual') && state !== 'posted') state = state === 'idle' ? 'idle' : 'needs_help';
         chips.push({ place: p.portal, name: NAMES[p.portal] || p.portalName, state, words: p.statusWords, link: p.portalUrl || null, error: p.lastError || null, queueId: q ? q.id : null, canRetry: !!p.canRetry, mode: p.mode });
       });
     }

@@ -45,6 +45,13 @@ const { prisma, check, RUN } = Z;
     const has = (h) => !!(h.body && (h.body.widgets || []).some((w) => w.id === 'new-reqs' && (w.rows || []).some((x) => x.id === rq.id)));
     check('3 the main TL and the second ticked TL both get "New requirements - post them"', has(h1) && has(h2), [h1.status, h2.status, has(h1), has(h2)]);
 
+    // D. an API place (Facebook) is done right away, not left in a queue nobody runs: a dry run comes back finished at once
+    await prisma.requirement.update({ where: { id: rq.id }, data: { jobDescription: 'Java, Spring Boot, REST APIs. 3-6 years.', salary: '6-9 LPA', experienceMin: 3, experienceMax: 6, department: 'IT' } }).catch(() => {});
+    const t0 = Date.now();
+    const fb = await Z.call('POST', `/api/job-publish/jobs/${rq.id}/publish`, tk.tl1, { portals: ['facebook'], dryRun: true });
+    const one = fb.body && ((fb.body.results || fb.body.portals || [])[0] || fb.body);
+    check('7 Facebook (an API place) runs at once: the answer comes back finished, not "Queued" (dry run)', fb.status < 300 && one && one.mode !== 'queued' && one.entry && one.entry.status !== 'QUEUED' && Date.now() - t0 < 60000, [fb.status, one && one.mode, one && one.reason, one && one.entry && one.entry.status]);
+
     // E. responses: shared equally between the recruiters the TL ticks
     const sp = await Z.call('POST', `/api/requirements/${rq.id}/assign`, tk.tl1, { recruiterId: r1.id, recruiterIds: [r2.id], responseSplit: 'even' });
     check('4 the TL chooses "share the responses equally" between two recruiters', sp.status < 300, [sp.status, sp.body && sp.body.error]);

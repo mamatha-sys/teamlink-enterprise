@@ -111,12 +111,37 @@ async function one(user, r, portal, action, o) {
   if (out.created && !o.dryRun) await P.set(r.id, portal, { status: 'QUEUED', lastQueueId: out.entry.id, lastAction: action, lastError: null }, user.id);
   if (out.created) await audit(user, `${action[0]}${action.slice(1).toLowerCase()} queued${o.dryRun ? ' (dry run)' : ''}`, r.id, portal, `queue ${out.entry.id}${o.scheduledFor ? ` at ${iso(o.scheduledFor)}` : ''}`);
   let entry = out.entry;
-  // The career page needs no browser: it is done at once (a person pressed the button)
-  if (out.created && portal === 'career' && !o.scheduledFor && process.env.TL_POSTING_NO_INLINE !== '1') entry = await runInline(entry.id);
+  // The career page needs no browser: it is done at once (a person pressed the button). So are the API places - Facebook,
+  // Instagram, Threads, LinkedIn post, Telegram (founder 2026-11-03: "oka req akkada successful ga post ayyakaney back ki
+  // redirect avvali ... posted ani automatic ga raavali"): the post is made right here, the platform's answer and live link
+  // come back with the response, and "Posted" is written only when the platform confirmed it (runner.js). They no longer
+  // wait for the separate posting worker, which the live server does not run.
+  const inlineNow = portal === 'career' || meta.kind === 'api';
+  if (out.created && inlineNow && !o.scheduledFor && process.env.TL_POSTING_NO_INLINE !== '1') {
+    entry = await runInline(entry.id);
+    // a retryable answer (a busy platform) goes back to the queue; with no worker running it would wait for ever, so try twice
+    // more here and then say plainly that it failed (Retry stays on the screen)
+    for (let i = 0; i < 2 && entry && entry.status === 'QUEUED' && entry.errorMessage && meta.kind === 'api'; i += 1) {
+      await new Promise((res) => { setTimeout(res, 3000); }); // eslint-disable-line no-await-in-loop
+      await ex('UPDATE "PostingQueue" SET "nextRunAt" = ? WHERE "id" = ? AND "status" = \'QUEUED\'', Date.now(), entry.id); // eslint-disable-line no-await-in-loop
+      entry = await runInline(entry.id); // eslint-disable-line no-await-in-loop
+    }
+    if (entry && entry.status === 'QUEUED' && entry.errorMessage && meta.kind === 'api') {
+      await ex('UPDATE "PostingQueue" SET "status" = \'FAILED\', "finishedAt" = ?, "updatedAt" = ? WHERE "id" = ? AND "status" = \'QUEUED\'', Date.now(), Date.now(), entry.id);
+      if (!o.dryRun) await P.set(r.id, portal, { status: 'FAILED', lastError: entry.errorMessage, lastQueueId: entry.id, lastAction: action }, user.id);
+      entry = Q.shape(await Q.byId(entry.id));
+    }
+  }
   const hold = await S.humanHold(portal);
+  let reason = hold ? `Queued, but ${name} is waiting for a person (${hold.reason || 'open the portal session'}).` : (out.duplicate ? 'It is already waiting in the queue.' : 'Queued.');
+  let mode = 'queued';
+  if (inlineNow && entry && entry.status === 'SUCCEEDED') { mode = 'posted'; reason = o.dryRun ? `Dry run on ${name}: everything checks out.` : `Posted on ${name}.`; }
+  if (inlineNow && entry && ['FAILED', 'DEAD', 'NEEDS_HUMAN'].includes(entry.status)) { mode = 'failed'; reason = `${name}: ${entry.errorMessage || 'the post did not go through'}.`; }
+  const now = inlineNow && !o.dryRun ? await P.get(r.id, portal).catch(() => null) : null;
   return {
-    ...base, ok: true, queued: true, duplicate: out.duplicate, mode: 'queued', queueId: entry.id, entry,
-    reason: hold ? `Queued, but ${name} is waiting for a person (${hold.reason || 'open the portal session'}).` : (out.duplicate ? 'It is already waiting in the queue.' : 'Queued.'),
+    ...base, ok: mode !== 'failed', queued: mode === 'queued', duplicate: out.duplicate, mode, queueId: entry.id, entry,
+    ...(now ? { posting: P.view(now), liveUrl: now.portalUrl || null } : {}),
+    reason,
   };
 }
 
