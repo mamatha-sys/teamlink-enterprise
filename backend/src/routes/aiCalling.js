@@ -57,7 +57,9 @@ admin.put('/config', requirePerm(null, 'administration', 'Integrations', 'config
       if (given == null || String(given).trim() === '') return false; // blank = unchanged (secrets) / not sent
       return ['key', 'token', 'amiSecret'].includes(k) ? true : String(given).trim() !== String(stored[X.F[k]] || '').trim();
     });
-    if (before.state !== 'Connected' || changed) {
+    // 2026-11-03: the office SIM line (free voice) being ready is enough - that is the line the calls go out on.
+    const phoneReady = require('../calling/voice/sipCall').readiness().ready; // eslint-disable-line global-require
+    if (!phoneReady && (before.state !== 'Connected' || changed)) {
       return res.status(400).json({ error: 'Press "Test connection" and get "Connected" before switching to Live. Use Test mode with your own phone number first.' });
     }
   }
@@ -172,7 +174,7 @@ staff.get('/status', async (req, res) => {
     steps: isAdmin ? s.problems : [],
     testMode: s.mode === 'Test',
     recording: s.recording || s.keepTranscripts,
-    phoneAi: (({ ready, mode }) => ({ ready, mode }))(require('../calling/voice/sipCall').readiness()), // eslint-disable-line global-require
+    phoneAi: (({ ready, mode }) => ({ ready, mode: require('../calling/voice/sipCall').lineMode({ mode }, s) }))(require('../calling/voice/sipCall').readiness()), // eslint-disable-line global-require
   });
 });
 

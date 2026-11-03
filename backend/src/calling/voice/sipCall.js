@@ -100,6 +100,14 @@ async function originateResult(e) {
   await svc.setRow(id, { status, failReason: words, providerStatus: `originate:${reason}`, endedAt: new Date().toISOString() });
 }
 
+// ONE SWITCH (founder 2026-11-03: "test mode ani endhuku vasthundhi. proper ga set cheyyi"): the Test / Live switch in
+// Administration > Integrations > AI Calling decides for the phone line too. The server's AI_VOICE_PHONE_MODE stays a kill
+// switch (Off), and is only used when that screen is Off.
+function lineMode(c, base) {
+  if (c.mode === 'Off') return 'Off';
+  return base && (base.mode === 'Live' || base.mode === 'Test') ? base.mode : c.mode;
+}
+
 function readiness() {
   const c = config();
   return { ready: c.ready, mode: c.mode, problems: c.problems, reachable: AMI_ERR ? AMI_ERR : null };
@@ -107,12 +115,13 @@ function readiness() {
 
 // --- recruiter: place one call -------------------------------------------------------------------------------------------------
 async function place(user, input, deps = {}) {
-  const c = deps.config || config();
+  const c = { ...(deps.config || config()) };
   if (!c.ready) return svc.fail(409, 'not_ready', `AI phone calls are not ready: ${c.problems[0]}`, { steps: c.problems });
   const base = await settingsStore.load({ fresh: true });
   // the AI calling rules, with the phone line's own switch (Off / Test numbers / Live) instead of the Exotel one
   // test numbers: the server's list AND the ones the Admin saves in Integrations > AI Calling (founder 2026-11-03: "ey number ki
   // call chesina call velley laaga ... prathi sari, problem lekunda" - a number saved on that screen is always callable in Test)
+  c.mode = lineMode(c, base);
   const s = { ...base, mode: c.mode, testNumbers: [...new Set([...c.testNumbers, ...(base.testNumbers || [])])] };
   const ctx = await svc.loadContext(input.applicationId);
   if (!ctx) return svc.fail(404, 'scope', 'Application not found.');
@@ -232,4 +241,4 @@ async function start() {
   return server;
 }
 
-module.exports = { config, readiness, place, sweep, start, dialNumber, _originateResult: originateResult, _wait: WAIT };
+module.exports = { config, readiness, lineMode, place, sweep, start, dialNumber, _originateResult: originateResult, _wait: WAIT };
