@@ -98,10 +98,10 @@ export default function AiCallingAdmin() {
       </div>
     );
   };
-  const yesNo = (k, label, hint) => (
+  const yesNo = (k, label, hint, blankYes = false) => (
     <div className="field" key={k}>
       <label>{label}</label>
-      <Combo value={/^y/i.test(v[k] || '') ? 'Yes' : 'No'} onChange={(e) => set(k, e.target.value)}><option>No</option><option>Yes</option></Combo>
+      <Combo value={(String(v[k] || '').trim() ? /^y/i.test(v[k]) : blankYes) ? 'Yes' : 'No'} onChange={(e) => set(k, e.target.value)}><option>No</option><option>Yes</option></Combo>
       {hint && <div className="small-muted">{hint}</div>}
     </div>
   );
@@ -241,7 +241,8 @@ export default function AiCallingAdmin() {
       </Section>
 
       <Section title="7. Consent, opt-out and Do Not Disturb" hint="A candidate who said no, or whose number is on the do-not-call list, is never called. You must also check the legal rules yourself (see the report).">
-        {yesNo('consentApplied', 'Allow interview and shortlist calls to people who applied but have no consent record', 'Screening calls always need a recorded consent.')}
+        {yesNo('consentAll', 'Call candidates who have no consent record', 'Yes (default): everyone is treated as consented unless they said no. A candidate who refused or withdrew consent is never called.', true)}
+        {yesNo('consentApplied', 'Allow interview and shortlist calls to people who applied but have no consent record', 'Only matters when the line above is No.')}
         {yesNo('dndService', 'Allow interview and shortlist calls to numbers marked Do Not Disturb', 'Screening calls to such numbers are never allowed.')}
       </Section>
 

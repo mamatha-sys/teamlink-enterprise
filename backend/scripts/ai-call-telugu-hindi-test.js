@@ -92,7 +92,7 @@ const ears = (te, hi) => { const asked = []; return { asked, stt: async (_pcm, l
   t = new Dialogue({ purpose: 'Screening', language: 'Telugu', data });
   t.start(); await t.hear('అవును');
   const u1 = await t.hear('గడబడ'); const u2 = await t.hear('గడబడ');
-  ok(!u1.done && !u2.done && u2.say.startsWith(S.phrases('Telugu').yesOrNo), 'C7 two unclear answers: still talking, the second time "అవునా కాదా?"', [u1.say, u2.say]);
+  ok(!u1.done && !u2.done && u2.say.startsWith(S.phrases('Telugu').yesOrNo.replace(/^సారీ,\s*/, '')) && !/సారీ/.test(u2.say), 'C7 two unclear answers: still talking, the second time "అవునా కాదా?"', [u1.say, u2.say]);
   const u3 = await t.hear('గడబడ');
   ok(u3.done, 'C8 the third unclear answer ends politely', u3.say);
 

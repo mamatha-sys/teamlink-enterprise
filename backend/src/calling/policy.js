@@ -127,7 +127,7 @@ async function personVerdict(ctx) {
   if (c.consentStatus === 'GIVEN') {
     const p = String(c.consentPurposes || '');
     if (p && !/recruit|message/i.test(p)) return refuse('no_consent', 'The consent on record is not for recruitment calls.');
-  } else if (!(service && s.consentApplied)) {
+  } else if (!(s.consentAll || (service && s.consentApplied))) { // no record: allowed by default ("andhariki consent starting lo ney ok", 2026-11-03)
     return refuse('no_consent', service
       ? 'There is no consent record for this candidate. An Admin can allow service calls to people who applied.'
       : 'There is no consent record for this candidate, so a screening call is not allowed.');

@@ -117,7 +117,7 @@ async function to(d, step, answers) { // walk a Screening call to a step with pl
   r = await d.hear('yes', { heard: 'unclear' });
   ok(r.say.startsWith(P.notClear) && d.st.interest === null, 'U1 an unclear "yes" is NOT taken as yes: "I couldn\'t hear you clearly" + the question', r.say);
   r = await d.hear('', { heard: 'unclear' });
-  ok(r.say.startsWith(P.breaking), 'U2 second time: "your voice is breaking up"', r.say);
+  ok(r.say.startsWith(P.breaking.replace(/^Sorry, y/, 'Y')), 'U2 second time: "your voice is breaking up"', r.say);
   r = await d.hear('', { heard: 'unclear' });
   ok(r.done && d.outcome().outcome === 'Unclear' && d.st.interest === null && /not heard clearly/.test(d.outcome().summary), 'U3 third time: a polite end, outcome Unclear, nothing assumed', d.outcome());
   const turns = d.transcript().filter((x) => x.who === 'candidate');

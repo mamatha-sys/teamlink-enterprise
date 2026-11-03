@@ -58,6 +58,7 @@ const F = {
   reminders: 'Interview reminder calls, hours before (comma separated)',
   callRoles: 'Roles that can place AI calls',
   bulkRoles: 'Roles that can place bulk campaigns',
+  consentAll: 'Call candidates who have no consent record (Yes / No)', // founder 2026-11-03: consent OK for everyone by default
   consentApplied: 'Allow service calls to people who applied but have no consent record (Yes / No)',
   dndService: 'Allow service calls to numbers marked DND (Yes / No)',
   recording: 'Record calls (Yes / No)',
@@ -108,6 +109,7 @@ const FIELD_LIST = [
   [F.reminders, '24,2'],
   [F.callRoles, 'SUPER_ADMIN,ADMIN,STL,TL,RECRUITER'],
   [F.bulkRoles, 'SUPER_ADMIN,ADMIN,STL,TL'],
+  [F.consentAll, 'Yes'],
   [F.consentApplied, 'No'],
   [F.dndService, 'No'],
   [F.recording, 'No'],
@@ -125,7 +127,7 @@ const DEFAULTS = {
   mode: 'Off', region: 'Mumbai', hoursFrom: '09:00', hoursTo: '21:00', outside: 'Queue', dailyLimit: 100, userLimit: 0,
   attempts: 3, gaps: [30, 120], languages: ['English', 'Telugu', 'Hindi'], fallbackLanguage: 'English', voice: '',
   reminders: [24, 2], callRoles: ['SUPER_ADMIN', 'ADMIN', 'STL', 'TL', 'RECRUITER'], bulkRoles: ['SUPER_ADMIN', 'ADMIN', 'STL', 'TL'],
-  consentApplied: false, dndService: false, recording: false, keepTranscripts: false, transcriptDays: 90, recordingDays: 30,
+  consentAll: true, consentApplied: false, dndService: false, recording: false, keepTranscripts: false, transcriptDays: 90, recordingDays: 30,
   writtenEmail: false, writtenWhatsapp: false, shortlistStages: ['CLIENT_SHORTLISTED'], maxBulk: 50,
 };
 

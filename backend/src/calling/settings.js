@@ -97,6 +97,7 @@ function normalise(values) {
     reminders: reminders.length ? reminders : D.reminders,
     callRoles: roles(v[F.callRoles], D.callRoles),
     bulkRoles: roles(v[F.bulkRoles], D.bulkRoles),
+    consentAll: yes(v[F.consentAll], D.consentAll),
     consentApplied: yes(v[F.consentApplied], D.consentApplied),
     dndService: yes(v[F.dndService], D.dndService),
     recording: yes(v[F.recording], D.recording),

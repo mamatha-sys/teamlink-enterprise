@@ -437,10 +437,21 @@ class Dialogue {
 
   speak(...parts) {
     if (this.prefix) { parts.unshift(this.prefix); this.prefix = ''; } // e.g. the brain's short lead-in, once, before the next sentence
-    const text = this.guard(parts.filter(Boolean).join(' '));
+    const text = this.oneSorry(this.guard(parts.filter(Boolean).join(' ')));
     this.st.transcript.push({ who: 'assistant', text: text.slice(0, 600) });
     this.st.lastAsk = text;
     return text;
+  }
+  // "Sorry" ONCE per call (founder 2026-11-03: "multiple times sorry sorry ani chepthundhi. adhi rectify cheyyu"): after the first,
+  // a sentence that opens with "Sorry," / "Sorry about that." / "సారీ," / "सॉरी," is said without it.
+  oneSorry(text) {
+    const OPEN = /(^|[.!?।]\s+)(?:sorry about that|sorry|సారీ|सॉरी)\s*[,.!।]\s*/gi;
+    if (!this.st.saidSorry) {
+      if (/sorry|సారీ|सॉरी/i.test(text)) this.st.saidSorry = true;
+      return text;
+    }
+    const out = text.replace(OPEN, (m, lead) => lead).replace(/(^|[.!?]\s+)([a-z])/g, (m, lead, ch) => lead + ch.toUpperCase()).trim();
+    return out || text;
   }
   finish(say, why) {
     this.st.done = true; this.st.ended = why;

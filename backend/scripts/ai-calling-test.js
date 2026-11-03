@@ -138,7 +138,7 @@ const COPY_URL = `file:${COPY.split(path.sep).join('/')}`;
   const cfgValues = (o = {}) => ({
     [F.mode]: 'Test', [F.sid]: 'ZZSID', [F.key]: secretsSent ? '' : FAKE_KEY, [F.token]: secretsSent ? '' : FAKE_TOKEN, [F.region]: 'Mumbai', [F.callerId]: '09000099999', [F.appId]: 'ZZAPP1', [F.hook]: secretsSent ? '' : FAKE_HOOK,
     [F.publicBase]: API, [F.testNumbers]: [ph(1), ph(2), ph(3), ph(4)].join(', '), [F.hoursFrom]: '00:00', [F.hoursTo]: '23:59', [F.outside]: 'Queue', [F.dailyLimit]: '500', [F.userLimit]: '0',
-    [F.attempts]: '3', [F.gaps]: '30,120', [F.keepTranscripts]: 'No', [F.recording]: 'No', ...o,
+    [F.attempts]: '3', [F.gaps]: '30,120', [F.keepTranscripts]: 'No', [F.recording]: 'No', [F.consentAll]: 'No', ...o, // the strict consent rules (the B checks); B18 checks the default
   });
   const saveCfg = async (o) => { const r = await api('PUT', '/api/ai-calling/admin/config', T.admin, { values: cfgValues(o) }); if (r.status === 200) secretsSent = true; settings.dropCache(); return r; };
   const hookPost = (body, { key = FAKE_HOOK, headers = {}, raw } = {}) => api('POST', `/api/webhooks/exotel-ai/status${key === null ? '' : `?key=${encodeURIComponent(key)}`}`, null, raw || body, headers);
@@ -272,6 +272,13 @@ const COPY_URL = `file:${COPY.split(path.sep).join('/')}`;
     const np = await callOn(T.rec, nophone.app.id, 'Screening');
     check('B16 a candidate with no phone is refused in plain words', np.status === 403 && np.body.code === 'no_phone', np.body);
     check('B17 refusals reached Exotel zero times and left audit rows', fake.state.connects.length === 1 + (r5.body.results ? 1 : 0) + (d3.body.results ? 1 : 0) && (await auditCount('AI call refused')) >= 6, { connects: fake.state.connects.length });
+    // founder 2026-11-03 "andhariki consent starting lo ney ok pettu. default ga": no record = consented unless they said no
+    await saveCfg({ [F.mode]: 'Live', [F.consentAll]: '' });
+    const r7 = await callOn(T.rec, norec.app.id, 'Screening');
+    const r8 = await callOn(T.rec, nc.app.id, 'Screening');
+    check('B18 by default a candidate with no consent record IS called; one who said no is still refused', r7.status === 200 && r8.status === 403 && r8.body.code === 'no_consent', { r7: r7.body, r8: r8.body });
+    if (r7.body.results) { await svc.cancel(await ident(uRec), r7.body.results[0].callId).catch(() => null); }
+    await saveCfg({ [F.mode]: 'Live' });
 
     // ======================================================================= C. screening lifecycle + the four outcomes
     console.log('\n=== C. Screening: queued -> calling -> provider callbacks -> completed, outcomes saved in the ATS');
