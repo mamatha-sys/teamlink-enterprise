@@ -380,7 +380,7 @@ async function sendInvites(appId, event, opts = {}) {
         // eslint-disable-next-line no-await-in-loop
         const r = await sendOne({
           to: rc.email, subject: m.subject, text: m.text, html: m.html ? m.html(logo.length > 0) : undefined, useEmployeeFrom: false, fromName: 'TeamLink Interviews', senderEmail: organizer.email || undefined,
-          attachments: [...logo, { filename: 'interview.ics', content: ics, contentType: `text/calendar; charset=utf-8; method=${WORDS[event].cancel ? 'CANCEL' : 'REQUEST'}` }],
+          attachments: [{ filename: 'interview.ics', content: ics, contentType: `text/calendar; charset=utf-8; method=${WORDS[event].cancel ? 'CANCEL' : 'REQUEST'}` }, ...logo], // the invite first (mail apps read the first calendar part)
         }).catch((err) => ({ ok: false, error: err.message }));
         if (r && r.ok) row = { ...base, status: 'sent', detail: 'Email sent with a calendar invite' };
         else row = { ...base, status: 'not_sent', detail: plainReason(r || {}), notConfigured: !!(r && r.notConfigured) };
