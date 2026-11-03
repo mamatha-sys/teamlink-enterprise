@@ -22,6 +22,8 @@ const leaveCharge = require('../utils/leaveCharge');
 const markedLeave = require('../utils/markedLeave');
 
 const router = express.Router();
+// working days = no week-offs, no company holidays (utils/workingDays.js, founder 2026-11-03): the holiday calendar is loaded first
+router.use((req, res, next) => { require('../utils/workingDays').ready().then(() => next(), () => next()); }); // eslint-disable-line global-require
 router.use(requireAuth);
 
 

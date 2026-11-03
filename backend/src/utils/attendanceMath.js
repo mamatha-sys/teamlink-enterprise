@@ -95,17 +95,19 @@ function calendarDays(month) {
   return new Date(y, m, 0).getDate();
 }
 
-// Working days of a month = every day that is not a weekly off. Week off is
-// SUNDAY ONLY (user, 2026-10-09: Saturday is a working day); `weeklyOffDays` is
-// HrConfig.weeklyOffDays ('0' = Sunday). Company holidays are not removed here.
+// Working days of a month = every day that is not a weekly off AND not a company holiday (founder 2026-11-03: "only working days are
+// calculated, not the week-offs and holidays"). Week off is SUNDAY ONLY (user, 2026-10-09: Saturday is a working day); `weeklyOffDays`
+// is HrConfig.weeklyOffDays ('0' = Sunday). Holidays come from utils/workingDays.js (the route awaits its ready() first; without it
+// the holiday list is empty and only week-offs are removed).
 function businessDays(month, weeklyOffDays = '0') {
   const [y, m] = String(month || '').split('-').map(Number);
   if (!y || !m) return 0;
   const offs = new Set(String(weeklyOffDays ?? '0').split(',').map((x) => Number(x.trim())).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6));
   let n = 0;
+  const WD = require('./workingDays'); // eslint-disable-line global-require
   for (let d = 1; d <= calendarDays(month); d++) {
     const dow = new Date(y, m - 1, d).getDay();
-    if (!offs.has(dow)) n++;
+    if (!offs.has(dow) && WD.isWorking(`${month}-${String(d).padStart(2, '0')}`)) n++;
   }
   return n;
 }
@@ -135,7 +137,8 @@ function monthStats({ month, records, punches, cfg, excusedDates }) {
 
   const free = Number(cfg.freeLateArrivalsPerMonth || 0);
   const halfDayCut = Math.max(0, late - free);
-  const working = calendarDays(month);
+  // working days only (founder 2026-11-03): week-offs and company holidays are not days anybody had to work
+  const working = businessDays(month, cfg.weeklyOffDays);
   // Late days are still worked days, so they count towards Present for the percentage.
   const pct = working > 0 ? Math.round((((present + markedLate) + halfDay * 0.5) / working) * 100) : 0;
   return { present, halfDay, absent, leave, late, halfDayCut, working, businessDays: businessDays(month, cfg.weeklyOffDays), pct };

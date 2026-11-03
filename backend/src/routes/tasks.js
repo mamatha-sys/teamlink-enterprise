@@ -39,8 +39,11 @@ const {
   parseAudience, parseChannels, resolveAudience, deliver, describeDelivery,
 } = require('../utils/audience');
 
+const WD = require('../utils/workingDays'); // "days late" = working days only (founder 2026-11-03)
 const router = express.Router();
 router.use(requireAuth);
+// the week-off setting + holiday calendar for the working-day counts below (utils/workingDays.js)
+router.use((req, res, next) => { WD.ready().then(() => next(), () => next()); });
 
 // The status vocabulary. One list, served to the browser by /options so the
 // modal's "-- Select Status --" picker and this file can never disagree.
@@ -205,7 +208,7 @@ function decorate(t, now = today()) {
     needsReason: overdue && !(lastDelay && lastDelay.status === 'Pending'),
     priority: t.priority || 'Medium',
     overdue,
-    daysLate: overdue ? daysBetween(t.endDate, now) : 0,
+    daysLate: overdue ? Math.max(1, WD.after(t.endDate, now)) : 0, // working days only: week-offs and holidays are not counted
     // founder 2026-10-27: a task the person marked done is COMPLETED only once their TL approved it
     displayStatus: overdue ? 'Overdue' : (t.status === 'Completed' && t.reviewState === 'Pending Review' ? 'Waiting for TL approval' : t.status),
     // Completion in words, from the stamps the lifecycle already keeps.
@@ -470,7 +473,7 @@ async function dayEndReport({ day = today(), userIds = null } = {}) {
       people.set(t.assigneeId, { userId: t.assigneeId, name: t.assigneeName, employeeCode: e.employeeCode || null, department: e.department || t.department || null, tl: tl ? tl.name : null, tasks: [] });
     }
     people.get(t.assigneeId).tasks.push({
-      id: t.id, name: t.name, state, label: (DAY_STATES.find(([k]) => k === state) || [])[1], why, late: isLate, daysLate: isLate ? daysBetween(t.endDate, day) : 0,
+      id: t.id, name: t.name, state, label: (DAY_STATES.find(([k]) => k === state) || [])[1], why, late: isLate, daysLate: isLate ? Math.max(1, WD.after(t.endDate, day)) : 0,
       due: t.endDate, givenBy: t.assignedById === t.assigneeId ? 'Self' : t.assignedByName, hoursToday: todayHrs.logged.get(t.id) || 0, hoursTotal: round2(hrs),
     });
   });
