@@ -124,6 +124,7 @@ router.post('/whatsapp', async (req, res) => {
       const want = crypto.createHmac('sha256', cfg.appSecret).update(req.rawBody || Buffer.from('')).digest('hex');
       if (!safeEq(sent, want)) return res.status(403).json({ error: 'Bad signature' });
       await delivery.markSeen('whatsapp');
+      require('../utils/greenStartWaForward').forwardSoon(req.rawBody, req.get('x-hub-signature-256')); // eslint-disable-line global-require
       const out = await handleWhatsApp(req.body);
       // Meta wants a quick 200; anything else makes it retry.
       return res.status(200).json({ ok: true, ...out });
@@ -150,6 +151,8 @@ router.post('/whatsapp', async (req, res) => {
     if (!anyValid && knownReferenced === 0) anyValid = all.some((sec) => safeEq(sent, sigOf(sec)));
     if (!anyValid) return res.status(403).json({ error: 'Bad signature' });
     await delivery.markSeen('whatsapp');
+    // the same call to Omni-Channel's own webhook on this server, so replies show in its Channels > WhatsApp (utils/greenStartWaForward.js)
+    require('../utils/greenStartWaForward').forwardSoon(raw, req.get('x-hub-signature-256')); // eslint-disable-line global-require
     const out = await handleWhatsApp(req.body, { valid, anyValid });
     return res.status(200).json({ ok: true, ...out });
   } catch (err) {

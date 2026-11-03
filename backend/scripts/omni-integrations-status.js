@@ -53,6 +53,9 @@ const when = (t) => (t ? new Date(t).toLocaleString('en-IN', { timeZone: 'Asia/K
       for (const [ch, c] of Object.entries(ws.channels || {})) line(`    ${ch.padEnd(9)} ${String(c.state).padEnd(8)} ${String(c.words || '').slice(0, 160)}`);
     }
   }
+  const fwd = await require(path.join(BACK, 'src/utils/greenStartWaForward')).last(); // eslint-disable-line global-require
+  line('\n=== WHATSAPP REPLIES -> OMNI-CHANNEL (the last call TeamLink handed on) ===');
+  line(fwd ? `  ${when(fwd.at)}: ${fwd.ok ? `OK (${fwd.status})` : `NOT taken - ${fwd.error || fwd.status}`} | signed with ${fwd.signedBy}` : '  none yet (run .\\link-whatsapp-replies-omni-on-vps.ps1 once)');
   try {
     const conns = await GI.connections();
     line('\n=== OMNI-CHANNEL: what it shows as connected right now ===');
