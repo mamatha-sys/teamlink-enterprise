@@ -122,11 +122,11 @@ export function nextActionsFor(user, stage, app = null) {
   // INTERNAL HIRING: HR Review → Dept Head / TL → Interview (no BDE / client).
   if (app && isInternalApp(app)) {
     if (RECRUITER_STEP.includes(stage) || ['RECRUITER_REVIEW', 'RECRUITER_APPROVED'].includes(stage)) {
-      if (is('hr', 'recruiter') && canMoveToStage(user, 'TL_REVIEW')) out.push({ id: 'send_to_dept', label: 'Send to dept head / team lead', kind: 'move', to: 'TL_REVIEW' });
+      // HR runs internal hiring start to end (2026-11-03): HR books the interview straight from its own check (no Dept head / TL step).
+      if (is('hr') && can(user, 'ats', 'interviews', 'Schedule Interview', 'create')) out.push({ id: 'book_interview', label: 'Book interview', kind: 'schedule' });
     } else if (stage === 'TL_REVIEW') {
-      // TeamLink's own jobs have no BDE: the Dept head / TL's approval IS the interview booking (the server checks it).
-      if (is('tl') && can(user, 'ats', 'candidates', 'Pipeline Stages', 'edit')) out.push({ id: 'approve_interview', label: 'Approve and book interview', kind: 'schedule' });
-      if (is('tl') && mayReturn(user)) out.push({ id: 'return', label: 'Send back to HR', kind: 'return' });
+      // an older candidate still waiting at the old Dept head / TL step: HR (or that TL) books the interview
+      if (is('hr', 'tl') && (can(user, 'ats', 'interviews', 'Schedule Interview', 'create') || can(user, 'ats', 'candidates', 'Pipeline Stages', 'edit'))) out.push({ id: 'approve_interview', label: 'Book interview', kind: 'schedule' });
     } else if (stage === 'JOINED') {
       if (is('hr') && can(user, 'ats', 'interviews', 'Internal Hiring', 'approve')) out.push({ id: 'hrms', label: 'Add as employee', kind: 'hrms' });
     }

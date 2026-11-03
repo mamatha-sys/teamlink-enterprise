@@ -765,8 +765,9 @@ async function applyStageMove(user, applicationId, body = {}, opts = {}) {
     // INTERNAL HIRING: the Dept Head / TL approves (HR Review → Dept Head / TL
     // → Interview). HR owns the other internal stages, but an internal
     // candidate leaves TL Review forward only on a TL / STL's say-so.
+    // (2026-11-03) HR runs internal hiring start to end, so HR may move it on too.
     if (internal && existing.stage === 'TL_REVIEW' && (STAGE_PHASE[stage] || 0) > STAGE_PHASE.TL_REVIEW
-      && !DEPT_HEAD_ROLES.includes(stageRoleOf(user))) {
+      && !DEPT_HEAD_ROLES.includes(stageRoleOf(user)) && stageRoleOf(user) !== 'HR') {
       return { status: 403, body: { error: `Only the Dept Head / TL approves an internal candidate out of ${stageLabelFor('TL_REVIEW', { internal: true })}.` } };
     }
   }

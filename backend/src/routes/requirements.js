@@ -587,8 +587,8 @@ const CLIENT_WORKFLOW_STEPS = [
 ];
 const INTERNAL_WORKFLOW_STEPS = [
   { key: 'screening', label: 'Screening', stages: ['NEW', 'AI_INTERVIEW_REQUIRED', 'AI_INTERVIEW_SCHEDULED', 'AI_INTERVIEW_COMPLETED'] },
-  { key: 'hrReview', label: 'HR Review', stages: ['RECRUITER_REVIEW', 'RECRUITER_APPROVED'] },
-  { key: 'deptHead', label: 'Dept Head / TL', stages: ['TL_REVIEW'] },
+  // HR runs the internal chain start to end (2026-11-03): no Dept head / TL step; an older TL_REVIEW row counts as HR's check
+  { key: 'hrReview', label: 'HR Review', stages: ['RECRUITER_REVIEW', 'RECRUITER_APPROVED', 'TL_REVIEW'] },
   { key: 'interview', label: 'Interview', stages: ['INTERVIEW_SCHEDULED'] },
   { key: 'feedback', label: 'Feedback', stages: ['INTERVIEW_COMPLETED'] },
   { key: 'selected', label: 'Selected', stages: ['SELECTED'] },

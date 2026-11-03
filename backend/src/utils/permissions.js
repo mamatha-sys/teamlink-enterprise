@@ -1373,6 +1373,11 @@ async function can(user, product, moduleId, feature, action, record = undefined)
   //      Role Catalog row can no longer take it away. The record scope and the delete guards (people / invoices / payments) stay in the routes.
   if (action === 'delete' && BDE_TEAM_DELETE.includes(`${moduleId}|${feature}`) && bdeTeamUser(user)) return true;
 
+  // 1a2. HR RUNS INTERNAL HIRING START TO END (founder 2026-11-03: "TLs dhi evaridhi em vundadhu, mottham antha start to end, HR ey chustharu"):
+  //      HR approves and sends the offer and takes the interview decision itself - a saved Role Catalog row cannot take it away.
+  //      HR's record scope is TeamLink's internal jobs only (utils/scope.js), so this never reaches a client placement.
+  if (moduleId === 'interviews' && action === 'approve' && ['Offers', 'Interview Feedback'].includes(feature) && stageRoleOf(user) === 'HR') return true;
+
   // 1b. THE ACCOUNTS DESK'S READ OF CLIENTS (P10) — before the ATS product test.
   if (moduleId === 'clients' && action === 'view' && ACCOUNTS_CLIENT_READ.includes(feature) && accountsClientReader(user)) {
     const acc = await accessFor('ACCOUNTANT', 'clients', 'ats');
@@ -1541,7 +1546,8 @@ const STAGE_OWNERS = {
   // internal hiring (scope pins HR to internal jobs). A Recruiter / TL / STL / Manager / AM asks the BDE instead.
   INTERVIEW_SCHEDULED: ['BDE', 'HR'],
   INTERVIEW_COMPLETED: ['RECRUITER', 'BDE', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER', 'HR'],
-  SELECTED: ['CLIENT', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER'],
+  // HR decides Selected on TeamLink's own jobs (2026-11-03: HR runs internal hiring start to end; HR's scope is internal only).
+  SELECTED: ['CLIENT', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER', 'HR'],
   OFFER: ['RECRUITER', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER', 'HR'],
   OFFER_ACCEPTED: ['RECRUITER', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER', 'HR'],
   JOINED: ['RECRUITER', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER', 'HR'],
@@ -1912,6 +1918,10 @@ async function effectiveMatrix(user) {
         const f = k.split('|')[1];
         if (out[m.id].features[f]) out[m.id].features[f] = { ...out[m.id].features[f], delete: true };
       });
+    }
+    // HR approves internal offers and interview decisions (can() 1a2, 2026-11-03): draw those switches ON.
+    if (m.id === 'interviews' && out[m.id] && out[m.id].features && stageRoleOf(user) === 'HR') {
+      ['Offers', 'Interview Feedback'].forEach((f) => { if (out[m.id].features[f]) out[m.id].features[f] = { ...out[m.id].features[f], approve: true }; });
     }
     // The BDE TL: no candidates / interviews at all (BDE work only, 2026-10-29) - the same refusal can() makes.
     if (BDE_TL_HIDDEN_MODULES.includes(m.id) && require('./scope').isBdeTl(user) && out[m.id]) { // eslint-disable-line global-require

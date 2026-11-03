@@ -297,9 +297,9 @@ export const NEXT_ACTION_BY_STAGE = {
 // Mirrors backend NEXT_ACTION_INTERNAL — the internal chain's own words.
 export const NEXT_ACTION_INTERNAL = {
   NEW: 'Check by HR',
-  RECRUITER_REVIEW: 'Send to dept head / team lead',
-  RECRUITER_APPROVED: 'Send to dept head / team lead',
-  TL_REVIEW: 'Approve for interview / Reject',
+  RECRUITER_REVIEW: 'Book the interview',
+  RECRUITER_APPROVED: 'Book the interview',
+  TL_REVIEW: 'Book the interview / Reject',
   SELECTED: 'Send offer',
   JOINED: 'Add as employee',
 };
@@ -690,7 +690,7 @@ export const WORKFLOW_STAGE_GROUPS = {
   PAYMENT_RECEIVED: { label: 'Payment', entity: 'invoice', invoiceStatuses: ['Paid'] },
 
   // ---- Internal hiring (ATS) -----------------------------------------------
-  INTERNAL_HR_REVIEW: { label: 'HR Review', side: 'ats', hiring: 'internal', stages: REVIEW_STAGES },
+  INTERNAL_HR_REVIEW: { label: 'HR Review', side: 'ats', hiring: 'internal', stages: [...REVIEW_STAGES, 'TL_REVIEW'] }, // HR runs it all (2026-11-03)
   INTERNAL_DEPT_HEAD_REVIEW: { label: 'Dept Head / TL', side: 'ats', hiring: 'internal', stages: ['TL_REVIEW'] },
   INTERNAL_INTERVIEW: { label: 'Interview', side: 'ats', hiring: 'internal', stages: ['INTERVIEW_SCHEDULED'] },
   INTERNAL_FEEDBACK_PENDING: { label: 'Feedback', side: 'ats', hiring: 'internal', stages: ['INTERVIEW_COMPLETED'] },
@@ -792,7 +792,6 @@ export const WORKFLOW_FLOW = {
   ],
   internal: [
     { id: 'hr_review', label: 'HR Review', group: 'INTERNAL_HR_REVIEW' },
-    { id: 'dept_head', label: 'Dept Head / TL', group: 'INTERNAL_DEPT_HEAD_REVIEW' },
     { id: 'int_interview', label: 'Interview', group: 'INTERNAL_INTERVIEW' },
     { id: 'int_feedback', label: 'Feedback', group: 'INTERNAL_FEEDBACK_PENDING' },
     { id: 'int_selected', label: 'Selected', group: 'INTERNAL_SELECTED', also: { id: 'int_rejected', label: 'Rejected', group: 'INTERNAL_REJECTED' } },
@@ -807,7 +806,7 @@ export const WORKFLOW_FLOW = {
 export const INTERNAL_STAGE_LABELS = {
   RECRUITER_REVIEW: 'Check by HR',
   RECRUITER_APPROVED: 'Check by HR',
-  TL_REVIEW: 'Check by dept head / team lead',
+  TL_REVIEW: 'Check by HR',
   HIRED: 'Employee record made',
 };
 export function stageLabelFor(code, { internal = false } = {}) {

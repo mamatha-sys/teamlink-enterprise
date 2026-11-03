@@ -53,6 +53,27 @@ const { prisma, check, RUN } = Z;
     const buf = Buffer.from(await pdf.arrayBuffer());
     check('8 the joining letter opens as a PDF', pdf.status === 200 && buf.slice(0, 4).toString() === '%PDF', [pdf.status, buf.length]);
 
+    // HR RUNS IT START TO END (founder 2026-11-03: "TLs dhi evaridhi em vundadhu ... HR ey chustharu")
+    const cand2 = await prisma.candidate.create({ data: { name: `ZZTEST IHP Sita ${RUN}`, email: `zz-ihp-sita-${RUN}@example.test`, phone: '9000000090', location: 'Hyderabad' } });
+    Z.made.cands.push(cand2.id);
+    const ap2 = await prisma.application.create({ data: { candidateId: cand2.id, requirementId: req.id, stage: 'RECRUITER_REVIEW', hiringType: 'TeamLink Internal Hire' } });
+    Z.made.apps.push(ap2.id);
+    const toInt = await Z.call('PATCH', `/api/applications/${ap2.id}/stage`, tk.hr, { stage: 'INTERVIEW_SCHEDULED' });
+    check('10 HR books the interview straight from its own check (no Dept head / TL step)', toInt.status < 300, [toInt.status, toInt.body && toInt.body.error]);
+    await prisma.application.update({ where: { id: ap2.id }, data: { stage: 'INTERVIEW_COMPLETED' } });
+    const sel = await Z.call('PATCH', `/api/applications/${ap2.id}/stage`, tk.hr, { stage: 'SELECTED' });
+    check('11 HR marks the internal candidate Selected', sel.status < 300, [sel.status, sel.body && sel.body.error]);
+    const bellsBefore = await prisma.notification.count({ where: { userId: tl.id, title: { contains: 'Offer to approve' } } });
+    const prep = await Z.call('POST', `/api/ats/offers/${ap2.id}/prepare`, tk.hr, { offeredCtc: 420000, confirmCtc: true });
+    const bellsAfter = await prisma.notification.count({ where: { userId: tl.id, title: { contains: 'Offer to approve' } } });
+    check('12 HR prepares the offer; no TL is asked to approve it', prep.status < 300 && bellsAfter === bellsBefore, [prep.status, prep.body && (prep.body.error || prep.body.message), bellsAfter - bellsBefore]);
+    const appr = await Z.call('POST', `/api/ats/offers/${ap2.id}/approve`, tk.hr, {});
+    const ap2b = await prisma.application.findUnique({ where: { id: ap2.id } });
+    check('13 HR approves and sends the offer itself (stage Offer)', appr.status < 300 && ap2b.stage === 'OFFER', [appr.status, appr.body && appr.body.error, ap2b.stage]);
+    const meHr = await Z.call('GET', '/api/auth/me', tk.hr);
+    const f = meHr.body && meHr.body.access && meHr.body.access.interviews && meHr.body.access.interviews.features;
+    check('14 the HR screens show Approve (Offers, interview decision)', !!f && f.Offers && f.Offers.approve === true && f['Interview Feedback'] && f['Interview Feedback'].approve === true, f && [f.Offers, f['Interview Feedback']]);
+
     // a client placement never gets an employee / pack
     const cCli = await prisma.client.create({ data: { name: `ZZTEST IHP Client ${RUN}`, clientType: 'Client', location: 'Pune' } });
     Z.made.clients.push(cCli.id);

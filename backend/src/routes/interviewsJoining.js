@@ -641,13 +641,14 @@ router.post('/offers/:id/prepare', requirePerm('ats', 'interviews', 'Offers', 'e
   // gives "approve" to). Without a TL on the job, nobody is guessed — the
   // offer waits on the Offers screen for any approver.
   const r = app.requirement || {};
-  await notifyUsers([r.tlId, r.stlId], {
+  // An internal job's offer is HR's to approve and send (2026-11-03: HR runs internal hiring start to end) - no TL is asked.
+  if (!r.internal) await notifyUsers([r.tlId, r.stlId], {
     title: `✍️ Offer to approve: ${app.candidate.name}`,
     message: `${r.title} — ${r.internal ? 'TeamLink' : (r.client && r.client.name) || ''}. CTC ${inr(ctc)}. Open Offers → Approve & send.`,
     exceptUserId: req.user.id,
   });
   const fresh = await prisma.application.findUnique({ where: { id: app.id }, include: FULL_INCLUDE });
-  res.json({ ...shapeRow(fresh), message: `Offer for ${app.candidate.name} is ready. Waiting for approval.` });
+  res.json({ ...shapeRow(fresh), message: r.internal ? `Offer for ${app.candidate.name} is ready. Approve & send it from Offers.` : `Offer for ${app.candidate.name} is ready. Waiting for approval.` });
 });
 
 router.post('/offers/:id/send-back', requirePerm('ats', 'interviews', 'Offers', 'approve'), async (req, res) => {

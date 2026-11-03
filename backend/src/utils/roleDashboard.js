@@ -356,7 +356,7 @@ async function recruiterBoard(c, req) {
     rows: await withReqProgress(c, await shapeReqs(openReqs.map((r) => r.id), { clientDesk: c.clientDesk })),
   });
   const pipeGroups = internal
-    ? ['PRE_ATS', 'INTERNAL_HR_REVIEW', 'INTERNAL_DEPT_HEAD_REVIEW', 'INTERNAL_INTERVIEW', 'INTERNAL_FEEDBACK_PENDING', 'INTERNAL_SELECTED', 'INTERNAL_OFFER', 'INTERNAL_JOINED', 'HOLD']
+    ? ['PRE_ATS', 'INTERNAL_HR_REVIEW', 'INTERNAL_INTERVIEW', 'INTERNAL_FEEDBACK_PENDING', 'INTERNAL_SELECTED', 'INTERNAL_OFFER', 'INTERNAL_JOINED', 'HOLD']
     : ['SCREENING_PENDING', 'RECRUITER_REVIEW_PENDING', 'RECRUITER_REVIEW', 'TL_REVIEW', 'BDE_READY_TO_SUBMIT', 'CLIENT_DECISION_PENDING', 'INTERVIEW', 'FEEDBACK_PENDING', 'SELECTED', 'OFFER', 'OFFER_ACCEPTED', 'HOLD'];
   b.widgets.push({ id: 'pipeline', type: 'pipeline', title: 'My pipeline — stage-wise', rows: pipelineRows(c, b, pipeGroups) });
   const joinedMonth = joinedIn(c, D.monthStart, D.t);

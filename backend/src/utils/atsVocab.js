@@ -194,6 +194,9 @@ function stageMoveProblem(fromStage, toStage, { internal = false, resumeFrom = n
   // HR Review → Dept Head / TL → Interview. The Dept Head / TL's approval
   // (phase 1) leads straight to Interview (phase 4).
   if (internal && from === STAGE_PHASE.TL_REVIEW && toStage === 'INTERVIEW_SCHEDULED') return null;
+  // HR RUNS INTERNAL HIRING START TO END (founder 2026-11-03: "TLs dhi evaridhi em vundadhu, mottham antha start to end, HR ey chustharu"):
+  // HR books the interview straight from its own check - there is no Dept head / TL step any more.
+  if (internal && from === 0 && toStage === 'INTERVIEW_SCHEDULED') return null;
   // Entering the NEXT phase lands on its first step: BDE Review before BDE
   // Approved, Shared with Client / Client Review before Client Shortlisted.
   if (to === from + 1) {
@@ -360,9 +363,9 @@ const NEXT_ACTION_BY_STAGE = {
 // TL → Interview → … → Offer → Joining → HRMS).
 const NEXT_ACTION_INTERNAL = {
   NEW: 'Check by HR',
-  RECRUITER_REVIEW: 'Send to dept head / team lead',
-  RECRUITER_APPROVED: 'Send to dept head / team lead',
-  TL_REVIEW: 'Approve for interview / Reject',
+  RECRUITER_REVIEW: 'Book the interview',
+  RECRUITER_APPROVED: 'Book the interview',
+  TL_REVIEW: 'Book the interview / Reject',
   SELECTED: 'Send offer',
   JOINED: 'Add as employee',
 };
@@ -841,7 +844,8 @@ const WORKFLOW_STAGE_GROUPS = {
   PAYMENT_RECEIVED: { label: 'Payment', entity: 'invoice', invoiceStatuses: ['Paid'] },
 
   // ---- Internal hiring (ATS) -----------------------------------------------
-  INTERNAL_HR_REVIEW: { label: 'HR Review', side: 'ats', hiring: 'internal', stages: REVIEW_STAGES },
+  // (2026-11-03) HR runs the whole internal chain: an older candidate still at TL_REVIEW counts as HR's check.
+  INTERNAL_HR_REVIEW: { label: 'HR Review', side: 'ats', hiring: 'internal', stages: [...REVIEW_STAGES, 'TL_REVIEW'] },
   INTERNAL_DEPT_HEAD_REVIEW: { label: 'Dept Head / TL', side: 'ats', hiring: 'internal', stages: ['TL_REVIEW'] },
   INTERNAL_INTERVIEW: { label: 'Interview', side: 'ats', hiring: 'internal', stages: ['INTERVIEW_SCHEDULED'] },
   INTERNAL_FEEDBACK_PENDING: { label: 'Feedback', side: 'ats', hiring: 'internal', stages: ['INTERVIEW_COMPLETED'] },
@@ -953,7 +957,6 @@ const WORKFLOW_FLOW = {
   ],
   internal: [
     { id: 'hr_review', label: 'HR Review', group: 'INTERNAL_HR_REVIEW' },
-    { id: 'dept_head', label: 'Dept Head / TL', group: 'INTERNAL_DEPT_HEAD_REVIEW' },
     { id: 'int_interview', label: 'Interview', group: 'INTERNAL_INTERVIEW' },
     { id: 'int_feedback', label: 'Feedback', group: 'INTERNAL_FEEDBACK_PENDING' },
     { id: 'int_selected', label: 'Selected', group: 'INTERNAL_SELECTED', also: { id: 'int_rejected', label: 'Rejected', group: 'INTERNAL_REJECTED' } },
@@ -968,7 +971,7 @@ const WORKFLOW_FLOW = {
 const INTERNAL_STAGE_LABELS = {
   RECRUITER_REVIEW: 'Check by HR',
   RECRUITER_APPROVED: 'Check by HR',
-  TL_REVIEW: 'Check by dept head / team lead',
+  TL_REVIEW: 'Check by HR',
   HIRED: 'Employee record made',
 };
 function stageLabelFor(code, { internal = false } = {}) {
