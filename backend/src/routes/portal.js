@@ -764,7 +764,7 @@ router.get('/candidate', requireAuth, wrap(async (req, res) => {
       appliedAt: a.createdAt,
       updatedAt: a.updatedAt,
       interview: interviewOf(a, { forCandidate: true }),
-      aiInterview: aiPending ? { pending: true, deadline: a.aiInterviewDeadline || null, link: null } : null,
+      aiInterview: aiPending ? { pending: true, deadline: a.aiInterviewDeadline || null, link: require('../utils/messageContext').appTokens({ requirement: {} }).aiInterviewLink || null } : null, // eslint-disable-line global-require
       offer,
       canWithdraw: !['REJECTED', 'JOINED', 'HIRED'].includes(a.stage),
     };

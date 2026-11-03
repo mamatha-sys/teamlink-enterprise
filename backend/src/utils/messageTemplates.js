@@ -68,6 +68,7 @@ const TOKENS = [
   { key: 'prepNote', label: 'How to prepare (link)', sample: 'How to prepare: https://tmlink.in/prep/abc', group: 'Interview', aliases: [] },
   { key: 'interviewOld', label: 'Old interview time', sample: 'Sat, 10 Oct, 10:00 am', group: 'Interview', aliases: [] },
   { key: 'deadline', label: 'AI interview deadline', sample: '14 Oct', group: 'Interview', aliases: [] },
+  { key: 'aiInterviewLink', label: 'AI interview link', sample: 'https://teamlink.teamlinks.in/jobs/#/candidate/applications', group: 'Interview', aliases: ['aiLink'] },
   { key: 'offerCtc', label: 'Offer CTC', sample: '4.2 LPA', group: 'Offer', aliases: ['ctc'] },
   { key: 'joiningDate', label: 'Joining date', sample: '1 Nov 2026', group: 'Offer', aliases: [] },
   { key: 'agreementLink', label: 'Agreement link', sample: 'https://tmlink.in/agreement/xyz', group: 'Client', aliases: [] },

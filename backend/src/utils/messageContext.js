@@ -51,6 +51,14 @@ function jobLinkOf(req) {
   } catch { return null; }
 }
 
+// Where the candidate takes the AI interview: the jobs site, My Applications ("Attend AI Interview" on the job).
+function aiInterviewLinkOf() {
+  try {
+    // eslint-disable-next-line global-require
+    return `${require('./jobPortalBridge').portalUrl()}/#/candidate/applications`;
+  } catch { return null; }
+}
+
 function appTokens(app) {
   if (!app) return {};
   const r = app.requirement || {};
@@ -63,6 +71,7 @@ function appTokens(app) {
     meetingLink: app.interviewMeetingLink || null,
     venue: app.interviewLocation || null,
     deadline: app.aiInterviewDeadline || null,
+    aiInterviewLink: aiInterviewLinkOf(),
     offerCtc: money(app.offeredCtc),
     joiningDate: app.joiningDate || null,
   };

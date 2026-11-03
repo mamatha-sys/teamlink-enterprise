@@ -65,6 +65,7 @@ function buildFacts({
     interviewLink: t.meetingLink || null,
     interviewPlace: t.venue || null,
     aiInterviewDeadline: t.deadline || null,
+    aiInterviewLink: ['AI_INTERVIEW_REQUIRED', 'AI_INTERVIEW_SCHEDULED'].includes(stage) ? (t.aiInterviewLink || null) : null,
     joiningDate: t.joiningDate || null,
     recruiterName: (recruiter && recruiter.name) || null,
     recruiterPhone: (recruiter && recruiter.phone) || null,

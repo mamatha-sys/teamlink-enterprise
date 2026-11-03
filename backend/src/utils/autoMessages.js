@@ -299,7 +299,18 @@ async function aiUsedToday() {
 const blockNamesOf = (ctx) => [ctx.requirement && !ctx.requirement.internal && ctx.requirement.client && ctx.requirement.client.name].filter(Boolean);
 
 // -> { subject, body, aiWritten, aiNote, template }
-async function wordsFor({
+// The AI interview message always carries its link (2026-11-03: "interview attend avamani mail vachindhi, but link raaledhu"),
+// whatever the saved wording or the AI writer said.
+async function wordsFor(args) {
+  const w = await wordsForRaw(args);
+  if (!w || w.missing || !args.row || args.row.stageTo !== 'AI_INTERVIEW_SCHEDULED') return w;
+  const link = require('./messageContext').appTokens({ requirement: {} }).aiInterviewLink; // eslint-disable-line global-require
+  if (!link || String(w.body || '').includes(link)) return w;
+  return { ...w, body: `${w.body || ''}
+
+Start your AI interview: ${link}`.trim() };
+}
+async function wordsForRaw({
   channel, row, ctx, settings, useStored, windowOpen, forcePlain,
 }) {
   // eslint-disable-next-line global-require

@@ -57,8 +57,8 @@ const TEMPLATES = {
     channels: ['Email', 'SMS', 'WhatsApp'],
     subject: 'Your AI screening interview for {{role}}',
     body: 'Hi {{name}}, your AI screening interview for {{role}} at {{client}} is scheduled. '
-      + 'Please complete it before {{deadline}}. The AI interview is a screening aid only — '
-      + 'a recruiter reviews every result.',
+      + 'Please complete it before {{deadline}}. Start it here: {{aiInterviewLink}} (sign in, open My Applications, '
+      + 'press Attend AI Interview). The AI interview is a screening aid only — a recruiter reviews every result.',
   },
   AI_INTERVIEW_REQUIRED: {
     key: 'AI_INTERVIEW_REQUIRED',
@@ -143,6 +143,12 @@ const TEMPLATES = {
 };
 
 // Fills {{tokens}} through the Message templates renderer; a detail nobody has stays "—" as before.
+// The AI interview message always carries its link, also when an Admin's saved wording has none (2026-11-03).
+function withAiLink(key, body, link) {
+  if (key !== 'AI_INTERVIEW_SCHEDULED' || !link || String(body || '').includes(link)) return body;
+  return `${body}\n\nStart your AI interview: ${link}`;
+}
+
 function fill(text, tokens) {
   // eslint-disable-next-line global-require
   return require('./messageTemplates').render(text, tokens, { blank: '—' }).text;
@@ -247,6 +253,7 @@ async function recordStageCommunications({
     mode: (application && application.interviewMode) || 'to be confirmed',
     interviewer: (application && application.interviewer) || 'to be confirmed',
     deadline: (application && application.aiInterviewDeadline) || 'the date in your invite',
+    aiInterviewLink: require('./messageContext').appTokens({ requirement: requirement || {} }).aiInterviewLink || '', // eslint-disable-line global-require
     sender: sender.senderName || '—',
   };
 
@@ -299,7 +306,7 @@ async function recordStageCommunications({
         trigger,
         recipient,
         subject: channel === 'Email' ? fill(tpl.subject, tokens) : null,
-        body: fill(tpl.body, tokens),
+        body: withAiLink(template.key, fill(tpl.body, tokens), tokens.aiInterviewLink),
         // eslint-disable-next-line no-nested-ternary
         status: !switchedOn ? IN.SWITCHED_OFF : (live ? 'QUEUED' : NOT_SENT),
         statusDetail: detail,
