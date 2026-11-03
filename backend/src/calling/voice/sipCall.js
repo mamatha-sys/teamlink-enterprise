@@ -111,7 +111,9 @@ async function place(user, input, deps = {}) {
   if (!c.ready) return svc.fail(409, 'not_ready', `AI phone calls are not ready: ${c.problems[0]}`, { steps: c.problems });
   const base = await settingsStore.load({ fresh: true });
   // the AI calling rules, with the phone line's own switch (Off / Test numbers / Live) instead of the Exotel one
-  const s = { ...base, mode: c.mode, testNumbers: c.testNumbers };
+  // test numbers: the server's list AND the ones the Admin saves in Integrations > AI Calling (founder 2026-11-03: "ey number ki
+  // call chesina call velley laaga ... prathi sari, problem lekunda" - a number saved on that screen is always callable in Test)
+  const s = { ...base, mode: c.mode, testNumbers: [...new Set([...c.testNumbers, ...(base.testNumbers || [])])] };
   const ctx = await svc.loadContext(input.applicationId);
   if (!ctx) return svc.fail(404, 'scope', 'Application not found.');
   const acc = await svc.accessVerdict(user, ctx, s);
