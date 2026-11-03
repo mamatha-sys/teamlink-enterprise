@@ -15,6 +15,7 @@ import './timesheet-priority.css';
 import './timesheet-tasks.css';
 import { TaskForm, GivenToMe, IGave, LateStrip, DayEndDialog, useTaskDialogs, PRI_WORD, cancelLine, AddOnList, TaskFiles, FeedbackToRd, FeedbackSent } from './TimesheetTasks.jsx';
 import IdeasBox from './IdeasBox.jsx';
+import TimesheetChecklist from './TimesheetChecklist.jsx'; // Checklist tab (founder 2026-11-03)
 
 // Timesheet — "Track and assign work".
 //
@@ -83,7 +84,7 @@ export default function Timesheet({ standalone = false }) {
   // the rows the server returned; department and dates stay server-side.
   const [pf, setPf] = useState({ q: '', code: '', name: '', role: '', status: '', review: '', priority: '', dueFrom: '', dueTo: '' });
   const [sort, setSort] = useState('');
-  const [view, setView] = useState(null); // 'mine' | 'gave' | 'all'
+  const [view, setView] = useState(null); // 'mine' | 'gave' | 'all' | 'checklist'
   const [newOpen, setNewOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [dayEndOpen, setDayEndOpen] = useState(false); // End of day: every task's state today (founder 2026-10-27) // feedback to the R&D team (any department may send it)
@@ -221,7 +222,7 @@ export default function Timesheet({ standalone = false }) {
   const OPEN = ['Not Started', 'In Progress', 'On Hold'];
   const mineCount = tasks.filter((t) => t.assigneeId === myId && OPEN.includes(t.status)).length;
   const gaveCount = tasks.filter((t) => t.assignedById === myId && t.assigneeId !== myId && OPEN.includes(t.status)).length;
-  const viewsOn = canGive || canPickEmployee;
+  const viewsOn = true; // the Checklist button is for everyone (2026-11-03)
   const cur = view || 'mine';
 
   return (
@@ -256,11 +257,13 @@ export default function Timesheet({ standalone = false }) {
               <button type="button" className={`tt-view${cur === 'mine' ? ' on' : ''}`} onClick={() => setView('mine')}>Given to me <b>{mineCount}</b></button>
               {canGive && <button type="button" className={`tt-view${cur === 'gave' ? ' on' : ''}`} onClick={() => setView('gave')}>Tasks I gave <b>{gaveCount}</b></button>}
               {canPickEmployee && <button type="button" className={`tt-view${cur === 'all' ? ' on' : ''}`} onClick={() => setView('all')}>{canGive ? 'My whole area' : 'Everyone'} <b>{tasks.length}</b></button>}
+              <button type="button" className={`tt-view${cur === 'checklist' ? ' on' : ''}`} onClick={() => setView('checklist')}>Checklist</button>
             </div>
           )}
 
           {!options && <div className="small-muted">Loading...</div>}
           {options && <LateStrip tasks={tasks} me={options.me.id} dlg={dlg} />}
+          {cur === 'checklist' && <TimesheetChecklist />}
           {options && cur === 'mine' && <GivenToMe tasks={tasks} options={options} dlg={dlg} busy={busyId} onStart={onStart} />}
           {options && cur === 'gave' && canGive && (
             <IGave tasks={tasks} options={options} dlg={dlg} busy={busyId} onStart={onStart} reload={load} setNotice={setNotice} setError={setError} />

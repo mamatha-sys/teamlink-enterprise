@@ -437,6 +437,7 @@ app.use('/api/ats-io', require('./routes/atsIo'));
 // generic /api/timesheet EmployeeRecord router below stays mounted for the
 // hour-log rows it already holds.
 app.use('/api/tasks', taskRoutes);
+app.use('/api/timesheet-checklist', require('./routes/timesheetChecklist')); // Timesheet > Checklist (2026-11-03)
 
 // EmployeeRecord-backed HRMS long-tail areas — one generic model, one route per type.
 // Helpdesk and Resignation still store EmployeeRecord rows but have their own

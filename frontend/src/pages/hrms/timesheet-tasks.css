@@ -115,3 +115,15 @@
 .tt-shot img, .tt-shot-doc { width: 100%; height: 72px; object-fit: cover; border-radius: 4px; background: #f3f5f8; display: flex; align-items: center; justify-content: center; font-size: 28px; }
 .tt-shot span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tt-shot button { position: absolute; top: 2px; right: 2px; padding: 0 6px; background: rgba(255,255,255,.9); }
+
+/* Timesheet > Checklist (2026-11-03): add-a-row form, the day / department / employee bar, department groups */
+.tcl-bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 12px; }
+.tcl-bar label, .tcl-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--muted, #5b6b7b); }
+.tcl-bar label { min-width: 190px; }
+.tcl-form { display: grid; grid-template-columns: 150px 120px 120px 150px 1fr auto; gap: 10px; align-items: end; margin-bottom: 12px; }
+.tcl-form .tcl-desc textarea { resize: vertical; min-height: 38px; }
+.tcl-actions { display: flex; gap: 8px; }
+.tcl-table td { vertical-align: top; }
+.tcl-group { margin-bottom: 16px; }
+.tcl-group-head { font-weight: 700; font-size: 14px; padding: 6px 0; border-bottom: 1px solid var(--line, #e3e8ee); margin-bottom: 6px; }
+@media (max-width: 900px) { .tcl-form { grid-template-columns: 1fr 1fr; } .tcl-form .tcl-desc, .tcl-actions { grid-column: 1 / -1; } }

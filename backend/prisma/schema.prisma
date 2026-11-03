@@ -5171,3 +5171,22 @@ model RcsBatch {
   @@index([status])
   @@map("rcs_batches")
 }
+
+// Timesheet > Checklist (founder 2026-11-03, migration 20261103120000): what a person did today - from/to time, status
+// (Completed | Pending | In Progress) and a description. The person sees their own, a TL their team's, the Super Admin all
+// (department-wise). routes/timesheetChecklist.js.
+model TimesheetChecklist {
+  id          String   @id @default(cuid())
+  userId      String
+  employeeId  String?
+  date        String // YYYY-MM-DD (IST)
+  fromTime    String // HH:MM
+  toTime      String // HH:MM
+  status      String   @default("Pending")
+  description String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, date])
+  @@index([date])
+}
