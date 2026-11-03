@@ -251,7 +251,11 @@ async function channelSpec(channel, input, language, statusMap, cfgs) {
     } else if (tpl && tpl.source === 'saved' && tpl.waStatus === 'Approved' && tpl.waTemplateName) {
       spec.mode = 'wa-template';
       spec.wa = { name: tpl.waTemplateName, language: tpl.waLanguageCode || undefined };
-      if (wa && wa.numberId) { const bad = await require('./whatsappCloud').templateAccountProblem(wa, tpl.waTemplateName); if (bad) spec.block = bad; } // eslint-disable-line global-require
+      if (wa && wa.numberId) {
+        const bad = await require('./whatsappCloud').templateAccountProblem(wa, tpl.waTemplateName); // eslint-disable-line global-require
+        // the numbers whose own account HAS it approved, so the screen can offer "Send from that number" (2026-11-03)
+        if (bad) { spec.block = bad; spec.approvedOn = (await require('../outreach/tplWaba').approvedNumbers(tpl.waTemplateName)).filter((n) => n.id !== wa.numberId); } // eslint-disable-line global-require
+      }
       spec.vars = T.waVarList(tpl);
       if (spec.edited) spec.error = 'WhatsApp only sends the wording Meta approved, so it cannot be edited here. Change the template instead.';
     } else if (wa && wa.templates && wa.templates.bulk) {
@@ -397,7 +401,7 @@ async function buildPlan(user, input) {
       let viaWindow = false;
       if (spec.block) {
         if (channel === 'WhatsApp' && windows.has(delivery.digitsOf(raw))) viaWindow = true;
-        else { block(spec.block); return; }
+        else { if (spec.approvedOn && spec.approvedOn.length) r.approvedOn = spec.approvedOn; block(spec.block); return; }
       } else if (channel === 'WhatsApp' && b.sessionText === true && windows.has(delivery.digitsOf(raw))) {
         viaWindow = true; // the WhatsApp chat screen: plain words inside the 24-hour window go as plain words (not wrapped in the bulk template)
         r.session = true;

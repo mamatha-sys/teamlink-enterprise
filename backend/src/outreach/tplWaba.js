@@ -250,6 +250,23 @@ async function guard(cfg, name) {
   } catch { return null; }
 }
 
+// THE NUMBERS THAT CAN SEND THIS TEMPLATE (founder 2026-11-03: the template was approved in the Teamlink Medical account, but the
+// message box had another number under "Sending from" and said "Cannot send from here"). -> [{ id, label, displayNumber }] of the
+// active, connected numbers whose own WhatsApp account has the template Approved; [] when nothing is known.
+async function approvedNumbers(name) {
+  try {
+    if (!name) return [];
+    const tpls = await q('SELECT id FROM "OutreachTemplate" WHERE "waTemplateName" = ? LIMIT 8', String(name));
+    if (!tpls.length) return [];
+    const rowsMap = await rowsFor(tpls.map((t) => t.id));
+    const ok = new Set();
+    rowsMap.forEach((rows) => rows.forEach((r) => { if (r.status === 'approved') ok.add(String(r.wabaId)); }));
+    if (!ok.size) return [];
+    const acc = await accounts();
+    return acc.accounts.filter((g) => ok.has(g.wabaId)).flatMap((g) => g.numbers.filter((n) => n.usable).map((n) => ({ id: n.id, label: n.label, displayNumber: n.displayNumber || '' })));
+  } catch { return []; }
+}
+
 // ---- keeping the rows and the summary in step -----------------------------------------------------------------------------------------
 const summaryOf = (rows) => { const b = bestOf(rows); return b ? b.status : null; };
 async function aggregate(templateId) {
@@ -412,4 +429,4 @@ async function finish(user, id, acc) {
 }
 
 const bust = () => { readyAt = 0; };
-module.exports = { bust, ensure, ready, rowsFor, put, accounts, stateFor, chipsOf, accountsView, decorate, byNumber, guard, reasonText, aggregate, mirror, resetFor, backfill, submitAll, checkAll, DDL, FIX_SENTENCE };
+module.exports = { bust, ensure, ready, rowsFor, put, accounts, stateFor, chipsOf, accountsView, decorate, byNumber, guard, approvedNumbers, reasonText, aggregate, mirror, resetFor, backfill, submitAll, checkAll, DDL, FIX_SENTENCE };

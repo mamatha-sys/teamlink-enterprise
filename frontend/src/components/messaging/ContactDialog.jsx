@@ -483,6 +483,15 @@ export default function ContactDialog({
       {!result && !sendable && first && !(first.missing && first.missing.length && channelReady && first.status === 'skipped') && (
         <div className="msg-box orange">
           {first.notSetUp ? setupLine : (<><b>{first.status === 'blocked' ? 'Cannot send from here.' : 'Cannot send yet.'}</b> {why}</>)}
+          {/* the template IS approved on another number's account: one click switches "Sending from" to it (founder 2026-11-03) */}
+          {ch === 'WhatsApp' && (first.approvedOn || []).filter((n) => !wa.state || !wa.state.usable || wa.state.usable.some((u) => u.id === n.id)).length > 0 && (
+            <div style={{ marginTop: 6 }}>
+              This template is approved on {(first.approvedOn || []).length === 1 ? 'this number' : 'these numbers'}:{' '}
+              {(first.approvedOn || []).filter((n) => !wa.state || !wa.state.usable || wa.state.usable.some((u) => u.id === n.id)).map((n) => (
+                <button key={n.id} type="button" className="btn btn-sm btn-primary" style={{ margin: '4px 6px 0 0' }} onClick={() => wa.setChosen(n.id)}>Send from {n.label}{n.displayNumber ? ` (${String(n.displayNumber).slice(-4)})` : ''}</button>
+              ))}
+            </div>
+          )}
           {ch === 'SMS' && <div style={{ marginTop: 4 }}>Mark as sent is off: we cannot know the message was sent from your phone.</div>}
         </div>
       )}
