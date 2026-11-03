@@ -51,6 +51,7 @@ const YES = { English: 'yes', Telugu: 'అవును', Hindi: 'हाँ' };
     ok(r.say.includes('3') && r.say.indexOf('3') < r.say.indexOf(P.qLoc), `A3 ${lang}: says the years back ("3 years") before asking the city`, r.say);
     r = await d.hear({ English: 'Warangal', Telugu: 'వరంగల్', Hindi: 'वारंगल' }[lang]);
     ok(r.say.startsWith(S.fill(P.ackLoc, { place: { English: 'Warangal', Telugu: 'వరంగల్', Hindi: 'वारंगल' }[lang] })), `A4 ${lang}: says the city back`, r.say);
+    await d.hear(YES[lang]); await d.hear('25000'); await d.hear('30000'); // working now? / current / expected salary (2026-11-03)
     r = await d.hear({ English: 'immediately', Telugu: 'వెంటనే', Hindi: 'तुरंत' }[lang]);
     ok(r.say.startsWith(P.ackNoticeNow), `A5 ${lang}: "immediately" -> "so you can join right away"`, r.say);
   }

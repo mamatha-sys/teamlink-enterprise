@@ -72,8 +72,16 @@ const PH = {
     qExp: 'How many years of experience do you have in this?',
     qLoc: 'Which city are you in right now?',
     qNotice: "What is your notice period, in days?",
-    qProceed: "Shall we go to the next step?",
-    closeInterested: "Thank you. I have noted everything. We will send you the next details soon. Nothing is final from this call. Bye.",
+    qProceed: "Would you like to go ahead with this opportunity?",
+    // the recruiter screening questions (founder 2026-11-03): one at a time, only what is not known yet
+    qWorking: "Are you working anywhere right now?",
+    qCtc: "What is your current salary?",
+    qExpCtc: "And what salary are you expecting?",
+    qComfort: "The job is in {location}, {workMode}. Is that okay for you?",
+    qComfortPlain: "Are you okay with the job location and work mode?",
+    qShare: "Can I share your profile with our team and the client for this job?",
+    closeNoShare: "Okay, we will not share your profile without your permission. Our team will contact you. Bye.",
+    closeInterested: "Thank you for your time. Our recruitment team will review your details and contact you about the next steps. Have a great day. Bye.",
     closeNotInterested: 'Okay, thanks for your time. Bye.',
     closeStop: "Okay, we won't call you again. Bye.",
     closeUnclear: "The line is not clear. I will call you again. Thank you.",
@@ -187,8 +195,15 @@ const PH = {
     qExp: "आपका कितने साल का एक्सपीरियंस है?",
     qLoc: "अभी आप कहाँ रहते हैं?",
     qNotice: "नोटिस पीरियड कितने दिन का है?",
-    qProceed: "ओके, आगे बढ़ें?",
-    closeInterested: "थैंक्यू। सब नोट कर लिया। आगे क्या करना है, जल्दी बताएँगे। इस कॉल से अभी कुछ फ़ाइनल नहीं है। बाय।",
+    qProceed: "क्या आप इस जॉब के लिए आगे बढ़ना चाहेंगे?",
+    qWorking: "अभी कहीं काम कर रहे हैं?",
+    qCtc: "अभी आपकी सैलरी कितनी है?",
+    qExpCtc: "और इस जॉब के लिए कितनी सैलरी एक्सपेक्ट कर रहे हैं?",
+    qComfort: "जॉब {location} में है, {workMode}। आपके लिए ठीक है?",
+    qComfortPlain: "जॉब की लोकेशन और वर्क मोड आपके लिए ठीक है?",
+    qShare: "क्या हम इस जॉब के लिए आपकी प्रोफाइल अपनी टीम और क्लाइंट को भेज सकते हैं?",
+    closeNoShare: "ठीक है, आपकी परमिशन के बिना प्रोफाइल नहीं भेजेंगे। हमारी टीम आपसे कॉन्टैक्ट करेगी। बाय।",
+    closeInterested: "आपके टाइम के लिए थैंक्यू। हमारी टीम आपकी डिटेल्स देखकर अगले स्टेप के बारे में आपसे कॉन्टैक्ट करेगी। बाय।",
     closeNotInterested: "ओके, कोई बात नहीं। टाइम देने के लिए थैंक्यू। बाय।",
     closeStop: "ओके, अब कॉल नहीं करेंगे। बाय।",
     closeUnclear: "ठीक है, लाइन साफ़ नहीं लग रही। मैं फिर से कॉल करूँगा। थैंक्यू।",
@@ -302,8 +317,15 @@ const PH = {
     qExp: "ఈ ఫీల్డ్‌లో మీకు ఎన్నేళ్ళ ఎక్స్‌పీరియన్స్ ఉంది?",
     qLoc: "ఇప్పుడు మీరు ఎక్కడ ఉంటున్నారు?",
     qNotice: "మీ నోటీస్ పీరియడ్ ఎన్ని రోజులు?",
-    qProceed: "ఓకే, ముందుకు వెళ్దామా?",
-    closeInterested: "థాంక్స్. అన్నీ నోట్ చేసుకున్నా. తర్వాత ఏం చేయాలో త్వరలో మీకు తెలియజేస్తాం. ఈ కాల్‌తోనే ఏదీ ఫైనల్ కాదు. బై.",
+    qProceed: "ఈ జాబ్‌కి ముందుకు వెళ్దామా?",
+    qWorking: "ఇప్పుడు ఎక్కడైనా వర్క్ చేస్తున్నారా?",
+    qCtc: "ఇప్పుడు మీ సాలరీ ఎంత?",
+    qExpCtc: "ఈ జాబ్‌కి ఎంత సాలరీ ఎక్స్‌పెక్ట్ చేస్తున్నారు?",
+    qComfort: "జాబ్ {location} లో, {workMode}. మీకు ఓకేనా?",
+    qComfortPlain: "జాబ్ లొకేషన్, వర్క్ మోడ్ మీకు ఓకేనా?",
+    qShare: "ఈ జాబ్ కోసం మీ ప్రొఫైల్‌ని మా టీమ్‌కి, క్లయింట్‌కి షేర్ చేయొచ్చా?",
+    closeNoShare: "సరే, మీ పర్మిషన్ లేకుండా ప్రొఫైల్ షేర్ చేయం. మా టీమ్ మిమ్మల్ని కాంటాక్ట్ చేస్తారు. బై.",
+    closeInterested: "మీ టైమ్‌కి థాంక్స్. మా టీమ్ మీ డీటెయిల్స్ చూసి, తర్వాత స్టెప్స్ గురించి మిమ్మల్ని కాంటాక్ట్ చేస్తారు. బై.",
     closeNotInterested: "ఓకే, పర్లేదు. టైమ్ ఇచ్చినందుకు థాంక్స్. బై.",
     closeStop: "ఓకే, ఇంకెప్పుడూ కాల్ చేయం. బై.",
     closeUnclear: "సరే, లైన్ సరిగ్గా లేనట్టుంది. మళ్ళీ కాల్ చేస్తా. థాంక్స్.",
@@ -428,7 +450,7 @@ const VARIANTS = {
       "Shall we go ahead?"
     ],
     "closeInterested": [
-      "Great, thank you. I have noted everything. We will send you the next details soon. Nothing is final from this call. Bye."
+      "Thank you for your time. Our recruitment team will review your details and contact you about the next steps. Have a great day. Bye."
     ],
     "closeNotInterested": [
       "No problem. Thanks for your time. Bye.",
@@ -502,7 +524,7 @@ const VARIANTS = {
       "దీన్ని ముందుకు తీసుకెళ్దామా?"
     ],
     "closeInterested": [
-      "సూపర్, థాంక్స్. అన్నీ నోట్ చేసుకున్నా, తర్వాత ఏం చేయాలో త్వరలో చెప్తాం. ఈ కాల్‌తో ఏదీ ఫైనల్ కాదు. బై."
+      "మీ టైమ్‌కి థాంక్స్. మా టీమ్ మీ డీటెయిల్స్ చూసి, తర్వాత స్టెప్స్ గురించి మిమ్మల్ని కాంటాక్ట్ చేస్తారు. బై."
     ],
     "closeNotInterested": [
       "పర్లేదు, టైమ్ ఇచ్చినందుకు థాంక్స్. బై.",
@@ -576,7 +598,7 @@ const VARIANTS = {
       "इसे आगे ले चलें?"
     ],
     "closeInterested": [
-      "बढ़िया, थैंक्यू। सब नोट कर लिया, आगे क्या करना है जल्दी बताएँगे। इस कॉल से कुछ भी फ़ाइनल नहीं है। बाय।"
+      "आपके टाइम के लिए थैंक्यू। हमारी टीम आपकी डिटेल्स देखकर अगले स्टेप के बारे में आपसे कॉन्टैक्ट करेगी। बाय।"
     ],
     "closeNotInterested": [
       "कोई बात नहीं, टाइम देने के लिए थैंक्यू। बाय।",
@@ -900,8 +922,13 @@ function preview(purpose, language, data, fieldsIn, opts = {}) {
     add('interest', P.interestQ);
     add('qExp', P.qExp);
     add('qLoc', P.qLoc);
+    add('qWorking', P.qWorking);
+    add('qCtc', P.qCtc);
+    add('qExpCtc', P.qExpCtc);
     add('qNotice', P.qNotice);
+    add('qComfort', P.qComfortPlain);
     add('qProceed', P.qProceed);
+    add('qShare', P.qShare);
     add('close', P.closeInterested);
   } else if (purpose === 'AI Interview Pending') {
     add('news', B.aiNews);

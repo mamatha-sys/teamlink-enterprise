@@ -285,7 +285,7 @@ const COPY_URL = `file:${COPY.split(path.sep).join('/')}`;
     let candCount0 = 0; let appCount0 = 0;
     const scr = {};
     for (const [k, script, want] of [
-      ['interested', ['yes', 'yes sure', 'yes interested', 'yes', '3 years', 'I live in Hyderabad', '30 days', 'yes'], 'Interested'],
+      ['interested', ['yes', 'yes sure', 'yes interested', 'yes', '3 years', 'I live in Hyderabad', 'yes', '25000', '30000', '30 days', 'yes', 'yes', 'yes'], 'Interested'], // + 2026-11-03: working now? / salary now / expected / okay with the place? / may we share?
       ['notint', ['yes', 'yes', 'no thanks not interested', 'not looking for a change right now', 'no', 'no'], 'Not Interested'], // + 2026-10-30: one honest try, then "other jobs?" // 2026-10-29: one polite why-question, then accepted
       ['later', ['yes', 'not now, I am busy', 'tomorrow evening'], 'Call Back Later'],
       ['unclear', ['yes', 'yes', 'hmm', 'banana', 'mango', 'kiwi', 'grape', 'plum', 'pear', 'fig'], 'Unclear'], // 2026-10-30: an unclear 'shall I tell you?' -> the job is told; then 3 tries, the offer to explain again, then the end // 2026-10-30: three unclear answers (the second asked another way)

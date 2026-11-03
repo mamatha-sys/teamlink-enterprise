@@ -348,6 +348,11 @@ function validateOutcome(raw, purpose) {
       noticePeriodDays: num(a.noticePeriodDays, 0, 365),
       noticePeriodText: str(a.noticePeriodText, 30),
       willingToProceed: typeof a.willingToProceed === 'boolean' ? a.willingToProceed : undefined,
+      currentlyWorking: typeof a.currentlyWorking === 'boolean' ? a.currentlyWorking : undefined,
+      currentCtc: str(a.currentCtc, 40),
+      expectedCtc: str(a.expectedCtc, 40),
+      comfortableWithJob: typeof a.comfortableWithJob === 'boolean' ? a.comfortableWithJob : undefined,
+      profileShareConsent: typeof a.profileShareConsent === 'boolean' ? a.profileShareConsent : undefined,
     },
     callbackRequested: bool(o.callbackRequested),
     callbackWhen: str(o.callbackWhen, 120),
@@ -487,6 +492,11 @@ class Dialogue {
       qLoc: this.P.qLoc,
       qNotice: this.P.qNotice,
       qProceed: this.P.qProceed,
+      qWorking: this.P.qWorking,
+      qCtc: this.P.qCtc,
+      qExpCtc: this.P.qExpCtc,
+      qComfort: this.comfortQ(),
+      qShare: this.P.qShare,
       proceed: this.P.shortProceed,
       avail: this.P.ivAvail,
       resched_time: this.P.ivReschedAsk,
@@ -644,7 +654,7 @@ class Dialogue {
     // Then the same question again. (Before the name is confirmed only "who is calling?" is answered.)
     // At "how many years / which city / notice period?" an answer often holds question words ("ఎన్ని రోజులు అంటే 30 రోజులు"):
     // there only a real question about ANOTHER thing ("salary entha?") is answered; the step reads the rest.
-    const OWN = { qExp: 'experienceNeeded', qLoc: 'location', qNotice: 'joining' };
+    const OWN = { qExp: 'experienceNeeded', qLoc: 'location', qNotice: 'joining', qCtc: 'salary', qExpCtc: 'salary', qComfort: 'location' };
     const topics = A.topicOf(text);
     const qStep = /^q/.test(st.step);
     const asks = !['resched_time', 'later_when', 'why_not'].includes(st.step) && (qStep
@@ -686,13 +696,33 @@ class Dialogue {
   }
   // the next question that is still open, from this step on (a remembered answer is skipped)
   ask(step) {
-    const order = ['qExp', 'qLoc', 'qNotice', 'qProceed'];
+    // THE RECRUITER SCREENING (founder 2026-11-03, TeamLink AI calling design): experience, city, working now?, current and
+    // expected salary, notice period, okay with the place / work mode, go ahead?, may we share the profile? - one at a time,
+    // and never what is already known (told earlier in this call or on an earlier call) or what does not apply (no current
+    // salary / notice period for someone not working).
+    const order = ['qExp', 'qLoc', 'qWorking', 'qCtc', 'qExpCtc', 'qNotice', 'qComfort', 'qProceed'];
     const a = this.st.answers;
-    const known = { qExp: a.experienceYears != null, qLoc: !!a.currentLocation, qNotice: !!a.noticePeriodText };
+    const notWorking = a.currentlyWorking === false || a.experienceYears === 0;
+    const known = {
+      qWorking: a.currentlyWorking != null || a.experienceYears === 0,
+      qExp: a.experienceYears != null,
+      qLoc: !!a.currentLocation,
+      qCtc: !!a.currentCtc || notWorking,
+      qExpCtc: !!a.expectedCtc,
+      qNotice: !!a.noticePeriodText || notWorking,
+      qComfort: a.comfortableWithJob != null || !(this.data.location || this.data.workMode),
+    };
     let i = Math.max(0, order.indexOf(step));
     while (i < order.length - 1 && known[order[i]]) i += 1;
     this.st.step = order[i];
-    return { say: this.speak(this.P[order[i]]), done: false };
+    return { say: this.speak(order[i] === 'qComfort' ? this.comfortQ() : this.P[order[i]]), done: false };
+  }
+  // "The job is in Hyderabad, work from office. Is that okay for you?" (the place / mode from the ATS only)
+  comfortQ() {
+    const x = this.data || {};
+    const location = x.location ? S.clean(x.location, 60) : '';
+    const workMode = x.workMode ? S.clean(x.workMode, 40).toLowerCase() : '';
+    return location && workMode ? S.fill(this.P.qComfort, { location, workMode }) : this.P.qComfortPlain;
   }
 
   // The brain's reading -> the intent the steps understand. A stop is believed only when the words hold a no / stop too:
@@ -964,7 +994,7 @@ class Dialogue {
       if (!S.looksGarbled(place) && knownPlace(spokenPlace)) this.ack('ackLoc', { place: spokenPlace }); else this.ack('ackNoted');
     }
     st.tries = 0;
-    return this.ask('qNotice');
+    return this.ask('qWorking');
   }
 
   on_qNotice(k, text) {
@@ -981,13 +1011,65 @@ class Dialogue {
       if (n.days === 0) this.ack('ackNoticeNow'); else if (n.days > 0) this.ack('ackNotice', { days: n.days }); else this.ack('ackNoted');
     }
     st.tries = 0;
-    return this.ask('qProceed');
+    return this.ask('qComfort');
   }
 
   on_qProceed(k) {
     const st = this.st;
-    if (k.intent === 'yes') { st.answers.willingToProceed = true; return this.close('Interested', 'interested'); }
+    if (k.intent === 'yes') { st.answers.willingToProceed = true; st.step = 'qShare'; st.tries = 0; return { say: this.speak(this.P.qShare), done: false }; }
     if (k.intent === 'no') { st.answers.willingToProceed = false; return this.close('Not Interested', 'will not proceed'); }
+    if (k.intent === 'later') { st.callback = true; st.step = 'later_when'; return { say: this.speak(this.P.laterAsk), done: false }; }
+    return this.retry(k);
+  }
+
+  on_qWorking(k, text) {
+    const st = this.st;
+    const l = this.laterInQuestions(k); if (l) return l;
+    const t = String(text || '');
+    if (/fresher|ఫ్రెషర్|फ्रेशर/i.test(t)) { st.answers.currentlyWorking = false; if (st.answers.experienceYears == null) st.answers.experienceYears = 0; } // a fresher: no experience question either
+    else if (k.intent === 'no') st.answers.currentlyWorking = false;
+    else if (k.intent === 'yes' || /working|వర్క్ చేస్త|జాబ్ చేస్త|काम कर|जॉब कर/i.test(t)) st.answers.currentlyWorking = true;
+    if (st.answers.currentlyWorking == null) {
+      st.tries += 1;
+      if (st.tries < 2) return { say: this.again(this.P.repeat), done: false };
+    } else if (st.answers.currentlyWorking === false && !st.answers.noticePeriodText) { st.answers.noticePeriodText = 'immediate'; st.answers.noticePeriodDays = 0; }
+    st.tries = 0;
+    return this.ask('qCtc');
+  }
+
+  // current / expected salary: their own words, kept as said ("25 thousand", "3.5 lakhs") - never worked out or changed
+  salaryAnswer(k, text, key, next) {
+    const st = this.st;
+    const l = this.laterInQuestions(k); if (l) return l;
+    const words = S.clean(String(text || '').replace(/[.?!।]+$/g, ''), 40);
+    const said = /\d|thousand|lakh|lac|lpa|ctc|\bk\b|వేలు|వేల|లక్ష|हज़ार|हजार|लाख/i.test(words);
+    if (said) { st.answers[key] = words; this.ack('ackNoted'); } else if (k.intent === 'no' || k.intent === 'maybe') {
+      st.answers[key] = key === 'expectedCtc' ? 'as per company' : 'not said'; // "no idea / as per company": noted, not asked again
+    } else {
+      st.tries += 1;
+      if (st.tries < 2) return { say: this.again(this.P.repeat), done: false };
+    }
+    st.tries = 0;
+    return this.ask(next);
+  }
+  on_qCtc(k, text) { return this.salaryAnswer(k, text, 'currentCtc', 'qExpCtc'); }
+  on_qExpCtc(k, text) { return this.salaryAnswer(k, text, 'expectedCtc', 'qNotice'); }
+
+  on_qComfort(k, text) {
+    const st = this.st;
+    const l = this.laterInQuestions(k); if (l) return l;
+    if (k.intent === 'yes') st.answers.comfortableWithJob = true;
+    else if (k.intent === 'no') { st.answers.comfortableWithJob = false; if (String(text || '').trim().split(/\s+/).length >= 3) st.comfortNote = S.clean(text, 120); }
+    else { st.tries += 1; if (st.tries < 2) return { say: this.again(this.P.repeat), done: false }; }
+    st.tries = 0;
+    return this.ask('qProceed');
+  }
+
+  // permission to share the profile (founder 2026-11-03: "candidate consent lekunda profile share cheyyakudadhu")
+  on_qShare(k) {
+    const st = this.st;
+    if (k.intent === 'yes') { st.answers.profileShareConsent = true; return this.close('Interested', 'interested, profile may be shared'); }
+    if (k.intent === 'no') { st.answers.profileShareConsent = false; return this.close('Interested', 'interested, profile not to be shared yet', this.P.closeNoShare); }
     if (k.intent === 'later') { st.callback = true; st.step = 'later_when'; return { say: this.speak(this.P.laterAsk), done: false }; }
     return this.retry(k);
   }
@@ -1079,10 +1161,15 @@ class Dialogue {
     else if (this.purpose === 'AI Interview Pending' && st.interest === 'no') bits.push('Does not want to take the AI interview.');
     else if (st.interest === 'yes') bits.push('Interested.'); else if (st.interest === 'no') bits.push('Not interested.');
     const a = st.answers;
+    if (a.currentlyWorking != null) bits.push(a.currentlyWorking ? 'Working now.' : 'Not working now.');
     if (a.experienceYears != null) bits.push(`Experience: ${a.experienceYears} years.`);
     if (a.currentLocation) bits.push(`Lives in: ${a.currentLocation}.`);
+    if (a.currentCtc && a.currentCtc !== 'not said') bits.push(`Current salary (their words): ${a.currentCtc}.`);
+    if (a.expectedCtc) bits.push(`Expected salary (their words): ${a.expectedCtc}.`);
     if (a.noticePeriodText) bits.push(`Notice period: ${a.noticePeriodText}.`);
+    if (a.comfortableWithJob != null) bits.push(a.comfortableWithJob ? 'Okay with the job location and work mode.' : `NOT okay with the job location / work mode${st.comfortNote ? ` ("${st.comfortNote}")` : ''}.`);
     if (a.willingToProceed != null) bits.push(a.willingToProceed ? 'Willing to go ahead.' : 'Not willing to go ahead.');
+    if (a.profileShareConsent != null) bits.push(a.profileShareConsent ? 'Allowed sharing the profile with the recruiter and the client for this job.' : 'Did NOT allow sharing the profile yet - the recruiter must talk to them first.');
     if (st.attendance === 'confirmed') bits.push('Confirmed they will attend.');
     if (st.attendance === 'reschedule') bits.push(`Asked to change the interview time${st.preferredTime ? `: ${st.preferredTime}` : ''}. The interview was NOT changed.`);
     if (st.attendance === 'not_available') bits.push('Cannot attend.');
@@ -1138,6 +1225,6 @@ class Dialogue {
 // the brain intents whose lead-in is spoken before the next question
 const LEAD_OK = ['answer', 'yes', 'no', 'maybe', 'later', 'reschedule', 'already_employed', 'human'];
 // the steps whose question is a plain yes / no
-const YES_NO_STEPS = ['identity', 'convenient', 'intro', 'interest', 'human_offer', 'qProceed', 'proceed', 'avail', 'calm', 'audio_check', 'convince', 'keep_other'];
+const YES_NO_STEPS = ['identity', 'convenient', 'intro', 'interest', 'human_offer', 'qProceed', 'qWorking', 'qComfort', 'qShare', 'proceed', 'avail', 'calm', 'audio_check', 'convince', 'keep_other'];
 
 module.exports = { Dialogue, timeLike, classify, fuzzyGoAhead, skeleton, detectLanguage, validateOutcome, OUTCOMES, INTENTS, readYears, readNotice, readPlace, norm };

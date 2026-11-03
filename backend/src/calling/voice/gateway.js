@@ -65,7 +65,7 @@ const END_OPEN_MS = Math.min(2500, Math.max(600, num(process.env.AI_VOICE_END_OP
 // AI_VOICE_FILLER_MS (default 800 - at 600 ms the "okay" came too early and a long pause followed it; 0 = off).
 const FILLER_MS = Math.max(0, num(process.env.AI_VOICE_FILLER_MS, 800));
 const FILLERS = { English: 'Okay.', Telugu: 'సరే.', Hindi: 'ठीक है।' };
-const OPEN_STEPS = ['qExp', 'qLoc', 'qNotice', 'later_when', 'resched_time', 'why_not'];
+const OPEN_STEPS = ['qExp', 'qLoc', 'qCtc', 'qExpCtc', 'qNotice', 'later_when', 'resched_time', 'why_not'];
 // Whisper's known made-up lines on noise / non-English sound (Bag of Hallucinations, arXiv 2501.11378, + our own calls): believed
 // only when Whisper was really sure (a real "Thank you." is said with a high logprob)
 const MADE_UP = /^(thank you( (so much|very much|for watching|for listening))?|thanks for watching|please subscribe|subscribe|bye( bye)?|you|my god[ ,a-z]*|oh my god|i'm sorry|so|okay so|music|applause|silence|the end|amen|hmm+|uh+|um+)[.!? ]*$/i;

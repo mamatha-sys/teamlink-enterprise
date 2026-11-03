@@ -113,7 +113,9 @@ const ok = (c, m, d) => { if (c) { pass += 1; console.log('PASS', m); } else { f
     }
     let d = new Dialogue({ purpose: 'Job Match', language: 'English', data });
     d.start(); await d.hear('yes'); await d.hear('yes'); await d.hear('yes'); await d.hear('yes');
-    await d.hear('3 years'); await d.hear('Hyderabad'); await d.hear('one month'); const last = await d.hear('yes');
+    await d.hear('3 years'); await d.hear('Hyderabad'); await d.hear('yes'); await d.hear('25000'); await d.hear('30000'); await d.hear('one month');
+    let last = await d.hear('yes'); // okay with the place / go ahead / may we share (2026-11-03)
+    for (let i = 0; i < 3 && !last.done; i += 1) last = await d.hear('yes'); // eslint-disable-line no-await-in-loop
     const o = d.outcome();
     ok(last.done && o.outcome === 'Interested' && o.answers.experienceYears === 3, 'T3 the whole talk -> Interested, with the answers', [o.outcome, o.answers]);
     d = new Dialogue({ purpose: 'Job Match', language: 'English', data });

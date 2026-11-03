@@ -153,7 +153,7 @@ const ok = (c, m, d) => { if (c) { pass += 1; console.log('PASS', m); } else { f
     ok(r.say.replace(S.fill(P.ackName, { first: data.firstName }), '').trim().startsWith(S.fill(P.resumeLine, { job: data.jobTitle })), 'M1 a call-back starts with "(Hi Ravi.) we spoke earlier about the Faculty job"', r.say);
     await d.hear('yes'); await d.hear('yes');
     r = await d.hear('yes');
-    ok(d.st.step === 'qProceed' && r.say.includes(P.qProceed), 'M2 experience, city and notice period told before are NOT asked again', [d.st.step, r.say]);
+    ok(d.st.step === 'qWorking' && r.say.includes(P.qWorking), 'M2 experience, city and notice period told before are NOT asked again (next: are you working now?)', [d.st.step, r.say]);
     await prisma.$disconnect();
   } catch (e) { fail += 1; console.log('ERROR', e.stack); }
   try { fs.unlinkSync(COPY); } catch { /* */ }
