@@ -38,6 +38,7 @@ import {
   ClientLifecycleDialog, ClientPausedBanner, LifecycleChip, lifecycleItemsFor,
 } from '../components/clients/ClientLifecycle.jsx';
 import ClientBusiness from '../components/clients/ClientBusiness.jsx';
+import FollowUpLog from '../components/clients/FollowUpLog.jsx';
 // ATS layout v3 — the Performance tab, the job status chain, Signed / Unsigned.
 import ClientPerformance from '../components/clients/ClientPerformance.jsx';
 import ClientWork from '../components/clients/ClientWork.jsx'; // 4th tab: what is waiting on this client + all activity (2026-10-10)
@@ -110,6 +111,8 @@ const TABS = [
   ['work', 'Client work', []],
   // 2026-10-17: what happened with this client, date by date (the server cuts it for each login: agreement steps, logins and invoices only for those who may see them).
   ['history', 'History', []],
+  // 2026-11-03: the dated follow-up log - everyone who works the client writes in it (the server decides who may).
+  ['followups', 'Follow-ups', []],
 ];
 // Every older link (?tab=overview / contacts / agreement / candidates /
 // invoices / joining / payments …) lands on the tab that now carries it, and
@@ -471,6 +474,7 @@ export default function ClientDetail() {
     const def = TABS.find(([key]) => key === k);
     if (k === 'work') return !!work && !data.redacted;
     if (k === 'history') return !data.redacted;
+    if (k === 'followups') return true;
     return !!def && (tabOk(k) || (def[2] || []).some(tabOk));
   };
   const activeTab = tabShown(tab) ? tab : (TABS.find(([k]) => tabShown(k)) || ['details'])[0];
@@ -588,6 +592,7 @@ export default function ClientDetail() {
 
       {activeTab === 'work' && work && <ClientWork key={c.id} clientId={c.id} initial={work} onGoTab={setTab} />}
       {activeTab === 'history' && <div className="card section"><ClientHistoryView key={c.id} endpoint={`/join-drop/client-history/${c.id}`} /></div>}
+      {activeTab === 'followups' && <FollowUpLog key={c.id} clientId={c.id} />}
 
       {/* ---------------------------------------------------------------- */}
       {activeTab === 'details' && (

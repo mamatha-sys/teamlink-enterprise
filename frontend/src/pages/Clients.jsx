@@ -21,6 +21,7 @@ import StatusChip from '../components/ui/StatusChip.jsx';
 import EmptyState from '../components/ui/EmptyState.jsx';
 import ScrollTable from '../components/ScrollTable.jsx';
 import ClientEditModal from '../components/clients/ClientEditModal.jsx';
+import { FollowUpImportButton } from '../components/clients/FollowUpImport.jsx';
 import AddClientWizard from '../components/clients/AddClientWizard.jsx';
 import ClientRowActions, { NoteModal } from '../components/clients/ClientRowActions.jsx';
 import { useClientsMeta, HEALTH_HINT } from '../components/clients/clientsMeta.js';
@@ -560,6 +561,8 @@ export default function Clients() {
             ) : null}
             {/* founder 2026-10-29: a client who signed outside the ATS (the BDE team and Admin; the server checks) */}
             {a.add && ['bde', 'admin'].includes(role) ? <AddSignedClientButton onAdded={load} /> : null}
+            {/* 2026-11-03: the BDE desk's Excel follow-up sheets, line by line into each client's Follow-ups (the server checks) */}
+            {['bde', 'admin'].includes(role) ? <FollowUpImportButton onDone={(m) => setFlash(m)} /> : null}
             {a.add ? (
               <button type="button" className="btn btn-primary" onClick={() => { setFlash(''); setAdding(true); }}>+ Add client</button>
             ) : null}

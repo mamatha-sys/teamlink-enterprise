@@ -5,6 +5,7 @@ import { rowClickProps } from '../utils/rowClick.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import api from '../api';
 import Modal from '../components/Modal.jsx';
+import FollowUpLog from '../components/clients/FollowUpLog.jsx';
 import Combo from '../components/Combo.jsx';
 import Pager, { usePaged } from '../components/Pager.jsx';
 // WORKFLOW ACTIONS ARE NOT VIEW/EDIT. The stages this login OWNS come from
@@ -179,9 +180,9 @@ export const JOB_PORTAL = 'TeamLink Job Portal';
 //   → Candidates Available → On Hold / Closed
 const FLOW = ['DRAFT', 'AGREEMENT_CHECK', 'OPEN', 'RECRUITER_ASSIGNED', 'SOURCING', 'CANDIDATES_AVAILABLE'];
 const PARKED = ['ON_HOLD', 'CLOSED'];
-const TABS = ['overview', 'candidates', 'recruiter', 'client', 'interviews', 'agreement', 'distribute', 'activity'];
+const TABS = ['overview', 'candidates', 'recruiter', 'client', 'interviews', 'followups', 'agreement', 'distribute', 'activity'];
 const TAB_LABELS = {
-  overview: 'Overview', candidates: 'Candidates', recruiter: 'Team', client: 'Client', interviews: 'Interviews', agreement: 'Agreement', distribute: 'Postings', activity: 'Activity',
+  overview: 'Overview', candidates: 'Candidates', recruiter: 'Team', client: 'Client', interviews: 'Interviews', followups: 'Follow-ups', agreement: 'Agreement', distribute: 'Postings', activity: 'Activity',
 };
 // Pipeline filter on the Candidates tab — same buckets as the count tiles.
 const PIPE_FILTERS = [
@@ -1091,9 +1092,11 @@ export default function RequirementDetail() {
   // Role spec §7 — a section this role may not see is not a tab at all (and
   // the API did not send its data).
   const tabs = TABS.filter((t) => (t !== 'client' || r.internal || !r.sections || !!r.sections.clientContact)
-    && (t !== 'agreement' || showAgreementTab));
+    && (t !== 'agreement' || showAgreementTab)
+    // the client's follow-up log (2026-11-03); TeamLink's own openings have no client to follow up
+    && (t !== 'followups' || !r.internal));
   const bodies = {
-    overview, candidates: candidatesTab, recruiter: recruiterTab, client: clientTab, interviews: interviewsTab, agreement: agreementTab, distribute: <PostingsTab job={r} canPost={can(user, 'ats', 'requirements', 'Job Posting', 'edit')} onChanged={load}><DistributeTab job={r} onChanged={load} /></PostingsTab>, activity: activityTab,
+    overview, candidates: candidatesTab, recruiter: recruiterTab, client: clientTab, interviews: interviewsTab, followups: <FollowUpLog key={r.id} requirementId={r.id} />, agreement: agreementTab, distribute: <PostingsTab job={r} canPost={can(user, 'ats', 'requirements', 'Job Posting', 'edit')} onChanged={load}><DistributeTab job={r} onChanged={load} /></PostingsTab>, activity: activityTab,
   };
   const tabCount = { candidates: applications.length, interviews: interviewRows.length };
 

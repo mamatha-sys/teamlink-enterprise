@@ -221,6 +221,7 @@ app.use('/api/clients', clientRoutes);
 // AGREEMENT PREPARATION WORKFLOW (2026-10-13): BDE > Purna Sir (HR) > BDE TL > client. Its own door so the HR step never opens the client routes.
 app.use('/api/agreement-flow', require('./routes/agreementFlow'));
 app.use('/api/client-merge', require('./routes/clientMerge')); // Duplicate clients (SA/Admin)
+app.use('/api/client-followlog', require('./routes/clientFollowLog')); // the dated follow-up log of a client: comments by everyone + Excel import (2026-11-03)
 // JOB PORTAL MIRROR. After any successful write to one requirement (edit,
 // status change, close, reopen …) a requirement that has ever been published
 // is pushed to the Job Portal, so a closed requirement leaves the board at
