@@ -14,7 +14,8 @@
 #      plain = never on rcssms.in), its RCS messages (Communication "Send now") and its last RCS actions and errors.
 #   5. each Omni-Channel workspace's rcssms.in connection: same username / password / bot id as TeamLink's working login? (yes/no only)
 #   5b. each workspace's RCS templates (is "tpm" in every workspace?)
-#   8. TeamLink's login on the rcssms.in TEMPLATE API, with a request that cannot make a template (no message, no credit).
+#   8. TeamLink's login on the rcssms.in TEMPLATE API, with a request that cannot make a template (no message, no credit);
+#   8b. the same with a deliberately wrong password: shows whether rcssms.in checks the login before the type (one refused login).
 #   Every list is newest first and short: paste the WHOLE output.
 # ---------------------------------------------------------------------------
 $ErrorActionPreference = 'Stop'
@@ -116,7 +117,16 @@ const mask = (s) => String(s == null ? "" : s).replace(/\d{6,}/g, "...").replace
     else if (code === "22") console.log("  => the TEMPLATE API refuses this login (sending accepts it): ask rcssms.in to switch on template creation by API for this account.");
     else if (code === "21") console.log("  => the TEMPLATE API does not know this username: ask rcssms.in.");
     else if (code === "10" && !(tlEnv.RCS_USERNAME && tlEnv.RCS_PASSWORD && tlEnv.RCS_ID)) console.log("  => TeamLink's RCS login is not complete in backend/.env (username, password or RCS id missing).");
-    else console.log(`  => the login is accepted on the template API (error ${code || "none"} is about the deliberately wrong request, not the login).`);
+    else console.log(`  => not refused for the login (error ${code || "none"} is about the deliberately wrong type). See 8b: does rcssms.in check the login first?`);
+    console.log("== 8b. the same wrong request with a deliberately WRONG password (nothing can be made; shows whether rcssms.in checks the login before the type)");
+    const r2 = await fetch(`${base}/rcsapi/rcscreatetemplate.jsp`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, password: "zz-wrong-password-check" }), signal: AbortSignal.timeout(20000) });
+    let txt2 = await r2.text();
+    for (const s of [tlEnv.RCS_PASSWORD, tlEnv.RCS_USERNAME]) if (s && s.length >= 3) txt2 = txt2.split(s).join("***");
+    console.log(`  rcssms.in answered: HTTP ${r2.status} ${mask(txt2).slice(0, 200)}`);
+    const code2 = (/ErrorCode"?\s*:\s*"?0*(\d+)/i.exec(txt2) || [])[1];
+    if (code2 === "22" && code !== "22") console.log("  => rcssms.in checks the LOGIN FIRST, and TeamLink's real login PASSED on the template API (8). So the 022 in Omni-Channel comes from Omni-Channel's own request: send these lines to Claude.");
+    else if (code2 === code) console.log("  => rcssms.in checks the TYPE before the login, so 8 does not prove the login works on the template API. Send these lines to Claude.");
+    else console.log("  => another answer: send these lines to Claude.");
   } catch (e) { console.log("  could not reach rcssms.in: " + mask(e.message).slice(0, 150)); }
 })().catch((e) => console.log("  could not read the Omni-Channel database: " + mask(e.message).slice(0, 200)));
 EOF_GS
