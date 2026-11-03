@@ -41,13 +41,15 @@ router.get('/interview-meet/settings', async (req, res, next) => {
   try {
     const ctx = await IM.startCtx(req.user);
     const s = await IM.loadSettings();
-    const mayBook = ctx.admin || ctx.bdeTeam;
+    const isHr = String(req.user.atsRole || '').toUpperCase() === 'HR';
+    const mayBook = ctx.admin || ctx.bdeTeam || isHr;
     const { emailConfig } = require('../utils/mailer'); // eslint-disable-line global-require
     const mail = await emailConfig().catch(() => ({ configured: false, reason: 'Mail is not set up.' }));
     const ML = require('../utils/meetingLinks'); // eslint-disable-line global-require
     const cal = await ML.setupReport().catch(() => null);
     res.json({
       canEdit: ctx.admin,
+      canSaveLink: ctx.admin || isHr,
       settings: { ...s, defaultMeetLink: mayBook ? s.defaultMeetLink : '' },
       mailReady: !!mail.configured,
       mailProblem: mail.configured ? null : 'Mail is not set up. Ask your Admin: Administration > Integrations > Email.',
@@ -59,7 +61,9 @@ router.get('/interview-meet/settings', async (req, res, next) => {
 
 router.put('/interview-meet/settings', async (req, res, next) => {
   try {
-    if (!IM.isAdminUser(req.user)) return res.status(403).json({ error: 'Only an Admin can change these settings.' });
+    const onlyLink = req.body && Object.keys(req.body).length === 1 && req.body.defaultMeetLink !== undefined;
+    const isHr = String(req.user.atsRole || '').toUpperCase() === 'HR';
+    if (!IM.isAdminUser(req.user) && !(onlyLink && isHr)) return res.status(403).json({ error: 'Only an Admin can change these settings.' });
     const out = await IM.saveSettings(req.body || {}, req.user);
     if (out.error) return res.status(out.status || 400).json({ error: out.error });
     await logAudit({ userId: req.user.id, actorName: req.user.name, action: 'Interview Meet and email settings changed', entity: 'AppSetting', entityId: IM.KEY, fromValue: JSON.stringify(out.before).slice(0, 900), toValue: JSON.stringify(out.settings).slice(0, 900) });

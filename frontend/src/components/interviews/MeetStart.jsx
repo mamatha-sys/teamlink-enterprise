@@ -28,10 +28,23 @@ const openNew = (url) => window.open(url, '_blank', 'noopener,noreferrer');
 // ---- the booking dialog's link field ---------------------------------------------------------------------------------------
 export function MeetLinkField({ value, onChange }) {
   const [standing, setStanding] = useState('');
+  const [canSave, setCanSave] = useState(false);
+  const [saved, setSaved] = useState('');
   useEffect(() => {
-    api.get('/ats/interview-meet/settings').then((r) => setStanding((r.data.settings && r.data.settings.defaultMeetLink) || '')).catch(() => setStanding(''));
-  }, []);
+    api.get('/ats/interview-meet/settings').then((r) => {
+      const link = (r.data.settings && r.data.settings.defaultMeetLink) || '';
+      setStanding(link); setCanSave(!!r.data.canSaveLink);
+      // the company link fills the box by itself (2026-11-03: "save avvatledhu")
+      if (link && !String(value || '').trim()) onChange(link);
+    }).catch(() => setStanding(''));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const chk = linkCheck(value);
+  async function saveStanding() {
+    try {
+      await api.put('/ats/interview-meet/settings', { defaultMeetLink: String(value || '').trim() });
+      setStanding(String(value || '').trim()); setSaved('Saved. This link fills in by itself for every interview.');
+    } catch (e) { setSaved(e.response?.data?.error || 'Could not save the link.'); }
+  }
   return (
     <div className="ims-field">
       <div className="ims-row">
@@ -40,6 +53,10 @@ export function MeetLinkField({ value, onChange }) {
       </div>
       <input type="url" aria-label="Google Meet link" placeholder="Paste the link here (https://meet.google.com/abc-defg-hij)" value={value} onChange={(e) => onChange(e.target.value)} />
       {chk.state !== 'empty' && <div className={`ims-chk is-${chk.state}`} role="status">{chk.text}</div>}
+      {canSave && chk.state !== 'empty' && chk.state !== 'bad' && String(value || '').trim() !== standing && (
+        <button type="button" className="btn btn-sm" style={{ marginTop: 6 }} onClick={saveStanding}>Save as our Meet link (every interview)</button>
+      )}
+      {saved && <div className="ims-hint" role="status">{saved}</div>}
       <div className="ims-hint">Press "Create a Meet link": Google Meet opens in a new tab. Copy its link and paste it here. You can also add it later.</div>
     </div>
   );
