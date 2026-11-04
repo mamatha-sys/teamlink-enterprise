@@ -133,6 +133,8 @@ app.use(require('./routes/omniNumbers'));
 app.use(require('./routes/omniWaFromOmni'));
 // CORS: open only for the public paths third parties use; everything else = CORS_ORIGINS / this site / localhost in dev.
 app.use(require('./utils/webSecurity').corsMiddleware());
+// Employee Monitoring: an agent batch of activity can be larger than the site-wide 100 kB JSON limit.
+app.use('/api/monitoring/activity', express.json({ limit: '1mb' }));
 app.use(express.json());
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
@@ -283,6 +285,8 @@ app.use('/api/new-items', require('./routes/newItems')); // the New button on ev
 app.use('/api/employees', employeeRoutes);
 app.use('/api/employee-fields', employeeFieldRoutes);
 app.use('/api/attendance', attendanceRoutes);
+// Employee Monitoring (2026-11-04): the desktop agent (device token) and the HR / Admin screens (routes/monitoring.js).
+app.use('/api/monitoring', require('./routes/monitoring'));
 app.use('/api/leave', leaveRoutes);
 app.use('/api/late-permissions', latePermissionRoutes);
 app.use('/api/payroll', payrollRoutes);
@@ -584,6 +588,8 @@ const server = app.listen(PORT, () => {
   require('./utils/interviewNotices').startSweep();
   // A recruiter who left: their candidates go to the recruiter on the job following them up now, every hour (utils/leaverHandover.js).
   require('./utils/leaverHandover').startSweep();
+  // Employee Monitoring: activity older than the retention days is deleted every 6 hours (utils/monitoring.js).
+  require('./utils/monitoring').startSweep();
   // Automatic stage messages: sends the scheduled ones that are due (reads the table, so a restart
   // loses nothing). Does nothing until Admin / HR first save the rules (utils/autoMessages.js).
   require('./utils/autoMessages').startSweep();

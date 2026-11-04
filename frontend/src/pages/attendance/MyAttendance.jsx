@@ -4,6 +4,7 @@ import { stopCamera } from '../../utils/cameraHold.js';
 import { distanceWords } from '../../utils/checkinGeo.js';
 import { Link } from 'react-router-dom';
 import api from '../../api';
+import { usePcActivity, PcLine } from '../../components/monitoring/PcActivity.jsx'; // Employee Monitoring: PC activity beside the times
 import { to12h } from '../../utils/csv.js';
 import { Panel, PanelPad, PanelHead, StatRow } from '../../components/proto.jsx';
 import FaceCheckIn from './FaceCheckIn.jsx';
@@ -259,6 +260,10 @@ export default function MyAttendance() {
   }
 
   const s = data && data.summary;
+  // the office PC's first / last activity of each listed day (Employee Monitoring), beside the times - never instead of them
+  const days = ((data && data.rows) || []).map((x) => x.date).filter(Boolean).sort();
+  const pcRows = usePcActivity(days[0] || null, days[days.length - 1] || null);
+  const pcOf = (d) => Object.entries(pcRows).find(([k]) => k.endsWith(`|${d}`))?.[1] || null;
   const lf = useListFilters(data?.rows || [], DAY_FIELDS, { sorts: DAY_SORTS });
   const srcRows = src ? lf.rows.filter((x) => x.sourceCounts && x.sourceCounts[src] > 0) : lf.rows;
   const page = usePaged(srcRows, 50);
@@ -316,8 +321,8 @@ export default function MyAttendance() {
               {page.slice.map((r) => [(
                 <tr key={r.date}>
                   <td>{r.date}</td>
-                  <td className="cell-muted">{r.checkIn ? to12h(r.checkIn) : '—'}</td>
-                  <td className="cell-muted">{r.checkOut ? to12h(r.checkOut) : '—'}</td>
+                  <td className="cell-muted">{r.checkIn ? to12h(r.checkIn) : '—'}<PcLine pc={pcOf(r.date)} which="first" /></td>
+                  <td className="cell-muted">{r.checkOut ? to12h(r.checkOut) : '—'}<PcLine pc={pcOf(r.date)} which="last" /></td>
                   <td className="cell-muted">{r.hours != null ? r.hours : '—'}</td>
                   <td><DayStatus status={r.status} colour={r.colour} earlyLogout={r.earlyLogout} />{r.reason || r.note ? <div className="small-muted att-note">{r.reason || r.note}</div> : null}{(r.notes || []).map((k) => <span key={k} className="hl-chip tone-orange">{{ late: 'Late', earlyLogout: 'Early logout', missingCheckIn: 'Missing check-in', missingCheckOut: 'Missing check-out', noPunches: 'No punches', punchOnLeave: 'Punch on a leave day', leaveRejected: 'Half-day leave rejected' }[k] || k}</span>)}{halfStateOf(r) ? <div><HalfLeaveChip state={halfStateOf(r)} half={r.leaveHalf ? (/first/i.test(r.leaveHalf) ? '1st half' : /second/i.test(r.leaveHalf) ? '2nd half' : '') : ''} /></div> : null}<LateChip r={r} windowDays={windowDays} onTell={setTellFor} />{r.awlText ? <div><span className="pc-tag" data-testid="awl-tag" title="No leave was applied for this day, so payroll counts extra loss of pay. Apply leave before the payroll is locked to correct it.">{r.awlText}</span></div> : null}</td>
                   <td className="cell-muted">{r.howText || r.method || '—'}{r.verification ? <div className="small-muted att-note">{r.verification}</div> : null}</td>

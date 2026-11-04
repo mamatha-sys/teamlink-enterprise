@@ -1,0 +1,219 @@
+// ---------------------------------------------------------------------------
+// /api/monitoring - EMPLOYEE MONITORING (2026-11-04, utils/monitoring.js has the rules and the privacy notes).
+//
+// THE DESKTOP AGENT (no browser login; "Authorization: Device <token>" after registering):
+//   POST /devices/register   { email, password, deviceName, os, acceptPolicyVersion? }   the employee's own TeamLink login.
+//                            -> 412 { consentRequired, policyVersion, policyText } until they accept the notice, then
+//                            -> { deviceToken, settings }  (the token is shown once; only its hash is kept)
+//   POST /activity           { records: [{ appName, windowTitle, start, end, isIdle }] }   every 1-5 minutes
+//   POST /heartbeat          -> { settings, consentRequired }   updates last seen
+// THE SCREENS (a TeamLink login; HR / Admin see everyone, anybody else only themselves):
+//   GET  /overview?date=                         HR / Admin
+//   GET  /employee/:id?from=&to=                 HR / Admin, or :id = me / their own employee id
+//   GET  /reports?from=&to=&department=&format=  HR / Admin (format=xlsx|csv|pdf: the file)
+//   GET/POST/PUT/DELETE /app-categories          HR / Admin (GET: + apps seen with no category)
+//   GET/PUT /settings                            HR / Admin (GET is open to everyone: work hours and the notice)
+//   GET  /devices, PUT /devices/:id/deactivate   HR / Admin all; an employee their own PCs
+//   GET  /me, POST /me/consent                   my notice, my consent, my PCs
+// The general API limit counts an agent per device (utils/apiRateLimit.js), with its own strict limits.
+// ---------------------------------------------------------------------------
+const express = require('express');
+const bcrypt = require('bcryptjs');
+const prisma = require('../db');
+const { requireAuth } = require('../middleware/auth');
+const { resolveIdentity } = require('../utils/identity');
+const { ipOf } = require('../utils/clientIp');
+const { logAudit } = require('../utils/audit');
+const M = require('../utils/monitoring');
+
+const router = express.Router();
+const fail = (res, status, error, extra = {}) => res.status(status).json({ error, ...extra });
+const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+const publicSettings = (s) => ({
+  workStart: s.workStart, workEnd: s.workEnd, idleThresholdMinutes: s.idleThresholdMinutes, retentionDays: s.retentionDays,
+  screenshotsEnabled: false, policyVersion: s.policyVersion,
+});
+
+// =============================================================== the agent
+router.post('/devices/register', wrap(async (req, res) => {
+  const b = req.body || {};
+  const email = String(b.email || '').trim();
+  const pw = String(b.password || '');
+  if (!email || !pw) return fail(res, 400, 'Type your TeamLink email and password.');
+  const { isLocked } = require('../utils/passwordPolicy'); // eslint-disable-line global-require
+  const { accounts } = await require('../utils/loginAccounts').resolveIdentifier(email); // eslint-disable-line global-require
+  let user = null;
+  for (const u of accounts) {
+    if (isLocked(u)) continue; // eslint-disable-line no-continue
+    // eslint-disable-next-line no-await-in-loop
+    if (u.passwordHash && await bcrypt.compare(pw, u.passwordHash)) { user = u; break; }
+  }
+  if (!user) {
+    if (accounts.length === 1 && !isLocked(accounts[0])) {
+      await prisma.user.update({ where: { id: accounts[0].id }, data: { failedLoginCount: (accounts[0].failedLoginCount || 0) + 1 } }).catch(() => {});
+    }
+    await logAudit({ action: 'Monitoring agent: wrong sign-in', entity: 'User', toValue: email.slice(0, 120), reason: `IP ${ipOf(req)}` }).catch(() => {});
+    return fail(res, 401, 'The email or password is not right.');
+  }
+  const idn = await resolveIdentity(user.id);
+  if (!idn || (idn.status && idn.status !== 'Active') || require('../utils/leftLogin').hasLeft(idn)) return fail(res, 403, 'This login is not active.'); // eslint-disable-line global-require
+  if (!idn.employeeId) return fail(res, 403, 'This login has no employee record, so there is nothing to record against.');
+  const s = await M.settings();
+  // NO HIDDEN MODE: the employee accepts the notice (this version) before the PC is registered
+  if (!(await M.hasConsent(idn.employeeId, s.policyVersion))) {
+    if (Number(b.acceptPolicyVersion) !== s.policyVersion) return fail(res, 412, 'Please read and accept the monitoring notice first.', { consentRequired: true, policyVersion: s.policyVersion, policyText: s.policyText });
+    await M.recordConsent(idn.employeeId, s.policyVersion, ipOf(req), 'Agent');
+  }
+  const { token, device } = await M.registerDevice({ employeeId: idn.employeeId, deviceName: b.deviceName, os: b.os });
+  await logAudit({ userId: user.id, action: 'Monitoring: PC registered', entity: 'MonitoringDevice', entityId: device.id, toValue: device.deviceName }).catch(() => {});
+  return res.status(201).json({ deviceToken: token, deviceId: device.id, employee: idn.name, settings: publicSettings(s) });
+}));
+
+const agent = wrap(async (req, res, next) => {
+  const d = await M.deviceOf(req);
+  if (!d) return fail(res, 401, 'This PC is not registered, or it was switched off by HR. Register it again.');
+  req.device = d;
+  return next();
+});
+router.post('/activity', agent, wrap(async (req, res) => {
+  const out = await M.ingest(req.device, (req.body || {}).records);
+  if (out.error) return res.status(out.status).json(out);
+  return res.json({ saved: out.saved, skipped: out.skipped });
+}));
+router.post('/heartbeat', agent, wrap(async (req, res) => {
+  await prisma.monitoringDevice.update({ where: { id: req.device.id }, data: { lastSeenAt: new Date() } });
+  const s = await M.settings();
+  const consent = await M.hasConsent(req.device.employeeId, s.policyVersion);
+  return res.json({ settings: publicSettings(s), consentRequired: !consent, ...(consent ? {} : { policyText: s.policyText }) });
+}));
+// a new notice accepted on the PC itself
+router.post('/consent', agent, wrap(async (req, res) => {
+  const s = await M.settings();
+  if (Number((req.body || {}).policyVersion) !== s.policyVersion) return fail(res, 409, 'The notice has changed; read the new one.', { policyVersion: s.policyVersion, policyText: s.policyText });
+  await M.recordConsent(req.device.employeeId, s.policyVersion, ipOf(req), 'Agent');
+  return res.json({ ok: true });
+}));
+
+// =============================================================== the screens
+router.use(requireAuth);
+const adminOnly = (req, res, next) => (M.isMonitorAdmin(req.user) ? next() : fail(res, 403, 'Employee monitoring is for HR and Admin. You can see your own activity under My activity.'));
+
+router.get('/overview', adminOnly, wrap(async (req, res) => res.json(await M.overview(req.query.date))));
+
+router.get('/employee/:id', wrap(async (req, res) => {
+  const id = req.params.id === 'me' ? req.user.employeeId : req.params.id;
+  if (!id) return fail(res, 404, 'Your login has no employee record.');
+  if (!M.isMonitorAdmin(req.user) && id !== req.user.employeeId) return fail(res, 403, 'You can see only your own activity.');
+  const out = await M.employeeDetail(id, req.query.from, req.query.to);
+  return out ? res.json(out) : fail(res, 404, 'Employee not found.');
+}));
+
+router.get('/reports', adminOnly, wrap(async (req, res) => {
+  const out = await M.reportRows(req.query.from, req.query.to, req.query.department || '');
+  const KIT = require('../utils/exportKit'); // eslint-disable-line global-require
+  const format = req.query.format ? KIT.formatOf(req.query) : null;
+  if (!format) return res.json(out);
+  const pct = (v) => (v == null ? '' : `${v}%`);
+  return KIT.sendTable(req, res, {
+    format, name: `employee-monitoring-${out.from}-to-${out.to}`, title: `Employee monitoring ${out.from} to ${out.to}${req.query.department ? ` · ${req.query.department}` : ''}`,
+    headers: ['Employee', 'Code', 'Department', 'Days', 'Active hours', 'Idle hours', 'Productive hours', 'Unproductive hours', 'Productivity'],
+    rows: out.rows.map((r) => [r.name, r.code || '', r.department || '', r.days, r.activeHours, r.idleHours, r.productiveHours, r.unproductiveHours, pct(r.productivity)]),
+    sheet: 'Monitoring', entity: 'ActivityLog', what: 'Employee monitoring report', scope: req.query.department || 'All departments', period: { from: out.from, to: out.to }, screen: 'Employee Monitoring',
+  });
+}));
+
+// --- app categories
+router.get('/app-categories', adminOnly, wrap(async (req, res) => {
+  const [rows, unset] = await Promise.all([prisma.appCategory.findMany({ orderBy: { appName: 'asc' } }), M.uncategorised()]);
+  res.json({ rows, uncategorised: unset, categories: M.CATEGORIES });
+}));
+const catBody = (b) => {
+  const appName = String(b.appName || '').trim().toLowerCase().replace(/\.exe$/, '').slice(0, 80);
+  const kind = b.kind === 'site' ? 'site' : 'app';
+  const category = String(b.category || '').toLowerCase();
+  if (!appName) return { error: 'Write the app (like chrome or excel) or a website word (like youtube).' };
+  if (!M.CATEGORIES.includes(category)) return { error: 'Pick productive, neutral or unproductive.' };
+  return { appName, kind, category };
+};
+router.post('/app-categories', adminOnly, wrap(async (req, res) => {
+  const c = catBody(req.body || {});
+  if (c.error) return fail(res, 400, c.error);
+  const row = await prisma.appCategory.upsert({ where: { appName: c.appName }, create: { ...c, setBy: req.user.name || null }, update: { kind: c.kind, category: c.category, setBy: req.user.name || null } });
+  return res.status(201).json(row);
+}));
+router.put('/app-categories/:id', adminOnly, wrap(async (req, res) => {
+  const cur = await prisma.appCategory.findUnique({ where: { id: req.params.id } });
+  if (!cur) return fail(res, 404, 'Not found.');
+  const c = catBody({ ...cur, ...(req.body || {}) });
+  if (c.error) return fail(res, 400, c.error);
+  return res.json(await prisma.appCategory.update({ where: { id: cur.id }, data: { ...c, setBy: req.user.name || null } }));
+}));
+router.delete('/app-categories/:id', adminOnly, wrap(async (req, res) => {
+  await prisma.appCategory.delete({ where: { id: req.params.id } }).catch(() => null);
+  res.json({ ok: true });
+}));
+
+// --- settings
+router.get('/settings', wrap(async (req, res) => {
+  const s = await M.settings();
+  res.json({ ...publicSettings(s), policyText: s.policyText, updatedBy: s.updatedBy || null, updatedAt: s.updatedAt || null, canEdit: M.isMonitorAdmin(req.user) });
+}));
+router.put('/settings', adminOnly, wrap(async (req, res) => {
+  const out = await M.saveSettings(req.user, req.body || {});
+  if (out.error) return fail(res, out.status, out.error);
+  return res.json({ ...publicSettings(out.settings), policyText: out.settings.policyText, message: out.newVersion ? 'Saved. The notice changed, so every employee accepts it again before more is recorded.' : 'Saved.' });
+}));
+
+// --- devices
+router.get('/devices', wrap(async (req, res) => {
+  const admin = M.isMonitorAdmin(req.user);
+  if (!admin && !req.user.employeeId) return res.json({ rows: [] });
+  const rows = await prisma.monitoringDevice.findMany({
+    where: admin ? {} : { employeeId: req.user.employeeId },
+    orderBy: [{ isActive: 'desc' }, { lastSeenAt: 'desc' }],
+    select: { id: true, deviceName: true, os: true, registeredAt: true, lastSeenAt: true, isActive: true, employee: { select: { id: true, name: true, employeeCode: true, department: true } } },
+  });
+  const now = Date.now();
+  res.json({ rows: rows.map((d) => ({ ...d, online: d.isActive && d.lastSeenAt && now - new Date(d.lastSeenAt).getTime() < 6 * 60000 })), canManage: admin });
+}));
+router.put('/devices/:id/deactivate', wrap(async (req, res) => {
+  const d = await prisma.monitoringDevice.findUnique({ where: { id: req.params.id } });
+  if (!d) return fail(res, 404, 'Not found.');
+  if (!M.isMonitorAdmin(req.user) && d.employeeId !== req.user.employeeId) return fail(res, 403, 'Only HR, Admin or the employee can switch this PC off.');
+  await prisma.monitoringDevice.update({ where: { id: d.id }, data: { isActive: false } });
+  await logAudit({ userId: req.user.id, action: 'Monitoring: PC switched off', entity: 'MonitoringDevice', entityId: d.id, toValue: d.deviceName }).catch(() => {});
+  res.json({ ok: true, message: `${d.deviceName} no longer sends activity. It can be registered again from the agent.` });
+}));
+
+// --- attendance: "PC activity" (first / last activity of each day), beside the marked times - it never changes them
+//     GET /pc-activity?from=&to=   HR / Admin: everyone; anybody else: their own days. -> { rows: { "<employeeId>|<day>": { first, last } } }
+router.get('/pc-activity', wrap(async (req, res) => {
+  const day = /^\d{4}-\d{2}-\d{2}$/;
+  const from = day.test(String(req.query.from || '')) ? String(req.query.from) : M.todayIst();
+  const to = day.test(String(req.query.to || '')) ? String(req.query.to) : from;
+  let ids;
+  if (M.isMonitorAdmin(req.user)) ids = [...new Set((await prisma.activityLog.findMany({ where: { day: { gte: from, lte: to } }, select: { employeeId: true }, distinct: ['employeeId'] })).map((x) => x.employeeId))];
+  else ids = req.user.employeeId ? [req.user.employeeId] : [];
+  const map = await M.pcActivity(ids, from, to);
+  res.json({ rows: Object.fromEntries(map) });
+}));
+
+// --- me
+router.get('/me', wrap(async (req, res) => {
+  const s = await M.settings();
+  const id = req.user.employeeId;
+  const consents = id ? await prisma.monitoringConsent.findMany({ where: { employeeId: id }, orderBy: { acceptedAt: 'desc' } }) : [];
+  res.json({
+    hasEmployee: !!id, isAdmin: M.isMonitorAdmin(req.user), settings: publicSettings(s), policyText: s.policyText,
+    accepted: consents.some((c) => c.policyVersion === s.policyVersion), consents,
+  });
+}));
+router.post('/me/consent', wrap(async (req, res) => {
+  if (!req.user.employeeId) return fail(res, 404, 'Your login has no employee record.');
+  const s = await M.settings();
+  if (Number((req.body || {}).policyVersion) !== s.policyVersion) return fail(res, 409, 'The notice has changed; read the new one.');
+  await M.recordConsent(req.user.employeeId, s.policyVersion, ipOf(req), 'Web');
+  res.json({ ok: true, message: 'Thank you. You accepted the monitoring notice.' });
+}));
+
+module.exports = router;

@@ -34,6 +34,7 @@ import AccountsDashboard from './pages/AccountsDashboard.jsx';
 import Employees from './pages/Employees.jsx';
 import EmployeeDetail from './pages/EmployeeDetail.jsx';
 import Attendance from './pages/Attendance.jsx';
+import EmployeeMonitoring from './pages/monitoring/EmployeeMonitoring.jsx'; // HRMS -> Employee Monitoring (2026-11-04)
 import Leave from './pages/Leave.jsx';
 import Payroll from './pages/Payroll.jsx';
 import HrmsDashboard from './pages/hrms/HrmsDashboard.jsx';
@@ -228,6 +229,7 @@ export default function App() {
         <Route path="employees" element={<Employees />} />
         <Route path="employees/:id" element={<EmployeeDetail />} />
         <Route path="attendance" element={<Attendance />} />
+        <Route path="monitoring" element={<EmployeeMonitoring />} />
         <Route path="leave" element={<Leave />} />
         <Route path="payroll" element={<Payroll />} />
         <Route path="performance" element={<PerformanceDevelopment />} />

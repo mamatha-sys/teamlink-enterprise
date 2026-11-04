@@ -1056,6 +1056,10 @@ model Employee {
   updatedAt                DateTime   @updatedAt
 
   attendance                Attendance[]
+  // Employee Monitoring (2026-11-04): office PCs, the consent, the activity (models at the end of this file)
+  monitoringDevices         MonitoringDevice[]
+  monitoringConsents        MonitoringConsent[]
+  activityLogs              ActivityLog[]
   punches                   AttendancePunch[]
   attendanceRegularizations AttendanceRegularization[]
   leaveRequests             LeaveRequest[]
@@ -5189,4 +5193,86 @@ model TimesheetChecklist {
 
   @@index([userId, date])
   @@index([date])
+}
+
+// ---------------------------------------------------------------------------
+// EMPLOYEE MONITORING (2026-11-04). How office PCs are used in work hours, from a desktop agent the employee installs and
+// agrees to (routes/monitoring.js, utils/monitoring.js). ONLY the app name, the window title, active / idle time and the
+// first / last activity of the day are kept - never keystrokes, passwords, the clipboard, chat content or screenshots.
+// Nothing is recorded before the employee accepts the policy (monitoring_consents); old activity is deleted after the
+// retention days in monitoring_settings.
+// ---------------------------------------------------------------------------
+model MonitoringDevice {
+  id           String        @id @default(cuid())
+  employeeId   String        @map("employee_id")
+  employee     Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  deviceName   String        @map("device_name")
+  os           String?
+  tokenHash    String        @unique @map("device_token") // sha256 of the device token; the token itself is never stored
+  registeredAt DateTime      @default(now()) @map("registered_at")
+  lastSeenAt   DateTime?     @map("last_seen_at")
+  isActive     Boolean       @default(true) @map("is_active")
+  activity     ActivityLog[]
+
+  @@index([employeeId])
+  @@map("monitoring_devices")
+}
+
+model MonitoringConsent {
+  id            String   @id @default(cuid())
+  employeeId    String   @map("employee_id")
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  policyVersion Int      @map("policy_version")
+  acceptedAt    DateTime @default(now()) @map("accepted_at")
+  ipAddress     String?  @map("ip_address")
+  via           String? // Agent | Web
+
+  @@index([employeeId, policyVersion])
+  @@map("monitoring_consents")
+}
+
+model ActivityLog {
+  id              String            @id @default(cuid())
+  deviceId        String?           @map("device_id")
+  device          MonitoringDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  employeeId      String            @map("employee_id")
+  employee        Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  appName         String            @map("app_name")
+  windowTitle     String?           @map("window_title")
+  startTime       DateTime          @map("start_time")
+  endTime         DateTime          @map("end_time")
+  durationSeconds Int               @map("duration_seconds")
+  isIdle          Boolean           @default(false) @map("is_idle")
+  day             String // YYYY-MM-DD, India time: the work day the record belongs to
+
+  @@index([employeeId, day])
+  @@index([day])
+  @@index([startTime])
+  @@map("activity_logs")
+}
+
+model AppCategory {
+  id        String   @id @default(cuid())
+  appName   String   @unique @map("app_name") // an app (chrome.exe -> "chrome") or a website word in the window title ("youtube")
+  kind      String   @default("app") // app | site
+  category  String // productive | neutral | unproductive
+  setBy     String?  @map("set_by")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("app_categories")
+}
+
+model MonitoringSetting {
+  id                   String   @id @default("default")
+  workStart            String   @default("09:30") @map("work_start") // HH:MM India time
+  workEnd              String   @default("18:30") @map("work_end")
+  idleThresholdMinutes Int      @default(5) @map("idle_threshold_minutes")
+  retentionDays        Int      @default(90) @map("retention_days")
+  screenshotsEnabled   Boolean  @default(false) @map("screenshots_enabled") // stays off: TeamLink takes no screenshots
+  policyVersion        Int      @default(1) @map("policy_version")
+  policyText           String?  @map("policy_text")
+  updatedBy            String?  @map("updated_by")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@map("monitoring_settings")
 }

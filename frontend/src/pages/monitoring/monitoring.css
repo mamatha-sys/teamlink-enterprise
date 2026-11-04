@@ -1,0 +1,33 @@
+/* HRMS -> Employee Monitoring (pages/monitoring/EmployeeMonitoring.jsx). Scoped under .mon */
+.mon .mon-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 12px}
+.mon .mon-bar label{display:flex;gap:6px;align-items:center;font-size:13px;color:var(--ink-soft,#5b6577)}
+.mon .mon-bar input[type=search],.mon .mon-bar input:not([type]){min-width:220px}
+.mon .mon-table{width:100%;border-collapse:collapse}
+.mon .mon-table th{text-align:left;font-size:12.5px;color:var(--ink-soft,#5b6577);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line,#e4e7ec)}
+.mon .mon-table td{padding:8px 10px;border-bottom:1px solid var(--line,#eef0f3);font-size:13.5px;vertical-align:top}
+.mon .mon-table .num{text-align:right;white-space:nowrap}
+.mon .mon-table tr.row-link{cursor:pointer}
+.mon .mon-table tr.row-link:hover td{background:var(--bg-soft,#f8fafc)}
+.mon .mon-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:14px;margin-top:14px}
+@media (max-width:900px){.mon .mon-two{grid-template-columns:minmax(0,1fr)}}
+.mon .mon-scroll{max-height:460px;overflow:auto}
+.mon .mon-titles{max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mon .mon-h2{margin:4px 0 10px;font-size:19px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.mon .mon-h3{margin:18px 0 8px;font-size:16px}
+.mon .mon-tl{padding:6px 2px 2px}
+.mon .mon-tl-bar{position:relative;height:26px;border-radius:6px;background:#eef1f5;overflow:hidden}
+.mon .mon-tl-seg{position:absolute;top:0;bottom:0}
+.mon .mon-tl-seg.active{background:#22a06b}
+.mon .mon-tl-seg.idle{background:#e59a1a}
+.mon .mon-tl-axis{position:relative;height:18px;margin-top:4px;font-size:11px;color:#64748b}
+.mon .mon-tl-axis span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+.mon .mon-tl-legend{display:flex;gap:14px;font-size:12px;color:#64748b;margin-top:6px}
+.mon .mon-tl-legend i{display:inline-block;width:11px;height:11px;border-radius:3px;background:#eef1f5;margin-right:5px;vertical-align:-1px}
+.mon .mon-tl-legend i.active{background:#22a06b}
+.mon .mon-tl-legend i.idle{background:#e59a1a}
+.mon .mon-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:8px}
+.mon .mon-grid label{display:flex;flex-direction:column;gap:4px;font-size:13px}
+@media (max-width:640px){.mon .mon-grid{grid-template-columns:minmax(0,1fr)}}
+.mon .mon-settings{display:flex;flex-direction:column;gap:14px;max-width:900px}
+.mon .mon-policy{white-space:pre-wrap;font-size:13.5px;line-height:1.5;background:var(--bg-soft,#f8fafc);border:1px solid var(--line,#e4e7ec);border-radius:8px;padding:10px 12px}
+.mon .mon-steps{margin:0;padding-left:20px;line-height:1.7;font-size:13.5px}

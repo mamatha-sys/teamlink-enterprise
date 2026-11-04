@@ -19,6 +19,9 @@
 const jwt = require('jsonwebtoken');
 
 const STRICT = [
+  // Employee Monitoring agents (routes/monitoring.js): counted per PC, not per office address (one office = one address)
+  { name: 'monitor-register', re: /^\/api\/monitoring\/devices\/register\/?$/i, methods: ['POST'], max: 10, byIp: true },
+  { name: 'monitor-agent', re: /^\/api\/monitoring\/(activity|heartbeat|consent)\/?$/i, methods: ['POST'], max: 30 },
   { name: 'login', re: /^\/api\/auth\/login(\/choose)?\/?$/i, methods: ['POST'], max: 20, byIp: true },
   { name: 'reset', re: /^\/api\/auth\/(forgot-password|reset-password)(\/|$)/i, methods: ['POST'], max: 10, byIp: true },
   { name: 'export', re: /(\/export([./]|$)|\/export-|\.(xlsx|csv|pdf)$|\/download-all|\/zip$)/i, methods: ['GET', 'POST'], max: 30 },
@@ -66,6 +69,8 @@ const limiter = makeLimiter({
 
 function userIdOf(req) {
   const h = String(req.headers.authorization || '');
+  // a monitoring agent is counted as its own PC (the token's hash), so a whole office behind one address is not one caller
+  if (h.startsWith('Device ') && h.length > 40) return `dev:${require('crypto').createHash('sha256').update(h.slice(7).trim()).digest('hex').slice(0, 24)}`; // eslint-disable-line global-require
   if (!h.startsWith('Bearer ')) return null;
   try {
     const c = jwt.verify(h.slice(7).trim(), process.env.JWT_SECRET);

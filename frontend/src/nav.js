@@ -152,6 +152,9 @@ export const HRMS_ITEMS = [
   leaf('💵', '/payroll', 'Payroll & Compensation', [['hrms', 'Payroll & Compensation', 'view']]),
   leaf('📈', '/performance', 'Performance & Development', [['hrms', 'Performance & Development', 'view']]),
   leaf('🛎️', '/employee-services', 'Employee Services', [['hrms', 'Employee Services', 'view']]),
+  // EMPLOYEE MONITORING (2026-11-04): office PC use in work hours. HR / Admin see everyone (Overview, Reports, Devices,
+  // Settings ...); every employee sees My activity - their own data and the notice they accepted. The server decides.
+  leaf('🖥️', '/monitoring', 'Employee Monitoring', [['hrms', 'Attendance & Time', 'view']]),
 ];
 
 // ATS LAYOUT v3 (user, 2026-10-03) — EXACTLY FIVE ATS ENTRIES:
@@ -511,7 +514,7 @@ const SECTION_OF_PATH = [
   // reaches it from Administration -> Employee Management; putting it in the
   // HRMS section keeps a TL's sidebar from opening an Administration group
   // they hold nothing else in.
-  [/^\/(hrms|attendance|leave|payroll|performance|employee-services|my-profile|employees)/, 'hrms'],
+  [/^\/(hrms|attendance|leave|payroll|performance|employee-services|my-profile|employees|monitoring)/, 'hrms'],
   [/^\/(ats|requirements|clients|candidates|client-portal|agreements)/, 'ats'],
   // ATS Reports / My Results are a tab of ATS → Reports & Team (layout v3).
   [/^\/reports\/(ats|my-results|job-portal)(\/|$)/, 'ats'],
