@@ -6,6 +6,7 @@ export const CHANNELS = [
   { key: 'sms', label: 'SMS', icon: '💬', color: '#4d7ddb', soft: '#edf3ff', kind: 'chat', tips: ['Templates must be DLT approved.', 'Use {{name}}, {{company}}: they are filled for each person.'] },
   { key: 'rcs', label: 'RCS', icon: '💭', color: '#0891b2', soft: '#e6f7fb', kind: 'chat', planned: true, tips: ['Rich cards render only on RCS-capable devices.', 'Fallback to SMS is automatic if unsupported.'] },
   { key: 'call', label: 'Voice', icon: '🎙', color: '#5b6ee1', soft: '#eef0fd', kind: 'call', tips: ['Each person becomes a call task for you (Automations > Tasks).', 'Keep the call script under 30 seconds.'] },
+  { key: 'aicall', label: 'AI Call', icon: '🤖', color: '#7b3fe4', soft: '#f3ecfd', kind: 'aicall', tips: ['The AI rings the candidates by itself and talks to them.', 'Every answer, outcome and what they said is saved on the candidate.'] },
   { key: 'email', label: 'Email', icon: '@', color: '#666fd3', soft: '#eff0fb', kind: 'email', tips: ['Subject lines under 60 characters perform best.', 'Every email carries an unsubscribe link, added for you.'] },
   { key: 'facebook', label: 'Facebook', icon: '📘', color: '#1877f2', soft: '#e8f1fe', kind: 'social', planned: true, page: 'fbchannel', tips: ['Connect a verified Facebook Page.'] },
   { key: 'instagram', label: 'Instagram', icon: '📸', color: '#d6249f', soft: '#fcebf6', kind: 'social', planned: true, page: 'igchannel', tips: ['Use vertical 9:16 media for stories.'] },

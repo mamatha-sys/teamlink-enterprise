@@ -6,6 +6,7 @@ import Combo from '../../Combo.jsx';
 import ConsolePreview from '../console/ConsolePreview.jsx';
 import CrmSelector from '../console/CrmSelector.jsx';
 import RunModal from '../console/RunModal.jsx';
+import AiVoicePage from './AiVoicePage.jsx';
 import { CHANNELS, chOf, download } from '../console/consoleKit.js';
 import '../console/console.css';
 
@@ -153,6 +154,26 @@ export default function ConsolePage() {
     { id: 'when', label: 'Started', render: (r) => fmtDateTime(r.scheduledAt || r.startedAt || r.createdAt), sort: (r) => r.createdAt },
     { id: 'by', label: 'By', render: (r) => r.createdByName, hide: true },
   ];
+
+  // AI CALL (founder 2026-11-04: "communication loo ai calling ki option ravdam ledhu"): not a message to a list but the AI ringing candidates, so this tab is the
+  // AI Voice campaigns of the existing AI Calling (Campaigns > AI Voice is the same page).
+  if (channel === 'aicall') {
+    return (
+      <div>
+        <PageHead eyebrow="Direct send" title="Communication Console" lead="Send targeted channel communications without building a full campaign." />
+        <div className="card panel">
+          <div className="console-tabs">
+            {CHANNELS.map((c) => (
+              <button type="button" key={c.key} className="console-tab" style={c.key === channel ? { color: c.color, borderColor: c.color, background: '#fff' } : undefined} onClick={() => changeChannel(c.key)}>
+                {c.icon} {c.label}{c.planned ? <span style={{ fontSize: 7.5, opacity: 0.7, fontWeight: 700 }}> · Planned</span> : null}
+              </button>
+            ))}
+          </div>
+          <AiVoicePage embedded />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>

@@ -6,6 +6,41 @@ import { Banner, Btn, Empty, Field, Kpi, Kpis, PageHead, Panel, Pill, Tabs } fro
 import { fmtDateTime } from '../ui.jsx';
 import AiCallDetail from '../../aicalling/AiCallDetail.jsx';
 
+// LIVE: what is being said on a call that is on the phone right now. The assistant saves every turn as it goes (voice/gateway.js keepTurns), so the
+// call is read again every 3 seconds while it is on the phone and the talk scrolls like a chat: the AI on one side, the candidate on the other.
+function LiveCall({ id, name, onClose }) {
+  const [c, setC] = useState(null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    let on = true;
+    const read = () => api.get(`/ai-calling/calls/${id}`).then((r) => { if (on) { setC(r.data.call); setErr(''); } }).catch((e) => { if (on) setErr(errOf(e, 'This call could not be read.')); });
+    read();
+    const t = setInterval(() => { if (!document.hidden) read(); }, 3000);
+    return () => { on = false; clearInterval(t); };
+  }, [id]);
+  const turns = (c && Array.isArray(c.transcript) ? c.transcript : []);
+  const on = c && c.status === 'calling';
+  return (
+    <Panel title={`Live: ${name || 'candidate'}`} sub={on ? 'On the phone now. This updates by itself.' : 'The call is over.'} right={<Btn small onClick={onClose}>Close</Btn>}>
+      {err && <Banner tone="error">{err}</Banner>}
+      {c && <div style={{ marginBottom: 8 }}><Pill tone={on ? 'live' : 'draft'} dot>{on ? 'On the phone' : (CALL_WORD[c.status] || [0, c.status])[1]}</Pill>{c.outcome ? <span style={{ marginLeft: 8, fontSize: 11 }}>Outcome: <b>{c.outcome}</b></span> : null}</div>}
+      <div style={{ maxHeight: 340, overflow: 'auto', background: '#fbfdfc', border: '1px solid var(--line)', borderRadius: 10, padding: 10 }}>
+        {!turns.length && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{c && c.transcriptNote ? c.transcriptNote : (on ? 'Ringing… the talk appears here as soon as the candidate answers.' : 'No talk was saved for this call.')}</div>}
+        {turns.map((t, i) => {
+          const ai = /^(assistant|ai|bot)$/i.test(String(t.role || t.who || t.speaker || ''));
+          return (
+            <div key={i} style={{ display: 'flex', justifyContent: ai ? 'flex-start' : 'flex-end', margin: '5px 0' }}>
+              <div style={{ maxWidth: '78%', padding: '6px 10px', borderRadius: 12, fontSize: 12, background: ai ? '#eef0fd' : '#e8f7ef', border: '1px solid var(--line)' }}>
+                <small style={{ display: 'block', fontSize: 9, fontWeight: 800, color: 'var(--muted)' }}>{ai ? 'AI' : 'Candidate'}</small>{t.text || t.say || t.content || ''}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // OMNI-CHANNEL > CAMPAIGNS > AI VOICE (founder 2026-11-04). Campaigns of TeamLink's existing AI Calling: the same engine, hours, consent, DND, limits,
 // retries, transcripts, outcomes and ATS timeline lines as the ATS AI Calling screen (server: calling/voiceCampaigns.js, /api/ai-calling/voice/*).
@@ -26,7 +61,7 @@ const callPill = (r) => {
 const short = (t, n = 70) => (t && t.length > n ? `${t.slice(0, n)}…` : (t || '—'));
 const dt = (iso) => (iso ? fmtDateTime(iso) : '—');
 
-export default function AiVoicePage() {
+export default function AiVoicePage({ embedded = false }) {
   const { toast } = useOmni();
   const [tab, setTab] = useState('campaigns');
   const [status, setStatus] = useState(null);
@@ -54,9 +89,10 @@ export default function AiVoicePage() {
   const t = data && data.totals;
   return (
     <div>
-      <PageHead eyebrow="Campaigns" title="AI Voice" lead="TeamLink's AI Calling as a campaign: pick an agent, a vacancy and candidates. The AI rings them, and every answer, outcome and transcript is saved on the candidate.">
+      {!embedded && <PageHead eyebrow="Campaigns" title="AI Voice" lead="TeamLink's AI Calling as a campaign: pick an agent, a vacancy and candidates. The AI rings them, and every answer, outcome and transcript is saved on the candidate." />}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', margin: embedded ? '8px 0' : '0 0 8px' }}>
         {status && status.canCall && ready && ready.path && <Btn primary onClick={() => { setMaking(true); setTab('campaigns'); setOpenId(null); }}>New AI Voice campaign</Btn>}
-      </PageHead>
+      </div>
       {ready && !ready.path && (
         <Banner tone="warn">
           AI calling is not ready yet, so no campaign can start. An Admin finishes the setup in Administration &gt; Integrations &gt; AI Calling, or switches the AI phone line on (the same line as “Call with AI (phone)” in the ATS).
@@ -223,6 +259,7 @@ function CampaignDetail({ id, onBack, onChanged, toast, canCall }) {
   const [filter, setFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [call, setCall] = useState(null);
+  const [liveId, setLiveId] = useState(null);
   const [busy, setBusy] = useState('');
   const load = useCallback(async () => {
     try { const r = await api.get(`/ai-calling/voice/campaigns/${id}`, { params: { status: filter === 'all' ? '' : filter, page, pageSize: 25 } }); setD(r.data); setErr(''); } catch (e) { setErr(errOf(e, 'This campaign could not be opened.')); }
@@ -287,7 +324,8 @@ function CampaignDetail({ id, onBack, onChanged, toast, canCall }) {
           </div>
         </Panel>
       )}
-      <Panel title="Calls" sub="Open a call to read what the candidate said and the saved outcome. It is also on the candidate's timeline.">
+      {liveId && <LiveCall id={liveId.id} name={liveId.name} onClose={() => setLiveId(null)} />}
+      <Panel title="Calls" sub="Press “Listen live” on a call that is on the phone to read what the candidate says as they say it. Open a finished call for the saved talk and outcome.">
         <Tabs value={filter} onChange={(v) => { setFilter(v); setPage(1); }} tabs={[['all', 'All', k.total], ['waiting', 'Waiting', k.queued + k.calling], ['answered', 'Answered', k.answered], ['failed', 'Failed', k.failed + k.retrying], ['cancelled', 'Cancelled', k.cancelled]]} />
         <div className="table-scroll" style={{ marginTop: 8 }}>
           <table className="table cmp-table-small">
@@ -298,7 +336,7 @@ function CampaignDetail({ id, onBack, onChanged, toast, canCall }) {
                   <td style={{ fontWeight: 800 }}>{r.candidateName || '—'}</td><td>{r.toMask || '—'}</td><td>{callPill(r)}{(r.failReason || r.waitReason) && <span className="cmp-sub">{short(r.failReason || r.waitReason, 60)}</span>}</td>
                   <td>{r.attempts}/{r.maxAttempts}</td><td>{r.outcome || '—'}{r.interest ? <span className="cmp-sub">{r.interest}</span> : null}</td><td title={r.summary || ''}>{short(r.summary)}</td>
                   <td>{r.durationSec ? `${r.durationSec}s` : '—'}{r.endedAt ? <span className="cmp-sub">{dt(r.endedAt)}</span> : null}</td>
-                  <td><Btn small onClick={() => setCall(r.id)}>Open</Btn></td>
+                  <td style={{ display: 'flex', gap: 6 }}>{r.status === 'calling' && <Btn small primary onClick={() => setLiveId({ id: r.id, name: r.candidateName })}>Listen live</Btn>}<Btn small onClick={() => setCall(r.id)}>Open</Btn></td>
                 </tr>
               ))}
               {!d.rows.length && <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--muted)', padding: 20 }}>Nothing here.</td></tr>}
