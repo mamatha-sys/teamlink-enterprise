@@ -547,6 +547,7 @@ const server = app.listen(PORT, () => {
   require('./utils/jobPortalBridge').startSchedule();
   require('./utils/candidateLogins').startSchedule();
   require('./calling/voiceCampaigns').startSchedule(); // AI Voice campaigns: dispatch the waiting calls, at most `concurrency` lines at once
+  require('./utils/omniVoiceSync').startSchedule(); // finished AI calls -> Omni-Channel > Voice Calling (the history there too)
   require('./utils/portalIntegrations').startSchedule(); // the portal sends WhatsApp from TeamLink's own number
   // Codes sent but never entered for a day → HR is told (utils/employeeEmailVerification.js).
   require('./utils/employeeEmailVerification').startSweep();

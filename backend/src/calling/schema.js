@@ -13,6 +13,7 @@
 //   AiCallSuppression  numbers never to be called by AI (opt-out / DND)
 //   AiCallCampaign     a bulk run (name, purpose, job, who)
 //   AiVoiceAgent       a saved AI Voice "agent": a purpose + language + extra wording picked in Omni-Channel > AI Voice (2026-11-04)
+//   AiCallOmniPush     which finished AI calls were sent to Voice Calling in Omni-Channel, and the fingerprint sent (utils/omniVoiceSync.js, 2026-11-04)
 //   AiVoiceCampaign    the running side of an AI Voice campaign (status, agent, how many lines at once), same id as its AiCallCampaign
 //   AiCallPref         the candidate's saved language for calls
 //   AiCallQuestion     a question the AI could not answer from verified facts (per requirement), and the answer a
@@ -175,6 +176,12 @@ const DDL = [
   )`,
   'CREATE INDEX IF NOT EXISTS "AiVoiceCampaign_status" ON "AiVoiceCampaign"("status")',
   'CREATE INDEX IF NOT EXISTS "AiCall_campaign" ON "AiCall"("campaignId", "status")',
+  `CREATE TABLE IF NOT EXISTS "AiCallOmniPush" (
+    "callId" TEXT NOT NULL PRIMARY KEY,
+    "fp" TEXT NOT NULL,
+    "workspaceId" TEXT,
+    "pushedAt" TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS "AiCallPref" (
     "candidateId" TEXT NOT NULL PRIMARY KEY,
     "language" TEXT NOT NULL,
