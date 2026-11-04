@@ -129,6 +129,8 @@ app.use('/api/public/job-card', require('./utils/jobCard').router); // the pictu
 app.use('/api/public/outreach/webhook', require('./routes/outreachWebhook'));
 // TeamLink WhatsApp numbers on Omni-Channel's Settings page (routes/omniNumbers.js): its own CORS for the Green Start address, so ahead of the site-wide one.
 app.use(require('./routes/omniNumbers'));
+// a WhatsApp number connected inside Omni-Channel also lands in TeamLink (server to server, signed; routes/omniWaFromOmni.js)
+app.use(require('./routes/omniWaFromOmni'));
 // CORS: open only for the public paths third parties use; everything else = CORS_ORIGINS / this site / localhost in dev.
 app.use(require('./utils/webSecurity').corsMiddleware());
 app.use(express.json());
