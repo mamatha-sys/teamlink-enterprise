@@ -579,6 +579,8 @@ const server = app.listen(PORT, () => {
   // guarantee ending), every 15 min — OFF until an Admin switches it on
   // (utils/interviewNotices.js).
   require('./utils/interviewNotices').startSweep();
+  // A recruiter who left: their candidates go to the recruiter on the job following them up now, every hour (utils/leaverHandover.js).
+  require('./utils/leaverHandover').startSweep();
   // Automatic stage messages: sends the scheduled ones that are due (reads the table, so a restart
   // loses nothing). Does nothing until Admin / HR first save the rules (utils/autoMessages.js).
   require('./utils/autoMessages').startSweep();

@@ -92,14 +92,30 @@ async function existingFor(user, candidateId, requirementId) {
 
 // The 409 body. `candidate` = { id, name }.
 async function alreadyAppliedBody(user, candidate, requirement, existing) {
+  // THE RECRUITER WHO HAD THEM LEFT (founder 2026-11-04): hand the application over first (utils/leaverHandover.js) - to the
+  // recruiter on the job who follows the person up now - so the answer names who has them NOW, and may be "it is yours".
+  let leftName = null;
+  try {
+    const raw = await prisma.application.findUnique({ where: { candidateId_requirementId: { candidateId: candidate.id, requirementId: requirement.id } }, select: { id: true, ownerRecruiterId: true } });
+    if (raw && raw.ownerRecruiterId) {
+      const HO = require('./leaverHandover'); // eslint-disable-line global-require
+      const gone = await HO.leaverIds();
+      if (gone.has(raw.ownerRecruiterId) && (await HO.run({ applicationIds: [raw.id] })).moved) { leftName = gone.get(raw.ownerRecruiterId); existing = null; } // eslint-disable-line no-param-reassign
+    }
+  } catch { /* the answer below still holds */ }
+  const owner = await prisma.application.findUnique({ where: { candidateId_requirementId: { candidateId: candidate.id, requirementId: requirement.id } }, select: { ownerRecruiterId: true } }).catch(() => null);
+  const yours = !!(owner && user && owner.ownerRecruiterId === user.id);
   const application = existing || await existingFor(user, candidate.id, requirement.id);
   if (!application) return null;
   const others = await otherApplications(user, candidate.id, requirement.id);
   const where = [application.requirementTitle, application.clientName].filter(Boolean).join(' at ');
   const by = application.addedBy ? ` by ${application.addedBy}` : '';
+  const already = `${candidate.name} is already on ${where}: step ${application.step}, added ${application.addedOnText}${by}.`;
   return {
-    error: `${candidate.name} is already on ${where}: step ${application.step}, added ${application.addedOnText}${by}.`,
+    error: yours ? `${already} ${leftName ? `${leftName} had them and has left, so they are yours now` : 'They are yours'}: open the profile and carry on.` : already,
     code: 'ALREADY_APPLIED',
+    yours,
+    handedFrom: leftName,
     candidate: { id: candidate.id, name: candidate.name },
     application,
     others,

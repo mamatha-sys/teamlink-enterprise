@@ -2223,7 +2223,10 @@ async function loadInScope(req, res) {
   // requirement's main recruiter (founder 2026-10-29)
   {
     const ownIds = [...new Set((candidate.applications || []).map((a) => a.ownerRecruiterId).filter(Boolean))];
-    const names = ownIds.length ? new Map((await prisma.user.findMany({ where: { id: { in: ownIds } }, select: { id: true, name: true } })).map((u) => [u.id, u.name])) : new Map();
+    // a recruiter who has left is named "(left)" until their candidates are handed over (utils/leaverHandover.js, founder 2026-11-04)
+    const LEFT = require('../utils/leftLogin').LEFT; // eslint-disable-line global-require
+    const names = ownIds.length ? new Map((await prisma.user.findMany({ where: { id: { in: ownIds } }, select: { id: true, name: true, status: true, employee: { select: { employmentStatus: true } } } }))
+      .map((u) => [u.id, u.status !== 'Active' || (u.employee && LEFT.includes(u.employee.employmentStatus)) ? `${u.name} (left)` : u.name])) : new Map();
     (candidate.applications || []).forEach((a) => { a.ownerRecruiterName = names.get(a.ownerRecruiterId) || null; });
   }
   const s = scopeOf(req.user);
