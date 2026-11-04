@@ -793,30 +793,77 @@ async function tokenWabaIds(cfg) {
     return [...new Set(ids.map(String))].slice(0, 25);
   } catch { return []; }
 }
+// The businesses this token may manage (debug_token), plus the owner of one account (read-only, [] on any error).
+async function tokenBusinessIds(cfg) {
+  try {
+    const r = await graphGet(cfg, `debug_token?input_token=${encodeURIComponent(cfg.token)}`);
+    const scopes = (r.ok && r.json && r.json.data && r.json.data.granular_scopes) || [];
+    return [...new Set(scopes.filter((s) => s.scope === 'business_management').flatMap((s) => (Array.isArray(s.target_ids) ? s.target_ids : [])).map(String))].slice(0, 5);
+  } catch { return []; }
+}
 const listsPhone = (r, phoneId) => !!(r.ok && r.json && Array.isArray(r.json.data) && r.json.data.some((d) => String(d.id) === String(phoneId)));
-// Is the typed WhatsApp Business ID the account Meta keeps this number in? If not, look for the right one among the accounts
-// the token reaches and, for a number of the Numbers list, save it (what Meta says is the truth; it is logged).
-// Returns null when the typed id is right (or Meta cannot tell), else { text, fixedTo? }.
+const idsOf = (r) => (r.ok && r.json && Array.isArray(r.json.data) ? r.json.data.map((d) => String(d.id)) : []);
+// Every WhatsApp Business Account worth asking about: the token's own list, the accounts of the token's businesses (and of the
+// typed account's owner), the ids saved on the other numbers and in the WhatsApp Business form. Read-only.
+async function candidateWabas(cfg, typed) {
+  const out = new Set(await tokenWabaIds(cfg));
+  const biz = new Set(await tokenBusinessIds(cfg));
+  const own = await graphGet(cfg, `${encodeURIComponent(typed)}?fields=owner_business_info`).catch(() => null);
+  const ob = own && own.ok && own.json && own.json.owner_business_info && own.json.owner_business_info.id;
+  if (ob) biz.add(String(ob));
+  for (const b of biz) {
+    for (const edge of ['owned_whatsapp_business_accounts', 'client_whatsapp_business_accounts']) {
+      idsOf(await graphGet(cfg, `${encodeURIComponent(b)}/${edge}?fields=id&limit=50`).catch(() => ({}))).forEach((x) => out.add(x));
+    }
+  }
+  try { (await listRows()).forEach((r) => { if (r.wabaId) out.add(String(r.wabaId)); }); } catch { /* best effort */ }
+  try { const l = await wa().legacyConfig(); if (l.wabaId) out.add(String(l.wabaId)); } catch { /* best effort */ }
+  out.delete(typed);
+  return [...out].slice(0, 30);
+}
+async function wabaHolding(cfg, typed) {
+  for (const id of await candidateWabas(cfg, typed)) {
+    if (listsPhone(await graphGet(cfg, `${encodeURIComponent(id)}/phone_numbers?fields=id,display_phone_number`), cfg.phoneId)) return id;
+  }
+  return null;
+}
+// Is the typed WhatsApp Business ID the account Meta keeps this number in? If not, look for the right one (with this number's
+// token, then with the token of the WhatsApp Business form) and, for a number of the Numbers list, save it (what Meta says is the
+// truth; it is logged). Returns null when the typed id is right (or Meta cannot tell), else { text, fixedTo? }.
 async function wabaFix(row, cfg, user) {
   const typed = String(cfg.wabaId);
   const wl = await graphGet(cfg, `${encodeURIComponent(typed)}/phone_numbers?fields=id,display_phone_number`);
   if (listsPhone(wl, cfg.phoneId)) return null;
   const metaErr = wl.json && wl.json.error;
   if (!wl.ok && !metaErr) return null; // Meta did not answer: say nothing rather than guess
-  let found = null;
-  for (const id of (await tokenWabaIds(cfg)).filter((x) => x !== typed)) {
-    if (listsPhone(await graphGet(cfg, `${encodeURIComponent(id)}/phone_numbers?fields=id,display_phone_number`), cfg.phoneId)) { found = id; break; }
+  // what Meta said about the typed account, in plain words
+  const seen = !wl.ok
+    ? `This number's token cannot open account ${typed} (Meta: ${clip(wa().failure(wl).error, 160)}).`
+    : `Meta lists ${(wl.json.data || []).length ? (wl.json.data || []).map((d) => d.display_phone_number || d.id).join(', ') : 'no number'} in account ${typed}, not this one.`;
+  let found = await wabaHolding(cfg, typed);
+  let viaShared = false;
+  if (!found && row && row.tokenMode !== 'shared' && row.credSource !== 'legacy') {
+    try {
+      const legacy = await wa().legacyConfig();
+      if (legacy.token && tagOf(legacy.token) !== tagOf(cfg.token)) {
+        const sc = { ...cfg, token: legacy.token };
+        found = listsPhone(await graphGet(sc, `${encodeURIComponent(typed)}/phone_numbers?fields=id,display_phone_number`), cfg.phoneId) ? typed : await wabaHolding(sc, typed);
+        viaShared = !!found;
+      }
+    } catch { /* best effort */ }
   }
+  const sharedHint = ' This number\'s own token cannot use that account; the token saved in the WhatsApp Business form can: edit the number and choose "The shared token".';
+  if (found === typed) return { text: `${seen}${sharedHint}` };
   if (!found) {
-    return { text: `The WhatsApp Business ID ${typed} is not the account of this Phone number ID (Meta: messages fail with "#10 ... not linked"), and the token reaches no account that has this number. In Meta WhatsApp Manager open this number, copy its WhatsApp Business Account ID, and save it here.` };
+    return { text: `${seen} No account that the saved tokens reach has this Phone number ID, so messages fail with "#10 ... not linked". In Meta (business.facebook.com > System users) give the token's user this number's WhatsApp account (Full control), or paste a token that has it, then Reconnect.` };
   }
   if (!row || row.credSource === 'legacy' || row.virtual) {
-    return { text: `The WhatsApp Business ID is wrong: Meta keeps this number in account ${found}, not ${typed}. Type ${found} in the WhatsApp Business form (Connections tab) and save.` };
+    return { text: `${seen} Meta keeps this number in account ${found}. Type ${found} in the WhatsApp Business form (Connections tab) and save.` };
   }
   await run('UPDATE "WaNumber" SET "wabaId" = ?, "updatedAt" = ? WHERE "id" = ?', found, nowIso(), row.id);
   bust();
   await logAudit({ userId: user ? user.id : null, actorName: user ? user.name : 'System', action: 'WhatsApp number: WhatsApp Business ID corrected from Meta', entity: 'WaNumber', entityId: row.id, fromValue: typed, toValue: `${row.label}: ${found}` });
-  return { fixedTo: found, text: `WhatsApp Business ID corrected: Meta keeps this number in account ${found} (it said ${typed}).` };
+  return { fixedTo: found, text: `WhatsApp Business ID corrected: Meta keeps this number in account ${found} (it said ${typed}).${viaShared ? sharedHint : ''}` };
 }
 async function graphGet(cfg, path) {
   return core.httpJson(`${cfg.base}/${wa().VERSION}/${path}`, { headers: { authorization: `Bearer ${cfg.token}` } });

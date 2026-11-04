@@ -12,6 +12,10 @@
 //   C a wrong id, no account of the token has the number -> plain words, nothing saved
 //   D the Main number from the WhatsApp Business form -> the right id is named, the form is not changed behind its back
 //   E Meta does not answer -> no guess
+//   F the token cannot open the typed account -> says so (Meta's words)
+//   G the right account is found through the token's business (owned accounts), not the token's own list
+//   H only the token of the WhatsApp Business form reaches the right account -> saved, and "choose The shared token"
+//   I the typed account is right but only the shared token can use it -> "choose The shared token", nothing saved
 // ---------------------------------------------------------------------------
 const os = require('os');
 const fs = require('fs');
@@ -34,23 +38,34 @@ process.env.DATABASE_URL = DB_URL;
 const prisma = require(path.join(BACK, 'src/db'));
 const core = require(path.join(BACK, 'src/utils/messagingCore'));
 const WN = require(path.join(BACK, 'src/utils/waNumbers'));
+const WA = require(path.join(BACK, 'src/utils/whatsappCloud'));
+let legacy = { token: '', wabaId: '' };
+WA.legacyConfig = async () => legacy;
 
 let pass = 0; let fail = 0;
 const check = (n, ok, d) => { if (ok) pass += 1; else fail += 1; console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${!ok && d != null ? `  -> ${JSON.stringify(d).slice(0, 500)}` : ''}`); };
 
 // the fake Meta: which account holds which phone ids, which accounts the token reaches
-let accounts = {}; let reach = []; let down = false; const asked = [];
-core.httpJson = async (url) => {
+let accounts = {}; let reach = []; let bizOwned = []; let sharedReach = null; let down = false; const asked = [];
+const OPEN_TO_OWN = ['RIGHT', 'WRONG', 'EMPTY'];
+core.httpJson = async (url, opts = {}) => {
   asked.push(url);
   if (down) return { ok: false, status: 0, json: null };
+  const shared = /Bearer shared/.test(String((opts.headers || {}).authorization));
+  const myReach = shared ? (sharedReach || []) : reach;
   const u = new URL(url);
   const parts = u.pathname.split('/').filter(Boolean);
   if (parts[1] === 'debug_token') {
-    return { ok: true, status: 200, json: { data: { is_valid: true, granular_scopes: [{ scope: 'business_management', target_ids: ['B1'] }, { scope: 'whatsapp_business_messaging', target_ids: reach }, { scope: 'whatsapp_business_management', target_ids: reach }] } } };
+    return { ok: true, status: 200, json: { data: { is_valid: true, granular_scopes: [{ scope: 'business_management', target_ids: ['B1'] }, { scope: 'whatsapp_business_messaging', target_ids: myReach }, { scope: 'whatsapp_business_management', target_ids: myReach }] } } };
   }
+  if (parts[1] === 'B1' && /whatsapp_business_accounts/.test(parts[2] || '')) {
+    return { ok: true, status: 200, json: { data: (shared || parts[2].startsWith('client') ? [] : bizOwned).map((id) => ({ id })) } };
+  }
+  if (parts.length === 2 && u.searchParams.get('fields') === 'owner_business_info') return { ok: true, status: 200, json: { id: parts[1] } };
   if (parts[2] === 'phone_numbers') {
     const phones = accounts[parts[1]];
-    if (!phones) return { ok: false, status: 400, json: { error: { code: 100, message: 'Unsupported get request.' } } };
+    const canOpen = shared ? (sharedReach || []).includes(parts[1]) : (reach.includes(parts[1]) || bizOwned.includes(parts[1]) || OPEN_TO_OWN.includes(parts[1]));
+    if (!phones || !canOpen) return { ok: false, status: 400, json: { error: { code: 100, message: 'Unsupported get request. Object does not exist or missing permissions.' } } };
     return { ok: true, status: 200, json: { data: phones.map((id) => ({ id, display_phone_number: '+91 0' })) } };
   }
   return { ok: false, status: 404, json: { error: { code: 803, message: 'unknown' } } };
@@ -82,11 +97,32 @@ core.httpJson = async (url) => {
     await prisma.$executeRawUnsafe('UPDATE "WaNumber" SET "wabaId" = ? WHERE "id" = ?', 'WRONG', id); WN.bust();
     reach = ['WRONG', 'EMPTY'];
     const c = await WN.wabaFix(await row(), cfg('WRONG'), null);
-    check('C no account of the token has the number: says what to do, saves nothing', c && !c.fixedTo && /WhatsApp Manager/.test(c.text) && (await wabaNow()) === 'WRONG', c);
+    check('C no account of the token has the number: says what to do, saves nothing', c && !c.fixedTo && /System users/.test(c.text) && (await wabaNow()) === 'WRONG', c);
+    check('C2 ... and what Meta lists in the typed account', c && /Meta lists \+91 0 in account WRONG/.test(c.text), c && c.text);
 
     reach = ['RIGHT'];
     const d = await WN.wabaFix({ ...(await row()), credSource: 'legacy' }, cfg('WRONG'), null);
     check('D the Main number of the WhatsApp Business form: names the right id, changes nothing', d && !d.fixedTo && d.text.includes('RIGHT') && /Connections tab/.test(d.text) && (await wabaNow()) === 'WRONG', d);
+
+    reach = []; accounts.HIDDEN = [`P${RUN}`];
+    const f = await WN.wabaFix(await row(), cfg('HIDDEN'), null);
+    check('F the token cannot open the typed account: says so', f && !f.fixedTo && /cannot open account HIDDEN/.test(f.text), f);
+    delete accounts.HIDDEN;
+
+    reach = []; bizOwned = ['RIGHT'];
+    const g = await WN.wabaFix(await row(), cfg('WRONG'), null);
+    check('G found through the token\'s business (owned accounts)', g && g.fixedTo === 'RIGHT' && (await wabaNow()) === 'RIGHT', g);
+    await prisma.$executeRawUnsafe('UPDATE "WaNumber" SET "wabaId" = ? WHERE "id" = ?', 'WRONG', id); WN.bust();
+
+    bizOwned = []; OPEN_TO_OWN.splice(0, 1); accounts.ONLYSHARED = [`P${RUN}`]; delete accounts.RIGHT; sharedReach = ['ONLYSHARED']; legacy = { token: 'shared-token', wabaId: '' };
+    const h = await WN.wabaFix(await row(), cfg('WRONG'), null);
+    check('H only the shared token reaches the right account: saved, and "choose The shared token"', h && h.fixedTo === 'ONLYSHARED' && /The shared token/.test(h.text) && (await wabaNow()) === 'ONLYSHARED', h);
+    await prisma.$executeRawUnsafe('UPDATE "WaNumber" SET "wabaId" = ? WHERE "id" = ?', 'WRONG', id); WN.bust();
+
+    accounts.SHAREDOK = [`P${RUN}`]; sharedReach = ['SHAREDOK'];
+    const i = await WN.wabaFix(await row(), cfg('SHAREDOK'), null);
+    check('I the typed account is right but only the shared token opens it: "choose The shared token", nothing saved', i && !i.fixedTo && /cannot open account SHAREDOK/.test(i.text) && /The shared token/.test(i.text) && (await wabaNow()) === 'WRONG', i);
+    legacy = { token: '', wabaId: '' }; sharedReach = null;
 
     down = true;
     const e = await WN.wabaFix(await row(), cfg('WRONG'), null);
