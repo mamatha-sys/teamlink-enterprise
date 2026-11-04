@@ -64,7 +64,9 @@ const RT = require('./reqTeamLeads'); // extra team leads of a job (2026-10-14)
 const {
   REQUIREMENT_LIVE_STATUSES, stageLabel, isPreAtsApplication, requirementStatusLabel, requirementStatusUser,
 } = require('./atsVocab');
-const { ATTR_SELECT, attribute, loadDirectory } = require('./workers');
+const {
+  ATTR_SELECT, attribute, creditAt, stepAt, loadDirectory,
+} = require('./workers');
 
 const TEAM_ROLES = ['RECRUITER', 'BDE', 'TL', 'STL'];
 const TEAM_ROLE_ORDER = { RECRUITER: 0, BDE: 1, TL: 2, STL: 3 };
@@ -472,6 +474,7 @@ async function buildWorld(user) {
   const reqById = new Map(shapedReqs.map((r) => [r.id, r]));
 
   // --- Applications: attribution + the ONE next action ----------------------
+  const creditUserOf = (a, when) => { const p = creditAt(a.requirement, a.followUps, a.stageEvents, dir.person, when); return p ? p.userId : null; };
   const shapeApp = (a) => {
     const at = attribute(a.requirement, a.followUps, a.stageEvents, dir.person);
     const req = reqById.get(a.requirementId) || (a.requirement ? shapeReq({
@@ -498,6 +501,11 @@ async function buildWorld(user) {
       interviewStatus: a.interviewStatus,
       recruiterUserId: at.recruiter && at.recruiter.userId,
       recruiterName: at.recruiter && at.recruiter.label,
+      // RESULTS go to who did them (utils/workers.js creditAt, founder 2026-11-04): sent to the client, the interview and the
+      // joining each to the recruiter who had the person at that moment - not to whoever took the seat or the job later.
+      sentBy: creditUserOf(a, stepAt(a.stageEvents, SUBMITTED_STAGES, a.updatedAt)),
+      interviewBy: creditUserOf(a, stepAt(a.stageEvents, INTERVIEW_STAGES, a.interviewAt || a.updatedAt)),
+      joinedBy: JOINED_STAGES.includes(a.stage) ? creditUserOf(a, a.joinedAt || stepAt(a.stageEvents, JOINED_STAGES, a.updatedAt)) : null,
       tlUserId: at.tl && at.tl.userId,
       tlName: at.tl && at.tl.label,
       bdeUserId: at.bde && at.bde.userId,
@@ -646,10 +654,13 @@ function personSets(world, person) {
     sets.needsAction = { kind: 'actions', ids: world.actions.filter((x) => x.ownerUserId === id).map((x) => x.id) };
     sets.interviewsToday = { kind: 'applications', ids: mine.filter((a) => isToday(a.interviewAt) && !DEAD_INTERVIEW.includes(a.interviewStatus)).map((a) => a.id) };
     // ATS layout v3 §5 — the Team performance snapshot (Sent · Interviews · Joined).
-    sets.submitted = { kind: 'applications', ids: mine.filter((a) => SUBMITTED_STAGES.includes(a.stage)).map((a) => a.id) };
-    sets.interviews = { kind: 'applications', ids: mine.filter((a) => INTERVIEW_STAGES.includes(a.stage)).map((a) => a.id) };
+    // the performance snapshot: their own results only (sentBy / interviewBy / joinedBy, creditAt)
+    sets.submitted = { kind: 'applications', ids: world.apps.filter((a) => a.sentBy === id && SUBMITTED_STAGES.includes(a.stage)).map((a) => a.id) };
+    sets.interviews = { kind: 'applications', ids: world.apps.filter((a) => a.interviewBy === id && INTERVIEW_STAGES.includes(a.stage)).map((a) => a.id) };
     sets.selected = { kind: 'applications', ids: mine.filter((a) => SELECTED_STAGES.includes(a.stage)).map((a) => a.id) };
-    sets.joined = { kind: 'joined', ids: world.joined.filter((a) => a.recruiterUserId === id).map((a) => a.id) };
+    sets.joined = { kind: 'joined', ids: world.joined.filter((a) => a.joinedBy === id).map((a) => a.id) };
+    // joinings that came with the candidates they took over (another recruiter's work): shown as a note, never counted as theirs
+    sets.inheritedJoined = { kind: 'joined', ids: world.joined.filter((a) => a.recruiterUserId === id && a.joinedBy !== id).map((a) => a.id) };
   } else if (role === 'BDE') {
     const clientIds = world.bdeClientIds.get(id) || new Set();
     const reqs = world.reqs.filter((r) => !r.internal && ((r.clientId && clientIds.has(r.clientId)) || (r.bde && r.bde.id === id)));

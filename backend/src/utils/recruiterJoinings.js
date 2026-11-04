@@ -218,9 +218,14 @@ async function monthApplications(month, { fresh = false } = {}) {
     if (joined && !day) { undated.push(a); return; }
     if (!day || day < from || day > to) return;
     const req = a.requirement || {};
-    const at = workers.attribute({
-      recruiterId: req.recruiterId, tlId: req.tlId, tl: req.tl, bdeId: req.bdeId, positionCode: req.positionCode,
-    }, a.followUps || [], evs, dir.person);
+    const reqForAttr = { recruiterId: req.recruiterId, tlId: req.tlId, tl: req.tl, bdeId: req.bdeId, positionCode: req.positionCode };
+    const at = workers.attribute(reqForAttr, a.followUps || [], evs, dir.person);
+    // the joining is the work of who had the person on the joining day (utils/workers.js creditAt, founder 2026-11-04): not of a
+    // recruiter who took the seat or the job later
+    if (joined) {
+      const by = workers.creditAt(reqForAttr, a.followUps || [], evs, dir.person, (firstMove && firstMove.createdAt) || (day ? `${day}T12:00:00+05:30` : null));
+      if (by) at.recruiter = by;
+    }
     const client = req.internal ? 'TeamLink Internal' : (req.client && req.client.name) || '—';
     const row = {
       id: a.id,

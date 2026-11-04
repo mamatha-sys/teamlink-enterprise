@@ -235,7 +235,7 @@ function PerfSnapshot({ list, onOpen }) {
     <section className="card pw-snap">
       <div className="pw-snap-head">
         <h3>Performance snapshot</h3>
-        <span className="small-muted">Sent to client and interviews: where people are now. Joined: everyone who joined.</span>
+        <span className="small-muted">Each person&apos;s own results: sent to client, interviews and joinings they did. Work done before someone joined, or by the recruiter whose seat or job they took over, stays with that recruiter.</span>
       </div>
       {!ranked.length && <div className="small-muted pw-snap-empty">Nobody here has sent a person to a client yet.</div>}
       {shown.map((r) => (
@@ -244,6 +244,12 @@ function PerfSnapshot({ list, onOpen }) {
             <button type="button" className="pw-person" onClick={() => onOpen(r.id)} title="Open their 360">{r.name}</button>
             <span className="pw-role-word">{roleWord(r)}</span>
             {r.department && <span className="small-muted">{r.department}</span>}
+            {/* the joinings that came with the candidates they took over: another recruiter's work, not counted (2026-11-04) */}
+            {Number(r.counts.inheritedJoined) > 0 && (
+              <span className="small-muted" title="These joinings were done by the recruiter who had these candidates before; they are counted for that recruiter">
+                {`${Number(r.counts.inheritedJoined).toLocaleString('en-IN')} joining${Number(r.counts.inheritedJoined) === 1 ? '' : 's'} of the earlier recruiter not counted`}
+              </span>
+            )}
           </div>
           {SNAP.map(([k, label, tone]) => {
             const v = Number(r.counts[k]) || 0;

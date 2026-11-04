@@ -119,10 +119,15 @@ async function loadDirectory() {
       },
     }),
     prisma.employee.findMany({
-      select: { id: true, name: true, userId: true, department: true, employmentStatus: true },
+      select: { id: true, name: true, userId: true, department: true, employmentStatus: true, dateOfJoining: true },
     }),
   ]);
   const person = makeResolver(users);
+  // the day each login started here (HR > the employee's Date of joining), for creditAt(): a step done before that day was
+  // somebody else's work. No date on file = no limit.
+  const startByUser = new Map();
+  employees.forEach((e) => { if (e.userId && e.dateOfJoining) startByUser.set(e.userId, new Date(e.dateOfJoining).getTime()); });
+  person.startOf = (userId) => (userId && startByUser.get(userId)) || null;
   const empByUser = new Map();
   const empByName = new Map();
   employees.forEach((e) => {
@@ -216,6 +221,40 @@ function attribute(req, fus, evs, person) {
   return { recruiter, seat, tl, bde };
 }
 
+// WHO DID THE WORK AT THAT TIME (founder 2026-11-04: "janathri join ayyi, one month kuda avavledhu. appudey inni joinings yela
+// istahdhi, previous ga vunna recruiter work & joinings avi"). attribute() names the recruiter a candidate is with NOW (the latest
+// follow-up owner) - right for workload, wrong for results: when a recruiter takes over a seat or a job, the candidates come with
+// it, and so did the old recruiter's joinings. creditAt() names who had the candidate WHEN the step happened (`at`): the owner of
+// the latest follow-up written by then, else the recruiter who moved it by then, else the job's recruiter - never somebody who had
+// not joined yet (HR > Date of joining after `at`). null = nobody here now (a former recruiter's work).
+function creditAt(req, fus, evs, person, at) {
+  const t = at ? new Date(at).getTime() : NaN;
+  if (!Number.isFinite(t)) return attribute(req, fus, evs, person).recruiter;
+  const started = (p) => !!p && (!p.userId || !person.startOf || !person.startOf(p.userId) || person.startOf(p.userId) <= t);
+  const before = (x) => x && x.createdAt && new Date(x.createdAt).getTime() <= t;
+  for (let i = (fus || []).length - 1; i >= 0; i -= 1) {
+    const f = fus[i];
+    if (before(f) && (f.ownerUserId || f.ownerName)) { const p = person(f.ownerUserId, f.ownerName); if (started(p)) return p; }
+  }
+  for (let i = (evs || []).length - 1; i >= 0; i -= 1) {
+    const e = evs[i];
+    if (before(e) && roleOfLabel(e.actorRole) === 'RECRUITER' && realActor(e)) { const p = person(e.actorUserId, e.actorName); if (started(p)) return p; }
+  }
+  // imported history: the trackers' follow-ups were written on the import day, after the step - the FIRST one still names
+  // who worked the person (the same name the old rule used, so one person is not split in two)
+  const first = (fus || []).find((f) => f.ownerUserId || f.ownerName);
+  if (first) { const p = person(first.ownerUserId, first.ownerName); if (started(p)) return p; }
+  const r = req || {};
+  if (r.recruiterId) { const p = person(r.recruiterId); if (started(p)) return p; }
+  const now = attribute(req, fus, evs, person).recruiter;
+  return started(now) ? now : null;
+}
+// When a step happened: the first move into one of `stages` (fallback: the given time).
+function stepAt(evs, stages, fallback = null) {
+  const e = (evs || []).find((x) => stages.includes(x.toStage));
+  return (e && e.createdAt) || fallback;
+}
+
 // A Prisma `where` on Application that is a SUPERSET of "attributed to this
 // person in this role" — the exact match is attribute() over what it finds.
 function attributionWhere(role, p) {
@@ -279,7 +318,7 @@ const ATTR_SELECT = {
   },
   stageEvents: {
     where: REAL_EVENT,
-    select: { actorUserId: true, actorName: true, actorRole: true, actorPositionCode: true, createdAt: true },
+    select: { actorUserId: true, actorName: true, actorRole: true, actorPositionCode: true, createdAt: true, toStage: true },
     orderBy: { createdAt: 'asc' },
   },
 };
@@ -619,6 +658,6 @@ module.exports = {
   ROLES, ROLE_LABEL, LEFT_STATUSES, REAL_EVENT, ATTR_SELECT,
   clean, nameKey, seatRole, roleOfLabel, realActor,
   makeResolver, loadDirectory, resolvePersonValue, nameVariantsFor,
-  attribute, attributionWhere, seatWhere, seatCodes, personQuery, hasPersonQuery,
+  attribute, creditAt, stepAt, attributionWhere, seatWhere, seatCodes, personQuery, hasPersonQuery,
   attributedApplications, attributedCounts, listWorkers,
 };

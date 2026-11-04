@@ -497,11 +497,12 @@ async function loadContext(user, f, { appDate = 'createdAt' } = {}) {
   const userByName = new Map();
   users.forEach((u) => { if (!userByName.has(nameKey(u.name))) userByName.set(nameKey(u.name), u); });
   const person = (id, name) => {
-    if (id && userById.has(id)) return { key: `u:${id}`, label: userById.get(id).name, team: userById.get(id).team };
+    if (id && userById.has(id)) return { key: `u:${id}`, userId: id, label: userById.get(id).name, team: userById.get(id).team };
     const u = userByName.get(nameKey(name));
-    if (u) return { key: `u:${u.id}`, label: u.name, team: u.team };
+    if (u) return { key: `u:${u.id}`, userId: u.id, label: u.name, team: u.team };
     return clean(name) ? { key: `n:${nameKey(name)}`, label: clean(name), team: null } : null;
   };
+  person.startOf = (await workers.loadDirectory()).person.startOf; // each login's Date of joining, for workers.creditAt()
 
   const reqMap = new Map();
   reqRows.forEach((r) => {
@@ -566,9 +567,17 @@ async function loadContext(user, f, { appDate = 'createdAt' } = {}) {
     // have since left), otherwise the requirement's, otherwise a real person
     // who moved it. ONE rule, utils/workers.js attribute(), shared with every
     // ATS screen's person filter so a filtered list and a report agree.
-    const { recruiter, seat, tl, bde } = workers.attribute({
+    const reqForAttr = {
       recruiterId: r.recruiterId, tlId: r.tlId, tl: r.tlText, bdeId: r.bdeId, positionCode: r.positionCode,
-    }, fus, evs, person);
+    };
+    const { recruiter: recruiterNow, seat, tl, bde } = workers.attribute(reqForAttr, fus, evs, person);
+    // THE RESULT GOES TO WHO DID IT (founder 2026-11-04: a recruiter who took over a seat or a job got the old recruiter's
+    // joinings): the recruiter who had the person when they reached the step they are at now - the joining for a joined person -
+    // never somebody who joined the company after that (utils/workers.js creditAt). A person not past the first steps stays with
+    // whoever has them now.
+    const steps = Object.values(crossedAt).filter(Boolean).map((d) => new Date(d).getTime());
+    const creditTime = joined ? (crossedAt.joined || a.joinedAt || null) : (steps.length ? new Date(Math.max(...steps)) : null);
+    const recruiter = creditTime ? (workers.creditAt(reqForAttr, fus, evs, person, creditTime) || recruiterNow) : recruiterNow;
 
     const fb = fbBy.get(a.id) || [];
     const clientFb = fb.find((x) => x.kind === 'Client') || fb.find((x) => x.kind === 'Internal');
