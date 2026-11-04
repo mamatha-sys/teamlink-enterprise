@@ -19,6 +19,8 @@ set -euo pipefail
 cd /opt/teamlink-enterprise/backend
 node - <<"EOF_NODE"
 const env = require("dotenv").parse(require("fs").readFileSync(".env", "utf8"));
+// the database reader needs DATABASE_URL in the process (3 Nov: "Environment variable not found: DATABASE_URL")
+for (const k of ["DATABASE_URL"]) if (env[k] && !process.env[k]) process.env[k] = env[k];
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 const base = String(env.RCS_BASE_URL || "https://web.rcssms.in").replace(/\/+$/, "");
