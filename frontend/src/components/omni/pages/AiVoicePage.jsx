@@ -30,6 +30,7 @@ export default function AiVoicePage() {
   const { toast } = useOmni();
   const [tab, setTab] = useState('campaigns');
   const [status, setStatus] = useState(null);
+  const [ready, setReady] = useState(null); // which way a campaign rings (the AI Calling provider or the AI phone line) and in which mode
   const [data, setData] = useState(null);
   const [agents, setAgents] = useState([]);
   const [err, setErr] = useState('');
@@ -42,7 +43,11 @@ export default function AiVoicePage() {
       setData(l.data); setAgents(a.data.agents || []); setErr('');
     } catch (e) { setErr(errOf(e, 'AI Voice could not be loaded.')); }
   }, []);
-  useEffect(() => { api.get('/ai-calling/status').then((r) => setStatus(r.data)).catch(() => setStatus(null)); load(); }, [load]);
+  useEffect(() => {
+    api.get('/ai-calling/status').then((r) => setStatus(r.data)).catch(() => setStatus(null));
+    api.get('/ai-calling/voice/readiness').then((r) => setReady(r.data)).catch(() => setReady(null));
+    load();
+  }, [load]);
   const live = !!(data && data.items.some((c) => ['running', 'scheduled'].includes(c.status)));
   useEffect(() => { if (!live) return undefined; const t = setInterval(() => { if (!document.hidden) load(); }, 6000); return () => clearInterval(t); }, [live, load]);
 
@@ -50,11 +55,23 @@ export default function AiVoicePage() {
   return (
     <div>
       <PageHead eyebrow="Campaigns" title="AI Voice" lead="TeamLink's AI Calling as a campaign: pick an agent, a vacancy and candidates. The AI rings them, and every answer, outcome and transcript is saved on the candidate.">
-        {status && status.canCall && <Btn primary onClick={() => { setMaking(true); setTab('campaigns'); setOpenId(null); }}>New AI Voice campaign</Btn>}
+        {status && status.canCall && ready && ready.path && <Btn primary onClick={() => { setMaking(true); setTab('campaigns'); setOpenId(null); }}>New AI Voice campaign</Btn>}
       </PageHead>
-      {status && status.notice && <Banner tone="warn">{status.notice}</Banner>}
-      {status && !status.notice && !status.canCall && <Banner tone="warn">Your role is not allowed to place AI calls. An Admin can change this in Administration &gt; Integrations &gt; AI Calling.</Banner>}
-      {status && status.testMode && <Banner tone="info">AI calling is in <b>Test mode</b>: only the test numbers are rung.</Banner>}
+      {ready && !ready.path && (
+        <Banner tone="warn">
+          AI calling is not ready yet, so no campaign can start. An Admin finishes the setup in Administration &gt; Integrations &gt; AI Calling, or switches the AI phone line on (the same line as “Call with AI (phone)” in the ATS).
+          {ready.problems.length > 0 && <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>{ready.problems.map((p) => <li key={p}>{p}</li>)}</ul>}
+        </Banner>
+      )}
+      {ready && ready.path === 'phone' && (
+        <Banner tone="info">
+          AI Voice rings through the <b>AI phone line</b>, the same one as “Call with AI (phone)” in the ATS.
+          {ready.mode === 'Test' ? <> It is in <b>Test mode</b>: only the {ready.testNumbers} test number{ready.testNumbers === 1 ? '' : 's'} can be rung. An Admin switches it to Live when the team is ready.</> : null}
+          {ready.mode === 'Off' ? <> It is switched <b>off</b>.</> : null}
+        </Banner>
+      )}
+      {ready && ready.path === 'provider' && ready.mode === 'Test' && <Banner tone="info">AI calling is in <b>Test mode</b>: only the test numbers are rung.</Banner>}
+      {ready && ready.path && status && !status.canCall && <Banner tone="warn">Your role is not allowed to place AI calls. An Admin can change this in Administration &gt; Integrations &gt; AI Calling.</Banner>}
       {err && <Banner tone="error">{err}</Banner>}
       <Kpis>
         <Kpi label="Campaigns" icon="☎" value={t ? t.campaigns : '—'} meta={t ? `${t.running} running` : ''} />
@@ -65,7 +82,7 @@ export default function AiVoicePage() {
         <Kpi label="Call-backs" icon="↺" value={t ? t.callbacks : '—'} />
       </Kpis>
       <Tabs value={tab} onChange={(v) => { setTab(v); setOpenId(null); setMaking(false); }} tabs={[['campaigns', 'Campaigns'], ['agents', 'AI agents', agents.length || undefined]]} />
-      {tab === 'campaigns' && making && <NewCampaign agents={agents} status={status} onClose={() => setMaking(false)} onCreated={(id) => { setMaking(false); load(); setOpenId(id); }} toast={toast} />}
+      {tab === 'campaigns' && making && <NewCampaign agents={agents} ready={ready} onClose={() => setMaking(false)} onCreated={(id) => { setMaking(false); load(); setOpenId(id); }} toast={toast} />}
       {tab === 'campaigns' && !making && !openId && <CampaignList data={data} onOpen={setOpenId} />}
       {tab === 'campaigns' && !making && openId && <CampaignDetail id={openId} onBack={() => { setOpenId(null); load(); }} onChanged={load} toast={toast} canCall={!!(status && status.canCall)} />}
       {tab === 'agents' && <Agents agents={agents} canCall={!!(status && status.canCall)} onChanged={load} toast={toast} />}
@@ -109,7 +126,7 @@ function CampaignList({ data, onOpen }) {
 }
 
 // ---- a new campaign ----------------------------------------------------------------------------------------------------------------
-function NewCampaign({ agents, status, onClose, onCreated, toast }) {
+function NewCampaign({ agents, ready, onClose, onCreated, toast }) {
   const [jobs, setJobs] = useState(null);
   const [f, setF] = useState({ name: '', jobId: '', agentId: '', language: '', concurrency: 2, when: 'now', at: '' });
   const [rows, setRows] = useState(null);
@@ -122,12 +139,12 @@ function NewCampaign({ agents, status, onClose, onCreated, toast }) {
   useEffect(() => {
     if (!f.jobId || !agent) { setRows(null); return; }
     setRows(null); setPick({});
-    api.get('/ai-calling/candidates', { params: { requirementId: f.jobId, purpose: agent.purpose } }).then((r) => setRows(r.data.rows || [])).catch((e) => setMsg({ tone: 'error', text: errOf(e, 'The candidates could not be loaded.') }));
+    api.get('/ai-calling/voice/candidates', { params: { requirementId: f.jobId, purpose: agent.purpose } }).then((r) => setRows(r.data.rows || [])).catch((e) => setMsg({ tone: 'error', text: errOf(e, 'The candidates could not be loaded.') }));
   }, [f.jobId, agent && agent.purpose]); // eslint-disable-line react-hooks/exhaustive-deps
   const shown = useMemo(() => (rows || []).filter((r) => !q.trim() || `${r.name} ${r.stageLabel || ''}`.toLowerCase().includes(q.trim().toLowerCase())), [rows, q]);
   const chosen = Object.keys(pick).filter((k) => pick[k]);
   const callable = (rows || []).filter((r) => r.callable);
-  const max = (status && status.maxBulk) || 50;
+  const max = (ready && ready.maxBulk) || 50;
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
 
   async function start() {

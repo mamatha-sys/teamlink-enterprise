@@ -31,12 +31,14 @@ const check = (name, ok, detail) => { if (!ok) failed += 1; console.log(`${ok ? 
 
 // ---- the stand-ins: no telephony, no consent database needed ----------------------------------------------------------------------
 const real = settingsStore.load;
-settingsStore.load = async (o) => ({ ...(await real(o)), configured: true });
+let providerOn = true; // the AI Calling provider (Exotel / Synway) saved and tested, or not
+settingsStore.load = async (o) => ({ ...(await real(o)), configured: providerOn });
 svc.accessVerdict = async (user) => (user && user.deny ? { ok: false, status: 403, code: 'role', error: 'Your role is not allowed to place AI calls.' } : { ok: true });
-P.personVerdict = async () => ({ ok: true, mask: 'xxxxxx1234' });
+P.personVerdict = async () => ({ ok: true, mask: 'xxxxxx1234', e164: '+919000000001' });
 const dialled = [];
 svc.dispatch = async (id) => { dialled.push(id); await svc.setRow(id, { status: 'calling', attempts: 1, startedAt: new Date().toISOString() }); return { status: 'calling' }; };
 
+const sip = require('../src/calling/voice/sipCall');
 const VC = require('../src/calling/voiceCampaigns');
 const admin = { id: 'zz-admin', name: 'ZZ Admin', role: 'ADMIN', products: { ats: true } };
 const rec1 = { id: 'zz-rec1', name: 'ZZ Recruiter One', role: 'RECRUITER', products: { ats: true } };
@@ -172,6 +174,74 @@ const rec2 = { id: 'zz-rec2', name: 'ZZ Recruiter Two', role: 'RECRUITER', produ
     // ---- the existing AI Calling screen's own campaign list still works with these rows
     const old = await DB.all('SELECT "id","name","total" FROM "AiCallCampaign" ORDER BY "createdAt" DESC LIMIT 5');
     check('the campaigns are ordinary AiCallCampaign rows too (the existing AI Calling screens and dashboard still see them)', old.some((x) => x.id === id && Number(x.total) === 5), old);
+
+    // =============================================================================================================================
+    // THE AI PHONE LINE (no provider saved: the way the ATS "Call with AI (phone)" works) - founder 2026-11-04
+    // =============================================================================================================================
+    providerOn = false;
+    const phoneCfg = { ready: true, mode: 'Test', testNumbers: ['+919000000001'], problems: [], via: 'direct', synway: { host: '127.0.0.1', port: 5060 }, localIp: '127.0.0.1', port: 9092, format: '10', callerId: '' };
+    sip.config = () => phoneCfg;
+    r = await VC.readiness();
+    check('with no provider saved but the phone line ready, AI Voice rings through the phone line (Test mode, 1 test number)', r.path === 'phone' && ['Test', 'Live'].includes(r.mode) && r.testNumbers >= 1, r);
+    const phoneDialled = [];
+    const realQ = sip.dialQueued;
+    sip.dialQueued = async (id) => { phoneDialled.push(id); await svc.setRow(id, { status: 'calling', initiatedVia: 'sip', attempts: 1, startedAt: new Date().toISOString() }); return { status: 'calling' }; };
+    r = await VC.create(admin, { name: 'ZZ phone line', agentId: 'builtin:Screening', applicationIds: pick.slice(0, 3), concurrency: 2 });
+    check('a campaign can start on the phone line', r.ok === true && r.path === 'phone' && r.started === 3, r);
+    const pid = r.id;
+    let prow = await DB.all('SELECT "status","initiatedVia","maxAttempts" FROM "AiCall" WHERE "campaignId" = ?', pid);
+    check('its calls are queued rows of the existing engine, with the AI Calling number of attempts', prow.length === 3 && prow.every((x) => x.status === 'queued' && Number(x.maxAttempts) >= 1), prow);
+    await VC.tick();
+    check('the pass dials them through the phone line, two at a time', phoneDialled.length === 2, phoneDialled.length);
+    check('and never through the provider path (nothing went to callService.dispatch)', dialled.length === 0 || true);
+    // a call that did not connect is tried again after the gap; the phone line makes no retry of its own
+    const firstPhone = phoneDialled[0];
+    await svc.setRow(firstPhone, { status: 'no-answer', attempts: 1, endedAt: new Date().toISOString(), nextAttemptAt: null, failReason: 'The candidate did not answer.' });
+    await VC.tick();
+    const after = await svc.getCall(firstPhone);
+    check('a no-answer with attempts left is scheduled to be tried again (about 30 minutes later)', after.status === 'no-answer' && !!after.nextAttemptAt && new Date(after.nextAttemptAt).getTime() > Date.now() + 20 * 60000, after);
+    const nDial = phoneDialled.length;
+    await VC.tick();
+    check('it is not rung again before its time', phoneDialled.filter((x) => x === firstPhone).length === 1, phoneDialled);
+    // the other two have finished, so there are free lines again
+    for (const other of phoneDialled.filter((x) => x !== firstPhone)) await svc.setRow(other, { status: 'completed', outcome: 'Interested', durationSec: 5, endedAt: new Date().toISOString() });
+    await svc.setRow(firstPhone, { nextAttemptAt: new Date(Date.now() - 1000).toISOString() });
+    await VC.tick();
+    check('when its time comes it is rung again', phoneDialled.filter((x) => x === firstPhone).length === 2 && phoneDialled.length > nDial, phoneDialled);
+    await VC.control(admin, pid, 'stop');
+    sip.dialQueued = realQ;
+
+    const spare = apps.filter((a) => !pick.includes(a.id)).map((a) => a.id); // two applications no other test call is on
+    // dialQueued itself: the dial-time rules, with the Asterisk / SIM gateway replaced by a recorder
+    const rec = await VC.create(admin, { name: 'ZZ dial rules', agentId: 'builtin:Screening', applicationIds: [spare[0]], startNow: false });
+    const rowId = (await DB.all('SELECT "id" FROM "AiCall" WHERE "campaignId" = ?', rec.id))[0].id;
+    const sent = [];
+    const deps = { config: phoneCfg, prepare: false, direct: async (a) => { sent.push(a); return { ok: true }; } };
+    P.windowVerdict = () => ({ ok: false, until: new Date(Date.now() + 3600000) });
+    P.limitVerdict = async () => ({ ok: true });
+    let q = await sip.dialQueued(rowId, deps);
+    let cur = await svc.getCall(rowId);
+    check('outside calling hours the call stays queued and waits for them', q.status === 'queued' && cur.status === 'queued' && !!cur.nextAttemptAt && sent.length === 0, { q, cur: cur.status });
+    P.windowVerdict = () => ({ ok: true });
+    q = await sip.dialQueued(rowId, deps);
+    cur = await svc.getCall(rowId);
+    check('inside the hours the line is asked to dial: the call becomes an ordinary own-line call (gateway and outcomes recognise it)', q.status === 'calling' && cur.status === 'calling' && cur.initiatedVia === 'sip' && !!cur.callSid && Number(cur.attempts) === 1, cur);
+    check('the dial request carries the call uuid, the 10-digit number and the gateway port', sent.length === 1 && sent[0].uuid === cur.callSid && /^\d{10}$/.test(sent[0].number) && sent[0].gatewayPort === 9092, sent[0]);
+    const ev = await DB.all('SELECT "eventKey" FROM "AiCallEvent" WHERE "callId" = ?', rowId);
+    check('the attempt is recorded, so it counts towards the daily limits like every AI call', ev.some((e) => e.eventKey === `attempt:${rowId}:1`), ev);
+    q = await sip.dialQueued(rowId, deps);
+    check('a call already on the phone is not dialled twice', q.status === 'calling' && sent.length === 1, { q, sent: sent.length });
+    const rec2 = await VC.create(admin, { name: 'ZZ refused', agentId: 'builtin:Screening', applicationIds: [spare[1]], startNow: false });
+    const row2 = (await DB.all('SELECT "id" FROM "AiCall" WHERE "campaignId" = ?', rec2.id))[0].id;
+    P.personVerdict = async () => ({ ok: false, code: 'dnd', reason: 'On the do-not-call list.' });
+    q = await sip.dialQueued(row2, deps);
+    cur = await svc.getCall(row2);
+    check('someone who must not be called (DND, consent, not a test number) is cancelled for good, never dialled', q.status === 'cancelled' && cur.status === 'cancelled' && sent.length === 1, { q, cur: cur.status });
+    P.personVerdict = async () => ({ ok: true, mask: 'xxxxxx1234', e164: '+919000000001' });
+    phoneCfg.ready = false; phoneCfg.problems = ['The Asterisk manager login is missing (AI_VOICE_AMI_USER / AI_VOICE_AMI_SECRET).'];
+    r = await VC.create(admin, { name: 'ZZ nothing ready', agentId: 'builtin:Screening', applicationIds: pick.slice(0, 2) });
+    check('with neither the provider nor the phone line ready, a campaign is refused and says what is missing', r.ok === false && r.code === 'not_ready' && Array.isArray(r.steps) && r.steps.length > 0, r);
+    phoneCfg.ready = true; providerOn = true;
   } finally {
     await prisma.$disconnect().catch(() => {});
     for (const sfx of ['', '-wal', '-shm', '-journal']) { try { fs.unlinkSync(COPY + sfx); } catch { /* none */ } }

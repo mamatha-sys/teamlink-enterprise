@@ -212,6 +212,76 @@ async function place(user, input, deps = {}) {
   return { ok: true, callId: id, status: 'calling', language: lang };
 }
 
+// AI VOICE CAMPAIGNS (2026-11-04): the same phone line, for a call that is already a queued AiCall row (made when the campaign was created, with its
+// consent / access checks done then for the person who made it). Everything place() does at dial time is done here too - consent, DND, test numbers, calling
+// hours, daily limits, one call to a person at a time, the opening sentences made first, Asterisk or the SIM gateway - but the row is UPDATED (queued -> calling)
+// instead of made. A call that is not allowed right now stays queued (hours, limits) or is cancelled for good (consent, DND, test numbers). place() is unchanged.
+async function dialQueued(id, deps = {}) {
+  const c = deps.config || config();
+  if (!c.ready) return { status: 'queued', note: `AI phone calls are not ready: ${c.problems[0]}` };
+  const row = await svc.getCall(id);
+  if (!row || row.status !== 'queued') return { status: row ? row.status : 'missing' };
+  const base = await settingsStore.load({ fresh: true });
+  const cc = { ...c, mode: typeof lineMode === 'function' ? lineMode(c, base) : c.mode };
+  const s = { ...base, mode: cc.mode, testNumbers: [...new Set([...c.testNumbers, ...(base.testNumbers || [])])] };
+  const ctx = await svc.loadContext(row.applicationId);
+  if (!ctx) { await svc.cancelWith(row, 'The application is no longer there.', null); return { status: 'cancelled' }; }
+  const t = svc.now();
+  const verdict = await P.personVerdict({ candidate: ctx.candidate, app: ctx.app, requirement: ctx.requirement, purpose: row.purpose, s, now: t, jobSetting: await svc.jobSetting(ctx.requirement.id) });
+  if (!verdict.ok) { await svc.cancelWith(row, verdict.reason || 'This candidate cannot be called.', null); return { status: 'cancelled', note: verdict.reason }; }
+  const win = P.windowVerdict(t, s);
+  if (!win.ok) {
+    await svc.setRow(id, { nextAttemptAt: (win.until ? new Date(win.until) : new Date(t.getTime() + 30 * 60000)).toISOString(), waitReason: `Waiting for calling hours (${s.hoursFrom} to ${s.hoursTo} India time).` });
+    return { status: 'queued', note: 'outside calling hours' };
+  }
+  const lim = await P.limitVerdict(t, s, row.initiatedById);
+  if (!lim.ok) { await svc.setRow(id, { nextAttemptAt: new Date(t.getTime() + 60 * 60000).toISOString(), waitReason: lim.reason }); return { status: 'queued', note: lim.reason }; }
+  const busy = await DB.one(`SELECT "id" FROM "AiCall" WHERE "initiatedVia" IN (?, 'campaign') AND "applicationId" = ? AND "status" = 'calling' AND "id" <> ?`, gateway.VIA, row.applicationId, id);
+  if (busy) { await svc.setRow(id, { nextAttemptAt: new Date(t.getTime() + 5 * 60000).toISOString(), waitReason: 'A call to this candidate is going on right now.' }); return { status: 'queued', note: 'already on a call' }; }
+  const lang = S.LANGS.includes(row.language) ? row.language : (S.LANGS.includes(process.env.AI_VOICE_START_LANGUAGE) ? process.env.AI_VOICE_START_LANGUAGE : 'English');
+  const uuid = crypto.randomUUID();
+  const stamp = t.toISOString();
+  const attempt = (Number(row.attempts) || 0) + 1;
+  await svc.setRow(id, { status: 'calling', initiatedVia: gateway.VIA, callSid: uuid, providerStatus: 'dialing', attempts: attempt, language: lang, lastAttemptAt: stamp, startedAt: stamp, nextAttemptAt: null, waitReason: null, failReason: null, endedAt: null });
+  await DB.run('INSERT OR IGNORE INTO "AiCallEvent" ("id","callId","eventKey","kind","status","applied","receivedAt") VALUES (?,?,?,?,?,1,?)', svc.newId('aie'), id, `attempt:${id}:${attempt}`, 'attempt', 'attempt', stamp);
+  if (deps.prepare !== false) {
+    try {
+      const d = await require('../webTalk').dialogueFor(await svc.getCall(id)); // eslint-disable-line global-require
+      await Promise.race([gateway.prepare(gateway.engines(), [d.start().say], lang), new Promise((r) => { setTimeout(r, 8000); })]);
+      gateway.prepareCall(gateway.engines(), d);
+    } catch (e) { log('prepare failed:', e.message); }
+  }
+  const number = dialNumber(verdict.e164, c.format);
+  if (c.via === 'direct') {
+    const dial = deps.direct || require('./sipDirect').originate; // eslint-disable-line global-require
+    dial({ host: c.synway.host, port: c.synway.port, number, uuid, gatewayPort: c.port, localIp: c.localIp, ringSec: RING_SEC })
+      .then(async (r) => {
+        if (r.ok) return;
+        const cur = await svc.getCall(id);
+        if (cur && cur.status === 'calling') await svc.setRow(id, { status: r.status, failReason: String(r.reason).slice(0, 250), providerStatus: `sip:${r.code || r.status}`, endedAt: new Date().toISOString() });
+      })
+      .catch((e) => log('direct dial failed:', e.message));
+  } else {
+    const actionId = `tl-${id}-${attempt}`;
+    try {
+      const a = deps.ami || await ami(c);
+      WAIT.set(actionId, id);
+      const r = await a.action({
+        Action: 'Originate', ActionID: actionId, Channel: `PJSIP/${number}@${c.trunk}`, Application: 'AudioSocket', Data: `${uuid},127.0.0.1:${c.port}`,
+        Timeout: RING_SEC * 1000, CallerID: c.callerId || undefined, Async: 'true',
+      });
+      if (r.Response !== 'Success') throw new Error(r.Message || 'Asterisk refused the call');
+    } catch (e) {
+      WAIT.delete(actionId);
+      await svc.setRow(id, { status: 'failed', failReason: `Not dialled: ${e.message}`.slice(0, 250), providerStatus: 'sip:not-dialled', endedAt: new Date().toISOString() });
+      return { status: 'failed', note: e.message };
+    }
+  }
+  setTimeout(() => sweep().catch(() => {}), STUCK_MS + 2000).unref();
+  await logAudit({ userId: row.initiatedById, action: 'AI phone call started (campaign)', entity: 'Application', entityId: ctx.app.id, toValue: `${row.purpose} (${lang}, ${c.mode}) via own SIP line, free voice`.slice(0, 200) });
+  return { status: 'calling', language: lang };
+}
+
 // Calls that were dialled but never answered or reported (Asterisk restarted, a lost event), and calls a restart cut off.
 async function sweep(now = Date.now()) {
   const rows = await DB.all(`SELECT * FROM "AiCall" WHERE "initiatedVia" = ? AND "status" = 'calling'`, gateway.VIA);
@@ -241,4 +311,4 @@ async function start() {
   return server;
 }
 
-module.exports = { config, readiness, lineMode, place, sweep, start, dialNumber, _originateResult: originateResult, _wait: WAIT };
+module.exports = { config, readiness, lineMode, place, dialQueued, sweep, start, dialNumber, _originateResult: originateResult, _wait: WAIT };

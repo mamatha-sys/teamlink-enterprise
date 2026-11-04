@@ -303,6 +303,35 @@ staff.post('/questions/:id/answer', async (req, res) => {
 // AI VOICE (Omni-Channel > Campaigns > AI Voice, 2026-11-04): campaigns over the same engine - calling/voiceCampaigns.js. Roles / consent / hours / limits are
 // the AI Calling ones (calling/callService.accessVerdict + policy), checked inside.
 const VC = require('../calling/voiceCampaigns');
+staff.get('/voice/readiness', async (req, res) => res.json(await VC.readiness()));
+// the same list as GET /candidates, judged with the settings a campaign really uses (in Test mode on the phone line only the test numbers can be rung)
+staff.get('/voice/candidates', async (req, res) => {
+  const eff = await VC.effective();
+  const s = eff.s;
+  const purpose = VC.ATS_PURPOSES.includes(req.query.purpose) ? req.query.purpose : 'Screening';
+  const acc = await svc.accessVerdict(req.user, null, s);
+  if (!acc.ok) return send(res, acc);
+  const requirementId = clip(req.query.requirementId, 60);
+  if (!requirementId) return res.status(400).json({ error: 'Pick a requirement first.' });
+  const apps = await prisma.application.findMany({
+    where: { AND: [{ requirementId }, applicationWhere(req.user)] },
+    include: { candidate: true, requirement: { select: { id: true, title: true, status: true } } },
+    orderBy: { createdAt: 'desc' }, take: 300,
+  });
+  const jset = await svc.jobSetting(requirementId);
+  const last = await DB.all('SELECT "applicationId","status","outcome","purpose","createdAt" FROM "AiCall" WHERE "requirementId" = ? AND "status" <> \'cancelled\' ORDER BY "createdAt" DESC LIMIT 1000', requirementId);
+  const lastBy = new Map();
+  last.forEach((l) => { const k = `${l.applicationId}|${l.purpose}`; if (!lastBy.has(k)) lastBy.set(k, l); });
+  const t = svc.now();
+  const rows = [];
+  for (const a of apps) { // eslint-disable-line no-restricted-syntax
+    // eslint-disable-next-line no-await-in-loop
+    const v = await P.personVerdict({ candidate: a.candidate, app: a, requirement: a.requirement, purpose, s, now: t, jobSetting: jset });
+    const l = lastBy.get(`${a.id}|${purpose}`);
+    rows.push({ applicationId: a.id, candidateId: a.candidate.id, name: a.candidate.name, stage: a.stage, stageLabel: stageLabel(a.stage), callable: v.ok && !l, reason: v.ok ? (l ? `Already has a ${l.status} call for this purpose` : null) : v.reason });
+  }
+  res.json({ rows, purpose, path: eff.path, mode: eff.mode });
+});
 staff.get('/voice/agents', async (req, res) => res.json({ ok: true, agents: await VC.listAgents() }));
 staff.post('/voice/agents', async (req, res) => send(res, await VC.saveAgent(req.user, req.body || {})));
 staff.delete('/voice/agents/:id', async (req, res) => send(res, await VC.removeAgent(req.user, clip(req.params.id, 60))));

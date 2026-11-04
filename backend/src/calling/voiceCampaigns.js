@@ -11,6 +11,10 @@
 //               reminder sweep leaves them alone, reminders.dueCalls)
 //   counters    initiated / answered / completed / failed / retrying / callbacks, from the AiCall rows themselves
 //   control     pause, resume, stop, retry the ones that gave up, CSV
+// TWO WAYS TO RING, the ones AI Calling already has (founder 2026-11-04: "ATS lo ela undho ai calling alagey omnichannel voice lo ravali"):
+//   provider   the AI Calling provider is saved and tested (Administration > Integrations > AI Calling): callService.dispatch, with its own queue + retries
+//   phone      no provider, but the AI phone line is ready (the "Call with AI (phone)" button of the ATS: our own SIP line / SIM gateway, free voices, the
+//              AI_VOICE_* server settings, Off / Test / Live): voice/sipCall.dialQueued. Same rules; in Test only the test numbers are rung.
 // A campaign is visible to its creator and to Admins. The roles that may call are the AI Calling roles (accessVerdict), as before.
 // ---------------------------------------------------------------------------
 const DB = require('./schema');
@@ -32,6 +36,25 @@ const isAdmin = (u) => !!u && ['SUPER_ADMIN', 'ADMIN'].includes(u.role);
 const fail = svc.fail;
 const clamp = (n, lo, hi, d) => { const v = Math.round(Number(n)); return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d; };
 const marks = (list) => list.map(() => '?').join(',');
+
+// ---- which way a campaign rings ------------------------------------------------------------------------------------------------------------
+async function effective() {
+  const base = await settingsStore.load({ fresh: true });
+  if (base.configured) return { path: 'provider', s: base, mode: base.mode, problems: [] };
+  const sip = require('./voice/sipCall'); // eslint-disable-line global-require
+  const c = sip.config();
+  if (c.ready) {
+    // the same one-switch rule as the ATS phone button: the Test / Live switch of Integrations > AI Calling decides, and the test numbers saved there are callable too
+    const mode = typeof sip.lineMode === 'function' ? sip.lineMode(c, base) : c.mode;
+    const testNumbers = [...new Set([...c.testNumbers, ...(base.testNumbers || [])])];
+    return { path: 'phone', s: { ...base, configured: true, mode, testNumbers }, mode, testNumbers: testNumbers.length, problems: [] };
+  }
+  return { path: null, s: base, mode: base.mode, problems: [...(base.problems || []), ...c.problems] };
+}
+async function readiness() {
+  const e = await effective();
+  return { ok: true, path: e.path, mode: e.mode, testNumbers: e.testNumbers || 0, maxBulk: e.s.maxBulk, hours: { from: e.s.hoursFrom, to: e.s.hoursTo }, problems: e.problems.slice(0, 6) };
+}
 
 // ---- agents --------------------------------------------------------------------------------------------------------------------------
 const builtin = () => ATS_PURPOSES.map((p) => ({
@@ -157,8 +180,9 @@ async function detail(user, id, { page = 1, pageSize = 25, status = '' } = {}) {
 // body: { name, agentId, applicationIds[], language?, concurrency?, scheduledAt?, startNow? }
 async function create(user, body) {
   const b = body || {};
-  const s = await settingsStore.load({ fresh: true });
-  if (!s.configured) return fail(409, 'not_ready', 'AI calling is not ready yet, so no campaign can start.', { steps: s.problems });
+  const eff = await effective();
+  const s = eff.s;
+  if (!eff.path) return fail(409, 'not_ready', 'AI calling is not ready yet, so no campaign can start. An Admin finishes the setup in Administration > Integrations > AI Calling (or switches the AI phone line on).', { steps: eff.problems });
   const ids = [...new Set((Array.isArray(b.applicationIds) ? b.applicationIds : []).map(String).filter(Boolean))];
   if (!ids.length) return fail(400, 'items', 'Pick at least one candidate.');
   if (ids.length > s.maxBulk) return fail(400, 'too_many', `A campaign can have at most ${s.maxBulk} candidates.`);
@@ -180,10 +204,21 @@ async function create(user, body) {
     id, name, agent.purpose, first.requirement.id, user.id, user.name, 0, now);
   await DB.run('INSERT INTO "AiVoiceCampaign" ("campaignId","status","agentId","agentName","language","concurrency","scheduledAt","startedAt","createdAt","updatedAt") VALUES (?,?,?,?,?,?,?,?,?,?)',
     id, status, agent.id, agent.name, language || null, concurrency, status === 'scheduled' ? iso(at) : null, status === 'running' ? now : null, now, now);
-  const r = await svc.createCalls(user, {
+  const input = {
     items: ids, purpose: agent.purpose, language, confirm: true, campaignId: id, campaignName: name, dispatch: false, via: 'campaign',
     fields: { includeSalary: agent.includeSalary, includeResponsibilities: agent.includeResponsibilities, instructions: agent.instructions },
-  });
+  };
+  let r;
+  if (eff.path === 'provider') r = await svc.createCalls(user, input);
+  else { // the AI phone line: the same createOne the provider path uses, with the phone line's own switch (Test numbers / Live) as the settings
+    const results = [];
+    for (const applicationId of ids) { // eslint-disable-line no-restricted-syntax
+      // eslint-disable-next-line no-await-in-loop
+      const one = await svc.createOne(user, applicationId, { ...input, bulk: ids.length > 1 }, s, id);
+      results.push({ applicationId, ok: !!one.ok, callId: one.id || one.callId || null, code: one.code, error: one.error });
+    }
+    r = { ok: true, campaignId: id, results, started: results.filter((x) => x.ok).length, refused: results.filter((x) => !x.ok).length };
+  }
   if (!r.ok || !r.started) {
     await DB.run('DELETE FROM "AiVoiceCampaign" WHERE "campaignId" = ?', id);
     await DB.run('DELETE FROM "AiCallCampaign" WHERE "id" = ?', id);
@@ -192,7 +227,7 @@ async function create(user, body) {
   }
   await DB.run('UPDATE "AiCallCampaign" SET "total" = ? WHERE "id" = ?', r.started, id);
   await logAudit({ userId: user.id, action: 'AI Voice campaign created', entity: 'AiCallCampaign', entityId: id, toValue: `${name}: ${r.started} candidate(s), agent ${agent.name}, ${status}`.slice(0, 200) });
-  return { ok: true, id, status, started: r.started, refused: r.refused, refusals: r.results.filter((x) => !x.ok).map((x) => ({ applicationId: x.applicationId, code: x.code, error: x.error })) };
+  return { ok: true, id, status, path: eff.path, mode: eff.mode, started: r.started, refused: r.refused, refusals: r.results.filter((x) => !x.ok).map((x) => ({ applicationId: x.applicationId, code: x.code, error: x.error })) };
 }
 
 // ---- control -------------------------------------------------------------------------------------------------------------------------
@@ -252,7 +287,18 @@ async function tick() {
     const t = iso();
     await DB.run(`UPDATE "AiVoiceCampaign" SET "status" = 'running', "startedAt" = COALESCE("startedAt", ?), "updatedAt" = ? WHERE "status" = 'scheduled' AND "scheduledAt" <= ?`, t, t, t);
     const camps = await DB.all(`SELECT * FROM "AiVoiceCampaign" WHERE "status" = 'running'`);
+    const eff = camps.length ? await effective() : null;
+    const dial = eff && eff.path === 'phone' ? require('./voice/sipCall').dialQueued : svc.dispatch; // eslint-disable-line global-require
     for (const c of camps) { // eslint-disable-line no-restricted-syntax
+      if (eff && eff.path === 'phone') {
+        // the phone line has no retry of its own: a call that did not connect, with attempts left, is tried again after the AI Calling gaps (default 30 min, then 2 h)
+        // eslint-disable-next-line no-await-in-loop
+        const gone = await DB.all(`SELECT "id","attempts","endedAt" FROM "AiCall" WHERE "campaignId" = ? AND "status" IN ('failed','busy','no-answer') AND "nextAttemptAt" IS NULL AND "attempts" < "maxAttempts"`, c.campaignId);
+        for (const g of gone) { // eslint-disable-line no-restricted-syntax
+          // eslint-disable-next-line no-await-in-loop
+          await svc.setRow(g.id, { nextAttemptAt: new Date((g.endedAt ? new Date(g.endedAt).getTime() : Date.now()) + svc.gapFor(eff.s, Number(g.attempts))).toISOString(), waitReason: 'Trying again later.' });
+        }
+      }
       // eslint-disable-next-line no-await-in-loop
       const inflight = Number((await DB.one(`SELECT COUNT(*) AS n FROM "AiCall" WHERE "campaignId" = ? AND "status" = 'calling'`, c.campaignId)).n) || 0;
       const slots = Math.max(0, c.concurrency - inflight);
@@ -262,7 +308,7 @@ async function tick() {
           AND ("nextAttemptAt" IS NULL OR "nextAttemptAt" <= ?) ORDER BY COALESCE("nextAttemptAt", "createdAt") ASC LIMIT ?`, c.campaignId, t, slots);
         for (const d of due) { // eslint-disable-line no-restricted-syntax
           // eslint-disable-next-line no-await-in-loop
-          const r = await svc.dispatch(d.id);
+          const r = await dial(d.id);
           if (r && r.status === 'calling') out.started += 1;
         }
       }
@@ -302,4 +348,4 @@ function startSchedule() {
   if (timer.unref) timer.unref();
 }
 
-module.exports = { listAgents, getAgent, saveAgent, removeAgent, list, detail, create, control, tick, exportCsv, startSchedule, countersFor, ATS_PURPOSES, FAILED };
+module.exports = { effective, readiness, listAgents, getAgent, saveAgent, removeAgent, list, detail, create, control, tick, exportCsv, startSchedule, countersFor, ATS_PURPOSES, FAILED };
