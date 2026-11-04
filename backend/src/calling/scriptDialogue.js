@@ -29,17 +29,20 @@ const MAX_STEPS = 14;
 const MAX_LINE = 300;
 
 // text -> { ok, steps:[{ kind, text }], error }
-function parseScript(raw) {
+// lim: { maxLines, maxLine } - a script from Omni-Channel (Green Start) may have longer lines and more steps than an ATS agent script
+function parseScript(raw, lim = {}) {
+  const maxSteps = lim.maxLines || MAX_STEPS;
+  const maxLine = lim.maxLine || MAX_LINE;
   const lines = String(raw == null ? '' : raw).replace(/\r/g, '').split('\n').map((l) => l.trim()).filter(Boolean);
   if (!lines.length) return { ok: false, steps: [], error: 'The script is empty.' };
-  if (lines.length > MAX_STEPS) return { ok: false, steps: [], error: `A script can have at most ${MAX_STEPS} lines.` };
+  if (lines.length > maxSteps) return { ok: false, steps: [], error: `A script can have at most ${maxSteps} lines.` };
   const steps = [];
   for (let i = 0; i < lines.length; i += 1) {
     const m = /^(opening|say|ask|interest|closing)\s*[:\-–]\s*(.*)$/i.exec(lines[i]);
     const kind = m ? KINDS[m[1].toLowerCase()] : (i === 0 ? 'opening' : 'ask');
     const text = (m ? m[2] : lines[i]).trim();
     if (!text) return { ok: false, steps: [], error: `Line ${i + 1} has a label but no words.` };
-    if (text.length > MAX_LINE) return { ok: false, steps: [], error: `Line ${i + 1} is too long (at most ${MAX_LINE} characters).` };
+    if (text.length > maxLine) return { ok: false, steps: [], error: `Line ${i + 1} is too long (at most ${maxLine} characters).` };
     if (S.hasForbidden(text.replace(/\{[a-z]+\}/gi, ''))) return { ok: false, steps: [], error: `Line ${i + 1} uses words the assistant must never say (selected, hired, offered, congratulations, a promise of a job).` };
     steps.push({ kind, text });
   }
@@ -62,14 +65,14 @@ class ScriptDialogue extends D.Dialogue {
   // opts: Dialogue's, plus script (the text, in scriptLanguage), scripts ({ Telugu: text, Hindi: text, English: text }: the other versions) and scriptName
   constructor(opts) {
     super({ ...opts, autoLanguage: false, brain: null });
-    const main = parseScript(opts.script);
+    const main = parseScript(opts.script, opts.limits);
     if (!main.ok) throw new Error(`The agent's script cannot be used: ${main.error}`);
     const first = S.LANGS.includes(opts.scriptLanguage) ? opts.scriptLanguage : (S.LANGS.includes(opts.language) ? opts.language : 'English');
     this.byLang = { [first]: main.steps };
     const sameShape = (a, b) => a.length === b.length && a.every((x, i) => x.kind === b[i].kind);
     Object.entries(opts.scripts || {}).forEach(([lang, text]) => {
       if (!S.LANGS.includes(lang) || lang === first || !text) return;
-      const p = parseScript(text);
+      const p = parseScript(text, opts.limits);
       if (p.ok && sameShape(p.steps, main.steps)) this.byLang[lang] = p.steps; // a version that does not match line for line is not used
     });
     this.scriptLanguage = first;

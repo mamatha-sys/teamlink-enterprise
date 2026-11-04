@@ -18,6 +18,8 @@ const S = require('./scripts');
 const { parseScript, ScriptDialogue } = require('./scriptDialogue');
 
 const AUD = 'teamlink-voice';
+// Green Start steps may be 600 characters and a script has up to 30 steps, so the ATS limits (300 characters, 14 lines) are wider here
+const LIMITS = { maxLine: 700, maxLines: 40 };
 const seen = new Map(); // jti -> expiry (a signed request is accepted once)
 
 const secret = () => String(process.env.GREENSTART_SSO_SECRET || '');
@@ -44,10 +46,10 @@ const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || '';
 
 // the script of the agent: checked here the same way as an ATS AI Voice agent's (the lines it may not say, one Opening, a Closing, one question)
 function checkScript(text, others) {
-  const main = parseScript(text);
+  const main = parseScript(text, LIMITS);
   if (!main.ok) return main.error;
-  const bad = Object.entries(others || {}).find(([, t]) => t && !parseScript(t).ok);
-  return bad ? `The ${bad[0]} version of the script cannot be used: ${parseScript(bad[1]).error}` : null;
+  const bad = Object.entries(others || {}).find(([, t]) => t && !parseScript(t, LIMITS).ok);
+  return bad ? `The ${bad[0]} version of the script cannot be used: ${parseScript(bad[1], LIMITS).error}` : null;
 }
 
 // the call's talk, in the shape Green Start shows
@@ -93,7 +95,7 @@ function dialogueFor(row, s) {
   const name = (j.omni && j.omni.name) || '';
   const d = new ScriptDialogue({
     purpose: row.purpose, language: row.language || 'English', data: { name, firstName: firstName(name), jobTitle: '', company: '' }, fields: {},
-    recordingNotice: !!(s && (s.recording || s.keepTranscripts)), script: a.text, scriptLanguage: a.language, scripts: a.texts, scriptName: a.name, seed: row.id,
+    recordingNotice: !!(s && (s.recording || s.keepTranscripts)), script: a.text, scriptLanguage: a.language, scripts: a.texts, scriptName: a.name, seed: row.id, limits: LIMITS,
   });
   const snap = svc.safeJson(row.botStateJson);
   if (snap && snap.step) d.restore(snap);
