@@ -69,6 +69,28 @@ const rec2 = { id: 'zz-rec2', name: 'ZZ Recruiter Two', role: 'RECRUITER', produ
     r = await VC.saveAgent({ ...admin, deny: true }, { name: 'Nope nope', purpose: 'Screening' });
     check('someone the AI Calling roles refuse cannot make agents', r.ok === false && r.status === 403, r);
 
+    // ---- an agent with the team's own script
+    const SCRIPT = 'Opening: Hello {name}, this is the TeamLink assistant. Am I speaking with {name}?\nAsk: How many years of experience do you have?\nInterest: Are you interested in this job?\nClosing: Thank you. Bye.';
+    r = await VC.saveAgent(admin, { name: 'Own script agent', purpose: 'Screening', language: 'English', script: SCRIPT });
+    check('an agent can carry the team\'s own script', r.ok === true, r);
+    const scripted = r.id;
+    r = await VC.saveAgent(admin, { name: 'Bad script', purpose: 'Screening', script: 'Opening: Hi\nAsk: You are selected, ok?\nClosing: Bye' });
+    check('a script with words the assistant must never say is refused when saved', r.ok === false && r.code === 'script', r);
+    r = await VC.saveAgent(admin, { name: 'No closing', purpose: 'Screening', script: 'Opening: Hi\nAsk: ok?' });
+    check('a script without a closing line is refused, with the reason', r.ok === false && /closing/i.test(r.error), r);
+    check('the saved agent shows its script', (await VC.listAgents()).find((a) => a.id === scripted).script === SCRIPT);
+    const sc = await VC.create(admin, { name: 'ZZ scripted', agentId: scripted, applicationIds: [pick[0]], startNow: false });
+    check('a campaign with that agent is created', sc.ok === true && sc.started === 1, sc);
+    const scRow = (await DB.all('SELECT * FROM "AiCall" WHERE "campaignId" = ?', sc.id))[0];
+    check('its call carries the script', JSON.parse(scRow.scriptJson).agentScript.text === SCRIPT, scRow.scriptJson);
+    const dlg = await require('../src/calling/webTalk').dialogueFor(scRow);
+    check('and the call talks by it: the dialogue is the script dialogue, opening with the script\'s words and the candidate\'s name', dlg && dlg.constructor.name === 'ScriptDialogue' && /Am I speaking with/.test(dlg.start().say), dlg && dlg.constructor.name);
+    const plainCamp = (await VC.create(admin, { name: 'ZZ plain', agentId: 'builtin:Screening', applicationIds: [pick[1]], startNow: false }));
+    const plainRow = (await DB.all('SELECT * FROM "AiCall" WHERE "campaignId" = ?', plainCamp.id))[0];
+    const plainDlg = await require('../src/calling/webTalk').dialogueFor(plainRow);
+    check('an agent without a script keeps the built-in questions (unchanged)', plainDlg && plainDlg.constructor.name === 'Dialogue', plainDlg && plainDlg.constructor.name);
+    await VC.control(admin, sc.id, 'stop'); await VC.control(admin, plainCamp.id, 'stop');
+
     // ---- create
     r = await VC.create(admin, { name: 'ZZ Test campaign', agentId: custom, applicationIds: pick, concurrency: 2 });
     check('a campaign is created and running', r.ok === true && r.status === 'running' && r.started === 5, r);

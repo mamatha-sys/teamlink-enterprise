@@ -355,7 +355,8 @@ function CampaignDetail({ id, onBack, onChanged, toast, canCall }) {
 
 // ---- agents ------------------------------------------------------------------------------------------------------------------------
 function Agents({ agents, canCall, onChanged, toast }) {
-  const BLANK = { name: '', purpose: 'Screening', language: '', instructions: '', includeSalary: true, includeResponsibilities: true };
+  const BLANK = { name: '', purpose: 'Screening', language: '', instructions: '', script: '', includeSalary: true, includeResponsibilities: true };
+  const EXAMPLE = 'Opening: Hello {name}, this is the TeamLink assistant. Am I speaking with {name}?\nSay: I am calling about the {job} job in {location}.\nAsk: How many years of experience do you have?\nAsk: Which city do you live in?\nInterest: Are you interested in this job?\nClosing: Thank you for your time. Our team will contact you. Bye.';
   const [f, setF] = useState(BLANK);
   const [edit, setEdit] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -375,11 +376,11 @@ function Agents({ agents, canCall, onChanged, toast }) {
       <Panel title="AI agents" sub="An agent is what the AI calls about (its purpose), the language it speaks and any extra wording. It uses TeamLink's own AI calling voice and brain, no other service. The built-in agents are the call types of AI Calling.">
         <div className="table-scroll">
           <table className="table cmp-table-small">
-            <thead><tr><th>Agent</th><th>Calls about</th><th>Language</th><th>Extra wording</th><th /></tr></thead>
+            <thead><tr><th>Agent</th><th>Calls about</th><th>Language</th><th>Talks by</th><th /></tr></thead>
             <tbody>
               {agents.map((a) => (
-                <tr key={a.id}><td style={{ fontWeight: 800 }}>{a.name}{a.builtin && <span className="cmp-sub">built in</span>}</td><td>{a.purpose}</td><td>{a.language || 'Each candidate\'s own'}</td><td>{a.instructions || '—'}</td>
-                  <td style={{ display: 'flex', gap: 6 }}>{!a.builtin && canCall && <><Btn small onClick={() => { setEdit(a.id); setF({ name: a.name, purpose: a.purpose, language: a.language || '', instructions: a.instructions || '', includeSalary: a.includeSalary, includeResponsibilities: a.includeResponsibilities }); }}>Edit</Btn><Btn small danger onClick={() => remove(a)}>Remove</Btn></>}</td></tr>
+                <tr key={a.id}><td style={{ fontWeight: 800 }}>{a.name}{a.builtin && <span className="cmp-sub">built in</span>}</td><td>{a.purpose}</td><td>{a.language || 'Each candidate\'s own'}</td><td>{a.script ? <Pill tone="live">Its own script</Pill> : (a.instructions || 'The built-in questions')}</td>
+                  <td style={{ display: 'flex', gap: 6 }}>{!a.builtin && canCall && <><Btn small onClick={() => { setEdit(a.id); setF({ name: a.name, purpose: a.purpose, language: a.language || '', instructions: a.instructions || '', script: a.script || '', includeSalary: a.includeSalary, includeResponsibilities: a.includeResponsibilities }); }}>Edit</Btn><Btn small danger onClick={() => remove(a)}>Remove</Btn></>}</td></tr>
               ))}
             </tbody>
           </table>
@@ -392,8 +393,12 @@ function Agents({ agents, canCall, onChanged, toast }) {
             <Field label="Name"><input value={f.name} maxLength={60} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
             <Field label="Calls about"><select value={f.purpose} onChange={(e) => setF({ ...f, purpose: e.target.value })}>{purposes.map((p) => <option key={p} value={p}>{p}</option>)}</select></Field>
             <Field label="Language"><select value={f.language} onChange={(e) => setF({ ...f, language: e.target.value })}><option value="">Each candidate's own</option>{LANG.map((l) => <option key={l} value={l}>{l}</option>)}</select></Field>
-            <Field label="Extra wording (optional)" hint="Short. Never words like selected, hired or offered."><input value={f.instructions} maxLength={200} onChange={(e) => setF({ ...f, instructions: e.target.value })} /></Field>
+            <Field label="Extra wording (optional)" hint="Short. Used with the built-in questions. Never words like selected, hired or offered."><input value={f.instructions} maxLength={200} onChange={(e) => setF({ ...f, instructions: e.target.value })} /></Field>
           </div>
+          <Field label="Script (optional): the AI talks exactly by it" full hint="One line per step, starting with Opening: (first), Say:, Ask:, Interest: (a yes / no question about the job) and Closing: (last, required). Use {name} {job} {company} {location} {salary}. Write it in the agent's language. With a script the built-in questions are not used.">
+            <textarea rows={8} value={f.script} onChange={(e) => setF({ ...f, script: e.target.value })} placeholder={EXAMPLE} style={{ width: '100%', fontFamily: 'inherit', fontSize: 12 }} />
+          </Field>
+          <div style={{ margin: '4px 0 8px' }}><Btn small onClick={() => setF({ ...f, script: EXAMPLE })}>Use the example script</Btn></div>
           <label style={{ fontSize: 11, marginRight: 14 }}><input type="checkbox" checked={f.includeSalary} onChange={(e) => setF({ ...f, includeSalary: e.target.checked })} /> Mention the salary</label>
           <label style={{ fontSize: 11 }}><input type="checkbox" checked={f.includeResponsibilities} onChange={(e) => setF({ ...f, includeResponsibilities: e.target.checked })} /> Mention the responsibilities</label>
           <div style={{ marginTop: 12 }}><Btn primary disabled={busy} onClick={save}>{busy ? 'Saving…' : (edit ? 'Save agent' : 'Add agent')}</Btn></div>

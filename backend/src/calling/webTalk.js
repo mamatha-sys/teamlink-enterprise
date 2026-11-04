@@ -135,6 +135,15 @@ async function dialogueFor(row) {
   if (!ctx) return null;
   const { fields } = webOf(row);
   const sc = await svc.scriptFor(ctx, row.purpose, row.language || 'English', fields, s);
+  // AN AI VOICE AGENT WITH ITS OWN SCRIPT (voiceCampaigns.js): the call follows the team's script, line by line (scriptDialogue.js)
+  const agentScript = (webOf(row).json || {}).agentScript;
+  if (agentScript && agentScript.text) {
+    const SD = require('./scriptDialogue'); // eslint-disable-line global-require
+    const d0 = new SD.ScriptDialogue({ purpose: row.purpose, language: row.language || 'English', data: sc.data, fields: sc.fields, recordingNotice: s.recording || s.keepTranscripts, script: agentScript.text, scriptName: agentScript.name, seed: row.id });
+    const snap0 = svc.safeJson(row.botStateJson);
+    if (snap0 && snap0.step) d0.restore(snap0);
+    return d0;
+  }
   // the AI brain (brain.js, the existing Claude channel) when it is set up and has credits; otherwise the script alone
   const Brain = require('./brain'); // eslint-disable-line global-require
   const brain = (await Brain.available()) ? Brain.think : null;

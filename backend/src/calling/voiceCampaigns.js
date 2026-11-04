@@ -18,6 +18,7 @@
 // A campaign is visible to its creator and to Admins. The roles that may call are the AI Calling roles (accessVerdict), as before.
 // ---------------------------------------------------------------------------
 const DB = require('./schema');
+const SD = require('./scriptDialogue');
 const S = require('./scripts');
 const svc = require('./callService');
 const settingsStore = require('./settings');
@@ -58,10 +59,10 @@ async function readiness() {
 
 // ---- agents --------------------------------------------------------------------------------------------------------------------------
 const builtin = () => ATS_PURPOSES.map((p) => ({
-  id: `builtin:${p}`, builtin: true, name: AGENT_NAME[p] || `${p} agent`, purpose: p, language: null, instructions: '', includeSalary: true, includeResponsibilities: true, active: true,
+  id: `builtin:${p}`, builtin: true, name: AGENT_NAME[p] || `${p} agent`, purpose: p, language: null, instructions: '', script: '', includeSalary: true, includeResponsibilities: true, active: true,
 }));
 const shapeAgent = (r) => ({
-  id: r.id, builtin: false, name: r.name, purpose: r.purpose, language: r.language || null, instructions: r.instructions || '',
+  id: r.id, builtin: false, name: r.name, purpose: r.purpose, language: r.language || null, instructions: r.instructions || '', script: r.script || '',
   includeSalary: !!r.includeSalary, includeResponsibilities: !!r.includeResponsibilities, active: !!r.active, createdByName: r.createdByName || null,
 });
 async function listAgents() {
@@ -87,17 +88,23 @@ async function saveAgent(user, body) {
   const fields = S.cleanFields({ instructions: b.instructions });
   const bad = S.checkFields(fields);
   if (bad) return fail(400, 'script', bad);
+  // the team's own script (optional): the AI then talks by it, line by line
+  const script = String(b.script || '').trim();
+  if (script) {
+    const p = SD.parseScript(script);
+    if (!p.ok) return fail(400, 'script', p.error);
+  }
   const now = iso();
   if (b.id) {
     const had = await DB.one('SELECT "id" FROM "AiVoiceAgent" WHERE "id" = ? AND "active" = 1', b.id);
     if (!had) return fail(404, 'agent', 'That agent was not found.');
-    await DB.run('UPDATE "AiVoiceAgent" SET "name"=?, "purpose"=?, "language"=?, "instructions"=?, "includeSalary"=?, "includeResponsibilities"=?, "updatedAt"=? WHERE "id"=?',
-      name, b.purpose, language || null, fields.instructions || null, b.includeSalary === false ? 0 : 1, b.includeResponsibilities === false ? 0 : 1, now, b.id);
+    await DB.run('UPDATE "AiVoiceAgent" SET "name"=?, "purpose"=?, "language"=?, "instructions"=?, "script"=?, "includeSalary"=?, "includeResponsibilities"=?, "updatedAt"=? WHERE "id"=?',
+      name, b.purpose, language || null, fields.instructions || null, script || null, b.includeSalary === false ? 0 : 1, b.includeResponsibilities === false ? 0 : 1, now, b.id);
     return { ok: true, id: b.id };
   }
   const id = svc.newId('aiva');
-  await DB.run('INSERT INTO "AiVoiceAgent" ("id","name","purpose","language","instructions","includeSalary","includeResponsibilities","active","createdById","createdByName","createdAt","updatedAt") VALUES (?,?,?,?,?,?,?,1,?,?,?,?)',
-    id, name, b.purpose, language || null, fields.instructions || null, b.includeSalary === false ? 0 : 1, b.includeResponsibilities === false ? 0 : 1, user.id, user.name, now, now);
+  await DB.run('INSERT INTO "AiVoiceAgent" ("id","name","purpose","language","instructions","script","includeSalary","includeResponsibilities","active","createdById","createdByName","createdAt","updatedAt") VALUES (?,?,?,?,?,?,?,?,1,?,?,?,?)',
+    id, name, b.purpose, language || null, fields.instructions || null, script || null, b.includeSalary === false ? 0 : 1, b.includeResponsibilities === false ? 0 : 1, user.id, user.name, now, now);
   await logAudit({ userId: user.id, action: 'AI Voice agent created', entity: 'AiVoiceAgent', entityId: id, toValue: `${name} (${b.purpose})`.slice(0, 200) });
   return { ok: true, id };
 }
@@ -226,6 +233,16 @@ async function create(user, body) {
     return fail(422, 'none', 'None of the picked candidates can be called now.', { refused: r.results.filter((x) => !x.ok).map((x) => ({ applicationId: x.applicationId, code: x.code, error: x.error })) });
   }
   await DB.run('UPDATE "AiCallCampaign" SET "total" = ? WHERE "id" = ?', r.started, id);
+  if (agent.script) {
+    // every call of the campaign carries the agent's script: the call talks by it (webTalk.dialogueFor -> scriptDialogue.js)
+    for (const x of r.results.filter((y) => y.ok && y.callId)) { // eslint-disable-line no-restricted-syntax
+      // eslint-disable-next-line no-await-in-loop
+      const row = await svc.getCall(x.callId);
+      const json = svc.safeJson(row && row.scriptJson) || {};
+      // eslint-disable-next-line no-await-in-loop
+      if (row) await svc.setRow(x.callId, { scriptJson: JSON.stringify({ ...json, agentScript: { name: agent.name, text: agent.script } }) });
+    }
+  }
   await logAudit({ userId: user.id, action: 'AI Voice campaign created', entity: 'AiCallCampaign', entityId: id, toValue: `${name}: ${r.started} candidate(s), agent ${agent.name}, ${status}`.slice(0, 200) });
   return { ok: true, id, status, path: eff.path, mode: eff.mode, started: r.started, refused: r.refused, refusals: r.results.filter((x) => !x.ok).map((x) => ({ applicationId: x.applicationId, code: x.code, error: x.error })) };
 }
