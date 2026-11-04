@@ -398,7 +398,7 @@ async function teamHistory(user, q) {
   if (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`) > 92 * 86400000) from = new Date(Date.parse(`${to}T00:00:00Z`) - 92 * 86400000).toISOString().slice(0, 10);
   if (from > to) from = to;
   let people;
-  if (['recruiter', 'bde'].includes(role.key)) people = [{ id: user.id, name: user.name, atsRole: role.key === 'bde' ? 'BDE' : 'RECRUITER' }];
+  if (['recruiter', 'bde'].includes(role.key)) people = [{ id: user.id, name: user.name, atsRole: role.key === 'bde' ? 'BDE' : 'RECRUITER', atsDepartment: user.atsDepartment }];
   else {
     people = await require('./teamWorkload').peopleFor(user); // eslint-disable-line global-require
     if (!people.some((p) => p.id === user.id)) people.push({ id: user.id, name: user.name, atsRole: user.atsRole });
@@ -423,7 +423,12 @@ async function teamHistory(user, q) {
   ]);
   const cName = Object.fromEntries(clients.map((c) => [c.id, c.name]));
   const kName = Object.fromEntries(cands.map((c) => [c.id, c.name]));
-  const pRole = Object.fromEntries(people.map((p) => [p.id, TEAM_ROLE[p.atsRole] || '']));
+  // RECRUITERS FOLLOW UP CANDIDATES, BDEs FOLLOW UP CLIENTS (founder 2026-11-04: "recruiters followups separate & bde follow up
+  // separate"): each person is on one side - the BDE and the BDE TL on the client side, everyone else on the candidate side.
+  const { isBdeDepartment } = require('./bdeDesk'); // eslint-disable-line global-require
+  const bdeTlOf = (p) => p.atsRole === 'TL' && isBdeDepartment(String(p.atsDepartment || '').split(',').map((x) => x.trim()).filter(Boolean));
+  const pRole = Object.fromEntries(people.map((p) => [p.id, bdeTlOf(p) ? 'BDE TL' : (TEAM_ROLE[p.atsRole] || '')]));
+  const pSide = Object.fromEntries(people.map((p) => [p.id, p.atsRole === 'BDE' || bdeTlOf(p) ? 'client' : 'candidate']));
   const pName = Object.fromEntries(people.map((p) => [p.id, p.name]));
   const rows = all.map((e) => ({
     id: e.id, onDate: e.onDate, createdAt: e.createdAt, byId: e.byId, byName: pName[e.byId] || e.byName || null, byRole: pRole[e.byId] || e.byRole || null,
@@ -436,13 +441,135 @@ async function teamHistory(user, q) {
     const s = sum[r.byId] || (sum[r.byId] = { id: r.byId, name: r.byName, role: r.byRole, total: 0, candidates: 0, clients: 0, days: new Set(), last: null });
     s.total += 1; if (r.kind === 'Candidate') s.candidates += 1; else s.clients += 1; s.days.add(r.onDate); if (!s.last || r.onDate > s.last) s.last = r.onDate;
   });
+  const sumOf = (kind) => { // per side: each person's own days and last day for that kind
+    const m = {};
+    rows.filter((r) => r.kind === kind).forEach((r) => { const e = m[r.byId] || (m[r.byId] = { days: new Set(), last: null }); e.days.add(r.onDate); if (!e.last || r.onDate > e.last) e.last = r.onDate; });
+    return m;
+  };
+  const byKind = { Candidate: sumOf('Candidate'), Client: sumOf('Client') };
   const summary = people.map((p) => sum[p.id] || { id: p.id, name: p.name, role: pRole[p.id], total: 0, candidates: 0, clients: 0, days: new Set(), last: null })
     .filter((s) => !q.personId || s.id === String(q.personId))
-    .map((s) => ({ ...s, days: s.days.size })).sort((a, b) => b.total - a.total || String(a.name).localeCompare(String(b.name)));
+    .map((s) => ({
+      ...s, days: s.days.size, side: pSide[s.id] || 'candidate',
+      candidateDays: byKind.Candidate[s.id] ? byKind.Candidate[s.id].days.size : 0, candidateLast: byKind.Candidate[s.id] ? byKind.Candidate[s.id].last : null,
+      clientDays: byKind.Client[s.id] ? byKind.Client[s.id].days.size : 0, clientLast: byKind.Client[s.id] ? byKind.Client[s.id].last : null,
+    })).sort((a, b) => b.total - a.total || String(a.name).localeCompare(String(b.name)));
   return {
     status: 200,
-    body: { from, to, today, scope: ['recruiter', 'bde'].includes(role.key) ? 'mine' : 'team', people: people.map((p) => ({ id: p.id, name: p.name, role: pRole[p.id] })).sort((a, b) => String(a.name).localeCompare(String(b.name))), rows, summary },
+    body: { from, to, today, scope: ['recruiter', 'bde'].includes(role.key) ? 'mine' : 'team', viewerSide: ['bde', 'bdetl'].includes(role.key) ? 'client' : 'candidate', people: people.map((p) => ({ id: p.id, name: p.name, role: pRole[p.id], side: pSide[p.id] })).sort((a, b) => String(a.name).localeCompare(String(b.name))), rows, summary },
   };
 }
 
-module.exports = { candidateList, candidateAdd, teamHistory, list, add, importPreview, importCommit, parseSheet, leadingDate, matcher, mayWrite, mayImport, PREFIX };
+// ---- EXPORT / IMPORT ON THE FOLLOW-UPS TAB (founder 2026-11-04: "ikkada kuda export import button vundali") ----------------
+// Export: the log the caller sees (a candidate's, or a client's / requirement's), as Excel / CSV / PDF (routes/clientFollowLog.js).
+// Import: a sheet with a date and what happened on each line - the exported file itself, or any sheet whose lines start with a
+// date ("04-11-2026 - called, will join Monday"). Preview first, then import; a line already on the log (same day, same words)
+// is never added twice. Imported lines show "From the sheet" (with the "Who" of the file, when it has one).
+const EXPORT_HEAD = ['Date', 'What happened', 'Who', 'Role', 'Job', 'Kind'];
+const KIND_WORD = { manual: 'Comment', quick: 'Logged contact', task: 'Follow-up task', sheet: 'From a sheet' };
+const dmy = (ymdStr) => { const [y, m, d] = String(ymdStr || '').split('-'); return y ? `${d}-${m}-${y}` : ''; };
+async function logOf(user, q) {
+  return q.candidateId ? candidateList(user, { candidateId: q.candidateId }) : list(user, { clientId: q.clientId, requirementId: q.requirementId });
+}
+async function exportRows(user, q) {
+  const out = await logOf(user, q);
+  if (out.status !== 200) return out;
+  const b = out.body;
+  const rows = b.entries.map((e) => [dmy(e.onDate), e.note, e.source === 'sheet' ? (e.topic || e.byName || '') : (e.byName || ''), e.byRole || '', e.requirementLabel || '', KIND_WORD[e.source] || 'Comment']);
+  const name = (b.candidate ? b.candidate.name : b.client.name) || 'follow-ups';
+  return { status: 200, body: { name, headers: EXPORT_HEAD, rows, entity: q.candidateId ? 'Candidate' : 'Client' } };
+}
+
+// A cell as a day: a real Excel date, an ISO day, or "04-11-2026" / "4 Nov 2026" (day first, as the sheets are written).
+function cellDay(v) {
+  if (v instanceof Date && !Number.isNaN(v.getTime())) return new Date(v.getTime() + 5.5 * 3600000).toISOString().slice(0, 10);
+  const t = String(v == null ? '' : v).trim();
+  if (!t) return null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(t)) return t.slice(0, 10);
+  const d = leadingDate(t);
+  return d ? d.on : null;
+}
+function parseSimpleSheet(buf) {
+  const XLSX = require('xlsx'); // eslint-disable-line global-require
+  const wb = XLSX.read(buf, { type: 'buffer', cellDates: true, raw: true }); // raw: a CSV's "04-11-2026" stays day-first text
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true });
+  const head = (rows[0] || []).map((h) => String(h || '').trim().toLowerCase());
+  const dateCol = head.findIndex((h) => /^(follow[- ]?up )?date|^day$|^on$/.test(h));
+  const noteCol = head.findIndex((h) => /what happened|follow[- ]?ups?$|note|comment|remark|status|discussion|details/.test(h) && !/date/.test(h));
+  const whoCol = head.findIndex((h) => /^(who|by|done by|recruiter|bde)$/.test(h));
+  const today = istToday();
+  const out = [];
+  let undated = 0; let future = 0;
+  const body = dateCol >= 0 && noteCol >= 0 ? rows.slice(1) : rows;
+  body.forEach((r) => {
+    if (!r.some((c) => String(c).trim())) return;
+    let on = null; let note = '';
+    if (dateCol >= 0 && noteCol >= 0) {
+      on = cellDay(r[dateCol]); note = String(r[noteCol] || '').trim();
+    } else {
+      // no headers: the first cell that is a day; the rest of the line is what happened
+      const cells = r.map((c) => (c instanceof Date ? c : String(c == null ? '' : c).trim()));
+      const i = cells.findIndex((c) => cellDay(c));
+      if (i >= 0) {
+        const lead = typeof cells[i] === 'string' ? leadingDate(cells[i]) : null;
+        on = cellDay(cells[i]);
+        note = [lead && lead.rest ? lead.rest : '', ...cells.filter((c, j) => j !== i && typeof c === 'string')].filter(Boolean).join(' · ');
+      }
+    }
+    if (!on || note.length < 2) { undated += 1; return; }
+    if (on > today) { future += 1; return; }
+    out.push({ onDate: on, note: note.slice(0, 2000), who: whoCol >= 0 ? String(r[whoCol] || '').trim().slice(0, 80) : '' });
+  });
+  return { lines: out, undated, future };
+}
+const SIMPLE = new Map(); // token -> { userId, target, lines, fileName, at }
+async function simplePreview(user, q, buf, fileName) {
+  if (!mayWrite(user)) return { status: 403, body: { error: 'Managers can read the follow-ups; the recruiters, TLs and BDEs import them.' } };
+  if (!buf || !buf.length) return { status: 400, body: { error: 'Choose the Excel or CSV file.' } };
+  const log = await logOf(user, q);
+  if (log.status !== 200) return log;
+  let parsed;
+  try { parsed = parseSimpleSheet(buf); } catch { return { status: 400, body: { error: 'This file could not be read. Save it as .xlsx or .csv and try again.' } }; }
+  const have = new Set(log.body.entries.map((e) => `${e.onDate}|${norm(e.note)}`));
+  const seen = new Set();
+  let already = 0; let repeats = 0;
+  const lines = parsed.lines.filter((l) => {
+    const k = `${l.onDate}|${norm(l.note)}`;
+    if (have.has(k)) { already += 1; return false; }
+    if (seen.has(k)) { repeats += 1; return false; }
+    seen.add(k);
+    return true;
+  });
+  if (!lines.length) return { status: 400, body: { error: parsed.lines.length ? 'Every line of this file is already on the follow-ups.' : 'No dated follow-up lines were found. Each line needs a date (like 04-11-2026) and what happened.' } };
+  const token = crypto.randomBytes(12).toString('hex');
+  [...SIMPLE.entries()].forEach(([k, v]) => { if (Date.now() - v.at > PREVIEW_MS) SIMPLE.delete(k); });
+  const target = q.candidateId ? { candidateId: log.body.candidate.id } : { clientId: log.body.client.id, requirementId: log.body.requirement ? log.body.requirement.id : null };
+  SIMPLE.set(token, { userId: user.id, target, lines, fileName: String(fileName || 'sheet.xlsx').slice(0, 120), at: Date.now() });
+  return { status: 200, body: { token, fileName, count: lines.length, already, repeats, undated: parsed.undated, future: parsed.future, sample: lines.slice(0, 8) } };
+}
+async function simpleCommit(user, { token }) {
+  if (!mayWrite(user)) return { status: 403, body: { error: 'Managers can read the follow-ups; the recruiters, TLs and BDEs import them.' } };
+  const p = SIMPLE.get(String(token || ''));
+  if (!p || p.userId !== user.id || Date.now() - p.at > PREVIEW_MS) return { status: 410, body: { error: 'The preview has expired. Choose the file again.' } };
+  SIMPLE.delete(String(token));
+  const role = roleOf(user);
+  const now = new Date().toISOString();
+  const t = p.target;
+  const data = p.lines.map((l) => {
+    const id = crypto.randomBytes(6).toString('hex');
+    const base = { id, onDate: l.onDate, note: l.note, topic: l.who || null, byId: user.id, byName: user.name || null, byRole: role.label || null, createdAt: now, source: 'sheet', sheet: p.fileName };
+    return t.candidateId
+      ? { key: `${CPREFIX}${t.candidateId}.${id}`, value: JSON.stringify({ ...base, candidateId: t.candidateId, applicationId: null }), updatedById: user.id, updatedByName: user.name || null }
+      : { key: keyOf(t.clientId, id), value: JSON.stringify({ ...base, clientId: t.clientId, requirementId: t.requirementId || null, hash: hashOf(t.clientId, l.onDate, l.note) }), updatedById: user.id, updatedByName: user.name || null };
+  });
+  for (let i = 0; i < data.length; i += 200) {
+    // eslint-disable-next-line no-await-in-loop
+    await prisma.appSetting.createMany({ data: data.slice(i, i + 200) });
+  }
+  await logAudit({ userId: user.id, actorName: user.name || null, action: t.candidateId ? 'Candidate follow-ups imported' : 'Client follow-ups imported', entity: t.candidateId ? 'Candidate' : 'Client', entityId: t.candidateId || t.clientId, fieldLabel: 'Follow-up', toValue: `${data.length} lines`, reason: `From ${p.fileName}`.slice(0, 500) });
+  return { status: 200, body: { ok: true, added: data.length, message: `${data.length} follow-up line${data.length === 1 ? '' : 's'} imported.` } };
+}
+
+module.exports = {
+  exportRows, simplePreview, simpleCommit, parseSimpleSheet, candidateList, candidateAdd, teamHistory, list, add, importPreview, importCommit, parseSheet, leadingDate, matcher, mayWrite, mayImport, PREFIX };

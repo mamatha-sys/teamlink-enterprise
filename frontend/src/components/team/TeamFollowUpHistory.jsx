@@ -14,11 +14,17 @@ const fmtDay = (ymd) => {
 };
 const minus = (ymd, days) => new Date(Date.parse(`${ymd}T00:00:00Z`) - days * 86400000).toISOString().slice(0, 10);
 const SOURCE = { quick: 'Logged contact', task: 'Follow-up task', manual: 'Comment' };
+// RECRUITERS FOLLOW UP CANDIDATES, BDEs FOLLOW UP CLIENTS (founder 2026-11-04: "recruiters followups separate & bde follow up separate"):
+// two tabs, each with its own people and its own list. A BDE / BDE TL opens on the client tab, everyone else on the candidate tab.
+const SIDES = [
+  { key: 'Candidate', side: 'candidate', label: 'Recruiter follow-ups (candidates)', who: 'Recruiters and TLs following up with candidates' },
+  { key: 'Client', side: 'client', label: 'BDE follow-ups (clients)', who: 'BDEs following up with clients' },
+];
 
 export default function TeamFollowUpHistory() {
   const [range, setRange] = useState({ from: '', to: '' });
   const [personId, setPersonId] = useState('');
-  const [kind, setKind] = useState('');
+  const [kind, setKind] = useState(''); // 'Candidate' | 'Client' (set from the login when the list first comes)
   const [q, setQ] = useState('');
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -27,7 +33,7 @@ export default function TeamFollowUpHistory() {
   useEffect(() => {
     setLoading(true);
     api.get('/client-followlog/team', { params: { from: range.from || undefined, to: range.to || undefined, personId: personId || undefined } })
-      .then((r) => { setData(r.data); setError(''); if (!range.from) setRange({ from: r.data.from, to: r.data.to }); })
+      .then((r) => { setData(r.data); setError(''); if (!range.from) setRange({ from: r.data.from, to: r.data.to }); setKind((k) => k || (r.data.viewerSide === 'client' ? 'Client' : 'Candidate')); })
       .catch((e) => setError(e.response?.data?.error || 'The follow-up history could not be loaded.'))
       .finally(() => setLoading(false));
   }, [range.from, range.to, personId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -45,6 +51,11 @@ export default function TeamFollowUpHistory() {
   const today = data ? data.today : '';
   const quick = (days) => setRange({ from: minus(today, days - 1), to: today });
   const mine = data && data.scope === 'mine';
+  const side = SIDES.find((t) => t.key === kind) || null;
+  // the people of this tab: that side's people, and anyone else who wrote a follow-up of this kind
+  const cand = kind === 'Candidate';
+  const sideSummary = data ? data.summary.filter((s) => (side ? s.side === side.side : true) || (cand ? s.candidates : s.clients) > 0) : [];
+  const sidePeople = data ? data.people.filter((p) => !side || p.side === side.side || sideSummary.some((s) => s.id === p.id)) : [];
 
   return (
     <div className="card section flog">
@@ -54,6 +65,15 @@ export default function TeamFollowUpHistory() {
           {mine ? 'Every follow-up you wrote or logged, day by day.' : 'Who followed up with which candidate or client, day by day: comments, logged calls and mails, and follow-up tasks done.'}
         </div>
       </div>
+
+      <div className="flog-filters" role="tablist" aria-label="Whose follow-ups">
+        {SIDES.map((t) => (
+          <button key={t.key} type="button" role="tab" aria-selected={kind === t.key} className={`btn${kind === t.key ? ' btn-primary' : ''}`} onClick={() => { setKind(t.key); setPersonId(''); }}>
+            {t.label}{data ? ` · ${data.rows.filter((x) => x.kind === t.key).length}` : ''}
+          </button>
+        ))}
+      </div>
+      {side && <div className="small-muted">{side.who}{kind === 'Candidate' ? ': calls, mails and comments on the candidate profile.' : ': comments on the client and requirement pages, and the BDE desk sheet.'}</div>}
 
       <div className="flog-filters">
         <label className="small-muted">From <input type="date" value={range.from} max={range.to || today} onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} /></label>
@@ -70,14 +90,9 @@ export default function TeamFollowUpHistory() {
         {!mine && data && (
           <select value={personId} onChange={(e) => setPersonId(e.target.value)} aria-label="Person">
             <option value="">Everyone in my team</option>
-            {data.people.map((p) => <option key={p.id} value={p.id}>{`${p.name}${p.role ? ` (${p.role})` : ''}`}</option>)}
+            {sidePeople.map((p) => <option key={p.id} value={p.id}>{`${p.name}${p.role ? ` (${p.role})` : ''}`}</option>)}
           </select>
         )}
-        <select value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Candidates or clients">
-          <option value="">Candidates and clients</option>
-          <option value="Candidate">Candidates only</option>
-          <option value="Client">Clients only</option>
-        </select>
         <input type="search" value={q} placeholder="Search a name or what was said…" onChange={(e) => setQ(e.target.value)} />
       </div>
 
@@ -87,16 +102,14 @@ export default function TeamFollowUpHistory() {
       {data && !mine && (
         <div className="flog-imp-wrap" style={{ maxHeight: 'none' }}>
           <table className="flog-imp-table">
-            <thead><tr><th>Person</th><th>Follow-ups</th><th>Candidates</th><th>Clients</th><th>Days with a follow-up</th><th>Last one</th></tr></thead>
+            <thead><tr><th>Person</th><th>{cand ? 'Candidate follow-ups' : 'Client follow-ups'}</th><th>Days with a follow-up</th><th>Last one</th></tr></thead>
             <tbody>
-              {data.summary.map((s) => (
+              {sideSummary.map((s) => (
                 <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => setPersonId(personId === s.id ? '' : s.id)} title="Show only this person (click again for everyone)">
                   <td><b>{s.name}</b>{s.role ? <span className="small-muted">{` · ${s.role}`}</span> : null}</td>
-                  <td>{s.total}</td>
-                  <td>{s.candidates}</td>
-                  <td>{s.clients}</td>
-                  <td>{s.days}</td>
-                  <td>{s.last ? fmtDay(s.last) : <span className="flog-none">None in these days</span>}</td>
+                  <td>{cand ? s.candidates : s.clients}</td>
+                  <td>{cand ? s.candidateDays : s.clientDays}</td>
+                  <td>{(cand ? s.candidateLast : s.clientLast) ? fmtDay(cand ? s.candidateLast : s.clientLast) : <span className="flog-none">None in these days</span>}</td>
                 </tr>
               ))}
             </tbody>
@@ -122,7 +135,7 @@ export default function TeamFollowUpHistory() {
               ))}
             </div>
           ))}
-          {groups.length === 0 && <div className="small-muted">No follow-up in these days.</div>}
+          {groups.length === 0 && <div className="small-muted">{cand ? 'No candidate follow-up in these days.' : 'No client follow-up in these days.'}</div>}
         </div>
       )}
     </div>

@@ -935,6 +935,9 @@ router.get('/joining', requirePerm('ats', 'interviews', 'Joining', 'view'), asyn
   res.json({ rows: withInvoice, filterOptions: filterOptionsFor(rows) });
 });
 
+// The steps a CLIENT placement may be marked Joined from (founder 2026-11-04).
+const CLIENT_JOIN_FROM = ['SELECTED', 'OFFER', 'OFFER_ACCEPTED'];
+
 router.post('/joining/:id/schedule', requirePerm('ats', 'interviews', 'Joining', 'edit'), async (req, res) => {
   const app = await loadScoped(req, res);
   if (!app) return;
@@ -947,10 +950,12 @@ router.post('/joining/:id/schedule', requirePerm('ats', 'interviews', 'Joining',
     if (app.documentsStatus !== 'Verified') {
       return res.status(409).json({ error: 'Documents must be verified before a joining date is set' });
     }
-  } else if (app.stage !== 'OFFER_ACCEPTED') {
+  } else if (!CLIENT_JOIN_FROM.includes(app.stage)) {
     // Client placement: Selected → Offer (the client's, recorded) → Offer
-    // Accepted → Joining (the actual workflow, 2026-09-29).
-    return res.status(409).json({ error: `Client joining follows Offer Accepted — this candidate is at ${stageLabel(app.stage)}. Record the client's offer on Offers first.` });
+    // Accepted → Joining (the actual workflow, 2026-09-29). Founder 2026-11-04: "move step daggara
+    // joined aney button kuda vundali" - a client often sends the offer itself, so Joined may be
+    // marked straight from Selected or Offer too (the joining date, CTC and commission still asked).
+    return res.status(409).json({ error: `A joining is marked once the candidate is Selected — this candidate is at ${stageLabel(app.stage)}.` });
   }
   const joiningDate = req.body.joiningDate;
   if (!joiningDate || Number.isNaN(new Date(joiningDate).getTime())) {
@@ -989,7 +994,7 @@ router.post('/joining/:id/joined', requirePerm('ats', 'interviews', 'Joining', '
   if (app.joiningStatus !== 'Joining Scheduled') {
     return res.status(409).json({ error: 'Schedule the joining date before marking the candidate joined' });
   }
-  const joinFrom = ['OFFER_ACCEPTED'];
+  const joinFrom = isInternalHire(app, app.requirement) ? ['OFFER_ACCEPTED'] : CLIENT_JOIN_FROM;
   if (!joinFrom.includes(app.stage)) {
     return res.status(409).json({ error: `This candidate is at ${stageLabel(app.stage)} — they can't be marked joined from here` });
   }

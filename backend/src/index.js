@@ -422,6 +422,8 @@ app.use('/api/ats', require('./routes/interviewMeet'));
 app.use('/api/ats', require('./routes/interviewPrep'));
 // "Ask the client manager to book" - only the BDE books an interview (routes/interviewRequest.js).
 app.use('/api/ats', require('./routes/interviewRequest'));
+// The selection confirmation mail: written by itself at Selected, sent by the TL (routes/selectionMails.js).
+app.use('/api/ats', require('./routes/selectionMails'));
 // The AI Assistant (answers) and AI Agent (proposes, acts only on Confirm).
 // One model wrapper behind both — utils/ai.js: local Ollama by default, Claude
 // with AI_PROVIDER=claude, whose key stays in the encrypted credential store.

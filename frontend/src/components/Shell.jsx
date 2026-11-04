@@ -16,6 +16,7 @@ import NotificationBell from './NotificationBell.jsx';
 import NudgePopup from './NudgePopup.jsx';
 import TaskPopup from './dashboard/TaskPopup.jsx';
 import JobRequestPopup from './JobRequestPopup.jsx';
+import SelectionMailPopup from './SelectionMailPopup.jsx'; // the TL sends the Selected confirmation mail (2026-11-04)
 import InterviewPopup from './InterviewPopup.jsx'; // every-hour interview reminders on screen (2026-11-04)
 import HealthDot from './dashboard/HealthDot.jsx';
 import TodayTasks from './dashboard/TodayTasks.jsx';
@@ -287,6 +288,8 @@ export default function Shell() {
             {hasAtsWork(user) && <TaskPopup />}
             {/* A client's new job request: the client's BDE and the BDE TL see it on screen at once (2026-10-09). */}
             {hasAtsWork(user) && <JobRequestPopup />}
+            {/* A candidate is Selected: the confirmation mail waits for the TL's Send (2026-11-04). */}
+            {hasAtsWork(user) && <SelectionMailPopup />}
             {/* From the day before an interview, every hour: the recruiter, TL and BDE see it on screen (2026-11-04). */}
             {hasAtsWork(user) && <InterviewPopup />}
             {/* Admin health dot: system problems only (dashboard review #2). */}

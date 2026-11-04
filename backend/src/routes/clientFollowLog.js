@@ -5,6 +5,9 @@
 //   POST /                                  { clientId | requirementId, onDate, note }: a follow-up comment (BDE, TL, recruiter, Admin)
 //   POST /import/preview                    the Excel file as the raw body (X-File-Name): colleges, lines, the client each one is
 //   POST /import/commit                     { token, mapping: { collegeIndex: clientId } }: imports the lines (BDE team, Admin)
+//   GET  /export?candidateId= | clientId= | requirementId= &format=xlsx|csv|pdf   the Follow-ups tab as a file
+//   POST /log-import/preview?candidateId= | clientId= | requirementId=   a sheet of dated lines (raw body, X-File-Name)
+//   POST /log-import/commit                 { token }: adds those lines to that one log
 const express = require('express');
 const { requireAuth, requireProduct } = require('../middleware/auth');
 const FL = require('../utils/clientFollowLog');
@@ -40,6 +43,30 @@ router.post('/import/preview', express.raw({ type: () => true, limit: '20mb' }),
 });
 router.post('/import/commit', async (req, res, next) => {
   try { return send(res, await FL.importCommit(req.user, req.body || {})); } catch (e) { return next(e); }
+});
+
+// The Follow-ups tab: Export / Import of that one log (founder 2026-11-04: "ikkada kuda export import button vundali").
+router.get('/export', async (req, res, next) => {
+  try {
+    const KIT = require('../utils/exportKit'); // eslint-disable-line global-require
+    const format = KIT.formatOf(req.query) || 'xlsx';
+    const out = await FL.exportRows(req.user, req.query || {});
+    if (out.status !== 200) return send(res, out);
+    const b = out.body;
+    return KIT.sendTable(req, res, {
+      format, name: `follow-ups-${String(b.name).replace(/[^\w-]+/g, '-').slice(0, 40)}`, title: `Follow-ups - ${b.name}`, headers: b.headers, rows: b.rows,
+      sheet: 'Follow-ups', entity: b.entity, what: 'Follow-ups', scope: b.name, screen: 'Follow-ups',
+    });
+  } catch (e) { return next(e); }
+});
+router.post('/log-import/preview', express.raw({ type: () => true, limit: '10mb' }), async (req, res, next) => {
+  try {
+    const name = decodeURIComponent(String(req.get('X-File-Name') || 'sheet.xlsx'));
+    return send(res, await FL.simplePreview(req.user, req.query || {}, Buffer.isBuffer(req.body) ? req.body : null, name));
+  } catch (e) { return next(e); }
+});
+router.post('/log-import/commit', async (req, res, next) => {
+  try { return send(res, await FL.simpleCommit(req.user, req.body || {})); } catch (e) { return next(e); }
 });
 
 module.exports = router;

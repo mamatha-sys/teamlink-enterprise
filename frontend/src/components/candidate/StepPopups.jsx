@@ -399,7 +399,7 @@ function JoinedDialog({ app, onClose, onDone }) {
   const feeOk = !terms || !terms.canSetFee || (Number(form.feePercent) > 0 && Number(form.feePercent) <= 50);
   // "Did not join" people are not marked joined from here.
   const dropped = !!(terms && terms.joiningStatus === 'Dropped');
-  const notYet = !!(terms && terms.stage && terms.stage !== 'OFFER_ACCEPTED');
+  const notYet = !!(terms && terms.stage && (terms.mayJoin === undefined ? terms.stage !== 'OFFER_ACCEPTED' : !terms.mayJoin));
   const [ask, setAsk] = useState(null); // the server asked "is this CTC right?"
   async function save(confirmCtc = false) {
     setBusy(true); setError('');
@@ -437,7 +437,7 @@ function JoinedDialog({ app, onClose, onDone }) {
     >
       {!terms && !error && <div className="small-muted">Loading…</div>}
       {dropped && <div className="notice red">{app.name} is marked &quot;Did not join&quot;. If they are joining after all, set a new joining date on the Joining screen first.</div>}
-      {!dropped && notYet && <div className="notice">The offer comes first: press &quot;Prepare offer&quot; on the profile. When the candidate accepts, mark the joining here.</div>}
+      {!dropped && notYet && <div className="notice">{internal ? <>The offer comes first: press &quot;Prepare offer&quot; on the profile. When the candidate accepts, mark the joining here.</> : <>The candidate is marked Joined once they are Selected. Move them to Selected first.</>}</div>}
       {terms && !dropped && (
         <>
           <label className="field">

@@ -19,6 +19,7 @@ import {
   RejectFields, rejectReady, rejectPayload, EMPTY_REJECT, sendWithSameClientCheck,
 } from './rejections/rejectionUi.jsx';
 import StepPopup from './candidate/StepPopups.jsx';
+import { SelectionMailBox } from './SelectionMailPopup.jsx'; // the Selected confirmation mail the TL sends (2026-11-04)
 import DropCandidate, { DROP, dropKind } from './candidate/DropCandidate.jsx'; // "Dropped" in Move step: reason + note
 import AskToBook, { askable, InterviewRequested } from './interviews/AskToBook.jsx'; // only the BDE books: others ask the client manager
 import { ctcAsk, CtcAsk, CtcAskButtons } from './CtcConfirm.jsx';
@@ -540,6 +541,7 @@ export function ReturnDialog({
 // API re-checks every move.
 // ---------------------------------------------------------------------------
 const CLOSED = ['REJECTED', 'JOINED', 'HIRED'];
+const JOIN = '__JOIN'; // "Joined" in Move to: opens the Joined window
 const INTERVIEW_WINDOW = ['bde_review', 'client_submission', 'client_decision', 'interview', 'feedback'];
 
 export function CandidateActions({
@@ -580,7 +582,14 @@ export function CandidateActions({
   const dKind = dropKind(app);
   const joiningEdit = can(user, 'ats', 'interviews', 'Joining', 'edit');
   const mayDrop = !!dKind && (dKind === 'reject' ? mayReject : (dKind === 'offer' ? joiningEdit : (mayReject || joiningEdit)));
-  const moveList = otherStages.length > 0 || mayDrop;
+  // JOINED in "Move to" (founder 2026-11-04: "move step daggara joined aney button kuda vundali"): opens the
+  // Joined window (joining date, final CTC, commission -> Accounts). A client placement from Selected / Offer /
+  // Offer accepted; an internal hire after the offer is accepted. Earlier steps show it greyed with why.
+  const JOIN_FROM = isInternalApp(app) ? ['OFFER_ACCEPTED'] : ['SELECTED', 'OFFER', 'OFFER_ACCEPTED'];
+  const mayJoinMove = !!stage && !CLOSED.includes(stage) && stage !== 'HOLD' && joiningEdit
+    && !(app && app.joiningStatus === 'Dropped') && !next.some((f) => f.to === 'JOINED') && !otherStages.includes('JOINED');
+  const joinNow = mayJoinMove && JOIN_FROM.includes(stage);
+  const moveList = otherStages.length > 0 || mayDrop || mayJoinMove;
   // An interview is scheduled from BDE / Client Review, or for a further round
   // after one completed — not for somebody already at Offer or Joining.
   const step = PIPELINE_STEPS[stepIndexOf(stage)];
@@ -707,9 +716,11 @@ export function CandidateActions({
           <Combo value={moveTo} onChange={(e) => setMoveTo(e.target.value)}>
             <option value="">Move to…</option>
             {otherStages.map((s) => <option key={s} value={s}>{stageLabelFor(s, { internal: isInternalApp(app) })}</option>)}
+            {mayJoinMove && <option value={JOIN} disabled={!joinNow}>{joinNow ? 'Joined' : `Joined (after ${isInternalApp(app) ? 'the offer is accepted' : 'Selected'})`}</option>}
             {mayDrop && <option value={DROP}>Dropped</option>}
           </Combo>
-          {moveTo !== DROP && <button type="button" className="btn btn-sm btn-primary" disabled={!moveTo || busy} onClick={() => move(moveTo)}>Move</button>}
+          {moveTo === JOIN && <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={() => { setMoveTo(''); setMoveOpen(false); setStepPop('joined'); }}>Mark joined…</button>}
+          {moveTo !== DROP && moveTo !== JOIN && <button type="button" className="btn btn-sm btn-primary" disabled={!moveTo || busy} onClick={() => move(moveTo)}>Move</button>}
         </div>
       )}
       {moveOpen && app && moveTo === DROP && (
@@ -720,6 +731,8 @@ export function CandidateActions({
           onDone={async (said) => { setMoveTo(''); setMoveOpen(false); if (onFlash) onFlash(said); if (onChanged) await onChanged(); }}
         />
       )}
+
+      {app && stage === 'SELECTED' && <SelectionMailBox applicationId={app.id} onFlash={onFlash} />}
 
       {noteOpen && (
         <form onSubmit={saveNote} className="cdw-noteform">

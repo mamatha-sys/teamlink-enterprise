@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../../api';
+import ExportMenu from '../ExportMenu.jsx';
+import FollowUpLogImport from './FollowUpLogImport.jsx'; // Export / Import on the tab (founder 2026-11-04)
 import './followUpLog.css';
 
 // THE CLIENT'S FOLLOW-UP LOG (founder 2026-11-03: "comments option recruiters ki, tls ki, bde ki andhariki vundali. vallu ey
@@ -32,7 +34,7 @@ export default function FollowUpLog({ clientId, requirementId, candidateId, appl
       .then((r) => { setData(r.data); setError(''); setOnDate((d) => d || r.data.today); })
       .catch((e) => { setData(null); setError(e.response?.data?.error || 'The follow-ups could not be loaded.'); });
   }
-  useEffect(load, [clientId, requirementId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(load, [clientId, requirementId, candidateId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save() {
     if (note.trim().length < 3) { setError('Write what happened in the follow-up.'); return; }
@@ -70,6 +72,10 @@ export default function FollowUpLog({ clientId, requirementId, candidateId, appl
             {data.entries.length ? `${data.entries.length} follow-up${data.entries.length === 1 ? '' : 's'}; the last one on ${fmtDay(data.lastOn)}.` : 'No follow-up written yet.'}
             {' '}{candidateId ? 'Everyone who works this candidate, and their TL, sees the same list.' : `Everyone who works this client sees the same list${data.requirement ? ' (also on the client page)' : ''}.`}
           </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {data.canAdd && <FollowUpLogImport params={params} onDone={(m) => { setFlash(m); load(); }} />}
+          <ExportMenu url="/client-followlog/export" params={params} />
         </div>
       </div>
 

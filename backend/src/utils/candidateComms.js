@@ -215,6 +215,18 @@ async function recordStageCommunications({
 }) {
   // silent: imports and historical loads never message anybody (no row, no log).
   if (silent) return [];
+  // SELECTED: the confirmation mail is written by itself and waits for the TL's Send (utils/selectionMail.js,
+  // founder 2026-11-04). It takes the place of the automatic "Selected" message, so nothing goes by itself.
+  if (toStage === 'SELECTED' && candidate) {
+    try {
+      // eslint-disable-next-line global-require
+      await require('./selectionMail').onSelected({ application, candidate, requirement, user });
+      return [];
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[selection-mail] could not write the mail, using the old path:', err && err.message);
+    }
+  }
   // AUTOMATIC STAGE MESSAGES (utils/autoMessages.js): once an Admin / HR has saved the rules the
   // scheduling engine owns this move (one scheduled row per move, rules, caps, quiet hours ...).
   // Before that - and on any error - the code below runs exactly as it always did.
