@@ -136,7 +136,10 @@ async function createRequirementRequest(body, { user, via }) {
     return { status: dupGuard.block.status, body: dupGuard.block.body };
   }
   const salary = salaryFrom(b);
-  const notes = [clean(b.notes, 2000), salary.note].filter(Boolean).join(' · ') || null;
+  // Quick fill (2026-11-04): the client's own words stay on the request, so the BDE sees what was asked.
+  const words = clean(b.autoFillText, 1500);
+  const notes = [clean(b.notes, 2000), salary.note, words ? `Client wrote: "${words}"` : null].filter(Boolean).join(' · ') || null;
+  const pick = (v, list) => (list.includes(String(v || '')) ? String(v) : null);
   const jd = clean(b.jobDescription, 8000);
   // The BDE who owns this client (named on it) owns the request too, so it lands
   // in their Jobs list ("Waiting for you"); a client with no BDE named leaves it
@@ -158,6 +161,9 @@ async function createRequirementRequest(body, { user, via }) {
       skills: clean(b.skills, 1000),
       experience: clean(b.experience, 40),
       jobDescription: jd,
+      ...(clean(b.responsibilities, 4000) ? { responsibilities: clean(b.responsibilities, 4000) } : {}),
+      ...(pick(b.workMode, ['Work From Office', 'Work From Home', 'Hybrid']) ? { workMode: b.workMode } : {}),
+      ...(pick(b.employmentType, ['Full Time', 'Part Time', 'Contract', 'Internship', 'Temporary']) ? { employmentType: b.employmentType } : {}),
       salary: salary.band,
       closingDate: clean(b.closingDate, 20),
       description: [jd, notes ? `Request note: ${notes}` : null].filter(Boolean).join('\n\n') || title,

@@ -449,6 +449,21 @@ router.get('/client/reports', requireAuth, wrap(async (req, res) => {
 // NEW REQUIREMENT REQUEST (per-role spec 2026-10-03): the client asks for a
 // new hire from the portal. Saved as a DRAFT TeamLink reviews and opens
 // (utils/requirementRequest.js) — never live by itself.
+// QUICK FILL (founder 2026-11-04): a few words -> the request form filled in (title, skills,
+// experience, place, pay, openings, joining time and a job description). Nothing is saved here:
+// the client checks the form and presses Send (below). utils/requestAutoFill.js.
+router.post('/client/requirement-requests/auto-fill', requireAuth, wrap(async (req, res) => {
+  const u = req.user;
+  if (!isClientLogin(u) || !(await can(u, 'ats', 'requirements', 'Requirement Request', 'create'))) {
+    return res.status(403).json({ error: 'Requesting a new requirement is not part of your access.' });
+  }
+  const client = await prisma.client.findUnique({ where: { id: u.clientId }, select: { name: true, location: true } });
+  const places = ((await require('../utils/jobLocations').list()).locations || []).map((p) => p.name); // eslint-disable-line global-require
+  const out = await require('../utils/requestAutoFill').fill(req.body && req.body.text, { clientName: client && client.name, places }); // eslint-disable-line global-require
+  if (out.error) return res.status(400).json({ error: out.error });
+  return res.json(out);
+}));
+
 router.post('/client/requirement-requests', requireAuth, wrap(async (req, res) => {
   const u = req.user;
   if (!isClientLogin(u) || !u.clientId || !(await can(u, 'ats', 'requirements', 'Requirement Request', 'create'))) {

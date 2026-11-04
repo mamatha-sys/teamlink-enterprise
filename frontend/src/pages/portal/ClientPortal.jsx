@@ -160,7 +160,7 @@ export default function ClientPortal() {
         </div>
         {requesting && (
           <RequestJobModal
-            endpoint="/portal/client/requirement-requests"
+            endpoint="/portal/client/requirement-requests" autoFillEndpoint="/portal/client/requirement-requests/auto-fill"
             onClose={() => setRequesting(false)}
             onSent={(r) => { setRequesting(false); setNotice(r?.message || "Request sent. We'll confirm soon."); }}
           />
@@ -226,7 +226,7 @@ export default function ClientPortal() {
       </div>
       {requesting && (
         <RequestJobModal
-          endpoint="/portal/client/requirement-requests"
+          endpoint="/portal/client/requirement-requests" autoFillEndpoint="/portal/client/requirement-requests/auto-fill"
           onClose={() => setRequesting(false)}
           onSent={(r) => { setRequesting(false); setNotice(r?.message || "Request sent. We'll confirm soon."); setTab('requirements'); load(); }}
         />

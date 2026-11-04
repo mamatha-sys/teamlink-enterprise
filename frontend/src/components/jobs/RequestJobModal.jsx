@@ -24,11 +24,56 @@ import useClientLabel from '../clients/useClientLabel.js'; // one company, many 
 
 // ONLY THE MAIN FIELDS (user, 2026-10-09): what the client knows. TeamLink's BDE
 // fills in the rest (description, qualification, notice period, posting sites...).
-const EMPTY = { title: '', clientId: '', openings: 1, location: '', skills: '', experience: '', salaryMonthlyMin: '', salaryMonthlyMax: '', joinBy: '30', notes: '' };
+const EMPTY = {
+  title: '', clientId: '', openings: 1, location: '', skills: '', experience: '', salaryMonthlyMin: '', salaryMonthlyMax: '', joinBy: '30', notes: '',
+  // Quick fill (2026-11-04): what the few words filled in besides the main fields.
+  jobDescription: '', responsibilities: '', workMode: '', employmentType: '', autoFillText: '',
+};
 const JOIN_BY = [['asap', 'As soon as possible'], ['15', 'Within 15 days'], ['30', 'Within a month'], ['later', 'No hurry']];
 
+// QUICK FILL (founder 2026-11-04): the client writes a few words ("Staff nurse, ICU, BLS, 2-5 years,
+// Hyderabad, 25k-35k, 5 openings, immediate") and the form fills itself, job description included.
+// They check it, change anything and press Send - the request then reaches their BDE as before.
+function QuickFill({ endpoint, onFilled }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null); // { tone, text }
+  async function go() {
+    if (text.trim().length < 3) { setMsg({ tone: 'red', text: 'Write a few words first: the role, key skills, experience, place.' }); return; }
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await api.post(endpoint, { text }, { timeout: 45000 });
+      onFilled(r.data, text.trim());
+      setMsg({ tone: 'green', text: 'Filled in below. Check it, change anything you like, then press Send request.' });
+    } catch (err) {
+      setMsg({ tone: 'red', text: err.response?.data?.error || 'Could not fill the form just now. Please fill it in below, or try again.' });
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="notice" style={{ display: 'block', marginBottom: 12 }}>
+      <b>Quick fill</b>
+      <div className="small-muted" style={{ margin: '2px 0 8px' }}>Write the role and a few key words. We fill in the form and the job description for you.</div>
+      <textarea
+        className="input"
+        rows={2}
+        value={text}
+        maxLength={1500}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="e.g. Staff nurse, ICU, BLS, 2-5 years, Hyderabad, 25k-35k a month, 5 openings, immediate joining"
+      />
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+        <button type="button" className="btn btn-primary btn-sm" onClick={go} disabled={busy}>{busy ? 'Filling…' : 'Fill the form'}</button>
+        {msg && <span style={{ color: msg.tone === 'red' ? 'var(--red, #b42318)' : 'var(--green, #067647)', fontSize: 13 }}>{msg.text}</span>}
+      </div>
+    </div>
+  );
+}
+
 export default function RequestJobModal({
-  endpoint, clients = null, presetClientId = '', presetTitle = '', onClose, onSent,
+  endpoint, clients = null, presetClientId = '', presetTitle = '', autoFillEndpoint = '', onClose, onSent,
 }) {
   const clientLabel = useClientLabel();
   // presetClientId / presetTitle: a link from "+ New job" on a client, or from a team lead's "Ask the client manager to add a job" bell.
@@ -46,6 +91,19 @@ export default function RequestJobModal({
   const [open, setOpen] = useState({ need: true, more: true });
   const places = useJobLocations(); // the shared list of places (staff form)
   const toggle = (id) => setOpen((o) => ({ ...o, [id]: !o[id] }));
+  // Quick fill: a field the words did not give keeps what the client already typed.
+  const filled = (out, words) => setForm((f) => {
+    const g = out.fields || {};
+    const keep = (k) => (g[k] === '' || g[k] === null || g[k] === undefined ? f[k] : g[k]);
+    return {
+      ...f,
+      title: keep('title'), skills: keep('skills'), experience: keep('experience'), location: keep('location'), openings: keep('openings'),
+      salaryMonthlyMin: keep('salaryMonthlyMin'), salaryMonthlyMax: keep('salaryMonthlyMax'), joinBy: keep('joinBy'),
+      workMode: keep('workMode'), employmentType: keep('employmentType'),
+      notes: g.notes && !String(f.notes || '').includes(g.notes) ? [f.notes, g.notes].filter(Boolean).join(' · ') : f.notes,
+      jobDescription: out.jobDescription || f.jobDescription, responsibilities: out.responsibilities || f.responsibilities, autoFillText: words,
+    };
+  });
   async function send(extraIn = {}) {
     // only a plain object of extra fields is ever added to the request: a click handler that passes its event here must not put the event (a DOM
     // node and a circular structure) into the body, which could not be turned into JSON, so nothing was sent and the form said "Could not send".
@@ -194,6 +252,7 @@ export default function RequestJobModal({
         </div>
       ) : (
         <>
+      {autoFillEndpoint && <QuickFill endpoint={autoFillEndpoint} onFilled={filled} />}
       <label className="field">
         <span>Requirement title</span>
         <input className="input" value={form.title} onChange={set('title')} placeholder="e.g. Staff Nurse" />
@@ -256,6 +315,21 @@ export default function RequestJobModal({
         <span>Anything else we should know</span>
         <textarea className="input" rows={3} value={form.notes} onChange={set('notes')} />
       </label>
+      {(form.jobDescription || form.autoFillText) && (
+        <>
+          <label className="field">
+            <span>Work mode</span>
+            <select className="input" value={form.workMode} onChange={set('workMode')}>
+              <option value="">— Not said —</option>
+              {['Work From Office', 'Work From Home', 'Hybrid'].map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </label>
+          <label className="field">
+            <span>Job description (filled in for you: change anything)</span>
+            <textarea className="input" rows={10} value={form.jobDescription} onChange={set('jobDescription')} />
+          </label>
+        </>
+      )}
         </>
       )}
     </Modal>
