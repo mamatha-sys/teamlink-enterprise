@@ -319,6 +319,9 @@ function TemplateEditor({ id, tokens, canEdit, isAdmin, purposes, languages, onS
                 </Combo>
               </div>
             ))}
+            {/* Meta's template can have more blanks than the words here (founder 2026-11-04, #132000): add one per blank */}
+            {editable && tokens && tokens.tokens && tokens.tokens.length > 0 && <button type="button" className="btn btn-sm" style={{ marginRight: 6 }} onClick={() => set('waVars', [...vars, tokens.tokens[0].key])}>+ Add a detail</button>}
+            {editable && vars.length > 0 && <button type="button" className="btn btn-sm" style={{ marginRight: 6 }} onClick={() => set('waVars', vars.slice(0, -1))}>Remove the last</button>}
             {f.waVars && f.waVars.length > 0 && editable && <button type="button" className="btn btn-sm" onClick={() => set('waVars', [])}>Use the order they appear in the words</button>}
           </div>
         </div>

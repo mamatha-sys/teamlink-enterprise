@@ -329,13 +329,33 @@ async function lookupCached(cfg, name) {
 }
 async function lookup(cfg, name) {
   const core = require('../utils/messagingCore'); // eslint-disable-line global-require
-  const res = await core.httpJson(`${cfg.base}/${wa().VERSION}/${encodeURIComponent(cfg.wabaId)}/message_templates?name=${encodeURIComponent(name)}&fields=id,name,status,category,language,rejected_reason,quality_score`, { headers: { authorization: `Bearer ${cfg.token}` } });
+  const res = await core.httpJson(`${cfg.base}/${wa().VERSION}/${encodeURIComponent(cfg.wabaId)}/message_templates?name=${encodeURIComponent(name)}&fields=id,name,status,category,language,rejected_reason,quality_score,components`, { headers: { authorization: `Bearer ${cfg.token}` } });
   if (!res.ok) return { error: `Meta could not be asked: ${S.clip((res.json && res.json.error && res.json.error.message) || res.networkError || res.text || res.status, 200)}` };
   const all = res.json && Array.isArray(res.json.data) ? res.json.data.filter((d) => d.name === name) : [];
   // an approved language version first (one template name can have several languages)
   const hit = all.find((d) => String(d.status).toUpperCase() === 'APPROVED') || all[0] || null;
   return { hit, hits: all };
 }
+// THE BLANKS OF META'S TEMPLATE (founder 2026-11-04: "#132000 Number of parameters does not match the expected number of params").
+// -> { body, header, names } for the approved version in `lang` (or the only approved one): body / header = how many {{n}} blanks;
+// names = the blank names when the template uses NAMED blanks ({{candidate_name}}). null = not known (Meta not reachable).
+async function metaShape(cfg, name, lang) {
+  try {
+    if (!cfg || !cfg.wabaId || !name) return null;
+    const live = await lookupCached(cfg, name);
+    if (live.error || !live.hits) return null;
+    const ok = live.hits.filter((d) => String(d.status).toUpperCase() === 'APPROVED');
+    const v = ok.find((d) => String(d.language) === String(lang || '')) || (ok.length === 1 ? ok[0] : null);
+    if (!v || !Array.isArray(v.components)) return null;
+    const textOf = (type) => String(((v.components.find((c) => String(c.type).toUpperCase() === type) || {}).text) || '');
+    const blanks = (t) => [...new Set([...t.matchAll(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g)].map((m) => m[1]))];
+    const body = blanks(textOf('BODY'));
+    const header = blanks(textOf('HEADER'));
+    const named = body.filter((x) => !/^\d+$/.test(x));
+    return { body: body.length, header: header.length, names: named.length === body.length ? body : [] };
+  } catch { return null; }
+}
+
 // THE LANGUAGE META APPROVED (founder 2026-11-04: "Template name does not exist in the translation" (#132001) - the name was right but
 // TeamLink sent another language code, e.g. en_US for a template Meta has as en). -> the code to send instead, or null to keep `wanted`.
 // Same base language first (en <-> en_US), else the only approved version. Meta not reachable: null (send as before).
@@ -468,4 +488,4 @@ async function finish(user, id, acc) {
 }
 
 const bust = () => { readyAt = 0; };
-module.exports = { bust, ensure, ready, rowsFor, put, accounts, stateFor, chipsOf, accountsView, decorate, byNumber, guard, approvedNumbers, metaLanguage, reasonText, aggregate, mirror, resetFor, backfill, submitAll, checkAll, DDL, FIX_SENTENCE };
+module.exports = { bust, ensure, ready, rowsFor, put, accounts, stateFor, chipsOf, accountsView, decorate, byNumber, guard, approvedNumbers, metaLanguage, metaShape, reasonText, aggregate, mirror, resetFor, backfill, submitAll, checkAll, DDL, FIX_SENTENCE };

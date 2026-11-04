@@ -206,6 +206,21 @@ async function sendWhatsApp(opts = {}) {
   if (content.type === 'template' && content.template && content.template.language && !simulated(cfg)) {
     const lang = await require('../outreach/tplWaba').metaLanguage(cfg, content.template.name, content.template.language.code); // eslint-disable-line global-require
     if (lang) content.template.language.code = lang;
+    // MATCH META'S BLANKS (2026-11-04, #132000): extra values are left out; too few = stopped here with which blanks need a detail,
+    // never sent with empty or "-" blanks; named blanks ({{candidate_name}}) get their names. Unknown shape = sent as before.
+    const shape = await require('../outreach/tplWaba').metaShape(cfg, content.template.name, content.template.language.code); // eslint-disable-line global-require
+    const bodyC = (content.template.components || []).find((c) => c.type === 'body');
+    if (shape && bodyC) {
+      const have = (bodyC.parameters || []).length;
+      if (have < shape.body || shape.header > 0) {
+        SD.release(dupKey);
+        const need = shape.header > 0 ? `a heading blank and ${shape.body} blank(s) in the text` : `${shape.body} blank(s) ({{1}}${shape.body > 1 ? ` to {{${shape.body}}}` : ''})`;
+        return { ok: false, invalid: true, transient: false, code: 'TEMPLATE_PARAMS', error: `Meta's template "${content.template.name}" has ${need}, but TeamLink fills ${have}. Open Administration > Message templates > this template and, under "Which detail goes in each {{1}} {{2}}", pick a detail for every blank (use "+ Add a detail").` };
+      }
+      bodyC.parameters = (bodyC.parameters || []).slice(0, shape.body);
+      if (shape.names.length === bodyC.parameters.length) bodyC.parameters.forEach((p, i) => { p.parameter_name = shape.names[i]; }); // eslint-disable-line no-param-reassign
+      if (!bodyC.parameters.length) content.template.components = content.template.components.filter((c) => c !== bodyC);
+    }
   }
   const TYPE_OF = { candidates: 'CANDIDATE', clients: 'CLIENT', employees: 'EMPLOYEE' };
   const person = (opts.meta && opts.meta.personId && TYPE_OF[opts.meta.audience]) ? { type: TYPE_OF[opts.meta.audience], id: opts.meta.personId, name: opts.meta.personName || null } : null;
