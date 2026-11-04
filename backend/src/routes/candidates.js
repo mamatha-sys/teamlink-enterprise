@@ -3234,6 +3234,15 @@ router.post('/bulk-contact', requirePerm('ats', 'candidates', 'Candidate Master'
 // each follow-up that was set and closed, so the story reads end to end.
 //
 // Internal only, like notes: a follow-up log is TeamLink's own working record.
+// BEST WAY TO REACH (founder 2026-11-04): AI call / phone / WhatsApp / SMS / Email ranked by how
+// this person really responds. Counts only, no number or message text. utils/reachPriority.js.
+router.get('/:id/reach-priority', async (req, res) => {
+  const loaded = await loadInScope(req, res);
+  if (!loaded) return undefined;
+  if (!isInternalViewer(req.user)) return res.status(403).json({ error: 'Not available to this login' });
+  return res.json(await require('../utils/reachPriority').rank(req.params.id)); // eslint-disable-line global-require
+});
+
 router.get('/:id/followup-log', async (req, res) => {
   const loaded = await loadInScope(req, res);
   if (!loaded) return undefined;

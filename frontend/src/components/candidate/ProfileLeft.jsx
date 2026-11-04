@@ -20,6 +20,7 @@ import { ProfileTools } from './ProfileTop.jsx';
 import './ProfileLeft.css';
 // ATS-100 B5/B6: Consent + Where they came from (referred by, campus, campaign).
 import { RecordCards } from './CandidateRecord.jsx';
+import ReachPriorityCard from './ReachPriorityCard.jsx'; // AI call / WhatsApp / SMS ranked by how the person answers (2026-11-04)
 
 const list = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
 
@@ -68,6 +69,8 @@ export default function ProfileLeft({
         {c.sourceKey && c.sourceRaw && c.sourceRaw !== c.sourceKey && <Row k="Recorded as" v={c.sourceRaw} />}
         <Row k="Added" v={protoDate(c.createdAt)} />
       </section>
+
+      {internal && <ReachPriorityCard candidateId={c.id} />}
 
       <section className="pfl-card">
         <div className="pfl-label">Work facts</div>
