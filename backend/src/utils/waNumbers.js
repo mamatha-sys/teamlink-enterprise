@@ -971,10 +971,17 @@ async function noteSendFailure(numberId, f) {
 async function ensureSubscribed(cfg) {
   try {
     const g = await graphGet(cfg, `${encodeURIComponent(cfg.wabaId)}/subscribed_apps`);
-    if (g.ok && g.json && Array.isArray(g.json.data) && g.json.data.length) return 'Webhook: Meta already sends this account\'s messages to TeamLink.';
     if (!g.ok) return `Webhook: could not check the subscription (${wa().failure(g).error.slice(0, 160)}).`;
+    const apps = (g.json && Array.isArray(g.json.data) ? g.json.data : []).map((d) => d.whatsapp_business_api_data || d).map((a) => ({ id: String(a.id || ''), name: a.name || a.id || 'an app' }));
+    // ANOTHER app being subscribed is not enough (founder 2026-11-04: Education sends stayed "sent", no replies): Meta sends the
+    // account's replies and ticks to each subscribed app's own webhook address, so the app of THIS token must be one of them.
+    let mine = '';
+    try { const d = await graphGet(cfg, `debug_token?input_token=${encodeURIComponent(cfg.token)}`); mine = String((d.ok && d.json && d.json.data && d.json.data.app_id) || ''); } catch { mine = ''; }
+    if (apps.length && (!mine || apps.some((a) => a.id === mine))) return 'Webhook: Meta already sends this account\'s messages to TeamLink.';
     const p = await graphPost(cfg, `${encodeURIComponent(cfg.wabaId)}/subscribed_apps`, {});
-    if (p.ok && p.json && p.json.success !== false) return 'Webhook: TeamLink was subscribed to this account\'s messages just now.';
+    if (p.ok && p.json && p.json.success !== false) {
+      return `Webhook: TeamLink was subscribed to this account's messages just now${apps.length ? ` (before, only ${apps.map((a) => a.name).join(', ')} got them)` : ''}.`;
+    }
     return `Webhook: could not subscribe (${wa().failure(p).error.slice(0, 160)}). In Meta, open the app > WhatsApp > Configuration and subscribe to "messages".`;
   } catch (e) { return `Webhook: could not check (${String(e.message).slice(0, 100)}).`; }
 }
@@ -1436,7 +1443,7 @@ module.exports = {
   resolveSender, planNumber, recheck, authorisedRows, mayUse, visibleNumberIds, holdsAccess, departmentsOfUser, rolesOfUser, isAdminLike,
   filterRows, threadNumbers, hiddenPersons, noteMessage, tagThread, numberOfMessage, numbersOfMessages, threadsOfContact, windowOpenOn, openWindowsOn, windowOpenFor, openWindowsFor, windowOpenSystem, anyUsable,
   rowByPhoneId, verifyTokens, appSecretOf, allAppSecrets, noteUnknown, unknownCount,
-  statusFromMeta, check, wabaFix, noteSendOk, afterLegacyTokenChange, tagOf, reconnectAllowed, reconnectLimit: () => RECONNECT_LIMIT, noteSendFailure,
+  statusFromMeta, check, wabaFix, ensureSubscribed, noteSendOk, afterLegacyTokenChange, tagOf, reconnectAllowed, reconnectLimit: () => RECONNECT_LIMIT, noteSendFailure,
   importMain, create, update, setDefault, setActive, remove, setAccess, historyCount,
   adminList, people, departmentCounts, effectivePeople, myNumbers, labelsOf, chipOf, validate, cleanE164,
   ASSIGNABLE_ROLES, WORDS, CHIP, UNKNOWN_PROVIDER, DDL,

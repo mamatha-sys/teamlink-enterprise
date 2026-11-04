@@ -16,6 +16,7 @@
 //   G the right account is found through the token's business (owned accounts), not the token's own list
 //   H only the token of the WhatsApp Business form reaches the right account -> saved, and "choose The shared token"
 //   I the typed account is right but only the shared token can use it -> "choose The shared token", nothing saved
+//   W the webhook: another app subscribed to the account is not enough -> TeamLink's app (the token's) is subscribed
 // ---------------------------------------------------------------------------
 const os = require('os');
 const fs = require('fs');
@@ -48,15 +49,20 @@ const check = (n, ok, d) => { if (ok) pass += 1; else fail += 1; console.log(`${
 // the fake Meta: which account holds which phone ids, which accounts the token reaches
 let accounts = {}; let reach = []; let bizOwned = []; let sharedReach = null; let down = false; const asked = [];
 const OPEN_TO_OWN = ['RIGHT', 'WRONG', 'EMPTY'];
+let subscribed = []; const posted = [];
 core.httpJson = async (url, opts = {}) => {
   asked.push(url);
+  if (/\/subscribed_apps$/.test(new URL(url).pathname)) {
+    if (opts.method === 'POST') { posted.push(url); subscribed.push({ whatsapp_business_api_data: { id: 'APP_TL', name: 'TeamLink' } }); return { ok: true, status: 200, json: { success: true } }; }
+    return { ok: true, status: 200, json: { data: subscribed } };
+  }
   if (down) return { ok: false, status: 0, json: null };
   const shared = /Bearer shared/.test(String((opts.headers || {}).authorization));
   const myReach = shared ? (sharedReach || []) : reach;
   const u = new URL(url);
   const parts = u.pathname.split('/').filter(Boolean);
   if (parts[1] === 'debug_token') {
-    return { ok: true, status: 200, json: { data: { is_valid: true, granular_scopes: [{ scope: 'business_management', target_ids: ['B1'] }, { scope: 'whatsapp_business_messaging', target_ids: myReach }, { scope: 'whatsapp_business_management', target_ids: myReach }] } } };
+    return { ok: true, status: 200, json: { data: { is_valid: true, app_id: 'APP_TL', granular_scopes: [{ scope: 'business_management', target_ids: ['B1'] }, { scope: 'whatsapp_business_messaging', target_ids: myReach }, { scope: 'whatsapp_business_management', target_ids: myReach }] } } };
   }
   if (parts[1] === 'B1' && /whatsapp_business_accounts/.test(parts[2] || '')) {
     return { ok: true, status: 200, json: { data: (shared || parts[2].startsWith('client') ? [] : bizOwned).map((id) => ({ id })) } };
@@ -123,6 +129,17 @@ core.httpJson = async (url, opts = {}) => {
     const i = await WN.wabaFix(await row(), cfg('SHAREDOK'), null);
     check('I the typed account is right but only the shared token opens it: "choose The shared token", nothing saved', i && !i.fixedTo && /cannot open account SHAREDOK/.test(i.text) && /The shared token/.test(i.text) && (await wabaNow()) === 'WRONG', i);
     legacy = { token: '', wabaId: '' }; sharedReach = null;
+
+    const sc = { base: 'https://graph.fake', token: 'tok', phoneId: 'P', wabaId: 'W' };
+    subscribed = [{ whatsapp_business_api_data: { id: 'APP_TL', name: 'TeamLink' } }];
+    const w1 = await WN.ensureSubscribed(sc);
+    check('W1 TeamLink\'s app is subscribed: nothing to do', /already sends/.test(w1) && posted.length === 0, w1);
+    subscribed = [{ whatsapp_business_api_data: { id: 'APP_OTHER', name: 'Some other app' } }];
+    const w2 = await WN.ensureSubscribed(sc);
+    check('W2 only another app is subscribed: TeamLink\'s app is subscribed now, and the other one is named', /subscribed to this account's messages just now \(before, only Some other app got them\)/.test(w2) && posted.length === 1, w2);
+    subscribed = [];
+    const w3 = await WN.ensureSubscribed(sc);
+    check('W3 no app subscribed: subscribed now', /just now\.$/.test(w3) && posted.length === 2, w3);
 
     down = true;
     const e = await WN.wabaFix(await row(), cfg('WRONG'), null);
