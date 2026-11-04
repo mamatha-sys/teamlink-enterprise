@@ -252,9 +252,10 @@ async function channelSpec(channel, input, language, statusMap, cfgs) {
       spec.mode = 'wa-template';
       spec.wa = { name: tpl.waTemplateName, language: tpl.waLanguageCode || undefined };
       if (wa && wa.numberId) {
-        const bad = await require('./whatsappCloud').templateAccountProblem(wa, tpl.waTemplateName); // eslint-disable-line global-require
-        // the numbers whose own account HAS it approved, so the screen can offer "Send from that number" (2026-11-03)
-        if (bad) { spec.block = bad; spec.approvedOn = (await require('../outreach/tplWaba').approvedNumbers(tpl.waTemplateName)).filter((n) => n.id !== wa.numberId); } // eslint-disable-line global-require
+        const chk = await require('./whatsappCloud').templateAccountCheck(wa, tpl.waTemplateName); // eslint-disable-line global-require
+        // the numbers whose own account HAS it approved, so the screen can offer "Send from that number" (2026-11-03), and the
+        // template's id so an Admin can fix it right in the message box (2026-11-04: "ee option ina evvu, nenu rectify chesukunta")
+        if (chk) { spec.block = chk.reason; spec.fixTemplateId = chk.templateId || null; spec.approvedOn = (await require('../outreach/tplWaba').approvedNumbers(tpl.waTemplateName)).filter((n) => n.id !== wa.numberId); } // eslint-disable-line global-require
       }
       spec.vars = T.waVarList(tpl);
       if (spec.edited) spec.error = 'WhatsApp only sends the wording Meta approved, so it cannot be edited here. Change the template instead.';
@@ -401,7 +402,7 @@ async function buildPlan(user, input) {
       let viaWindow = false;
       if (spec.block) {
         if (channel === 'WhatsApp' && windows.has(delivery.digitsOf(raw))) viaWindow = true;
-        else { if (spec.approvedOn && spec.approvedOn.length) r.approvedOn = spec.approvedOn; block(spec.block); return; }
+        else { if (spec.approvedOn && spec.approvedOn.length) r.approvedOn = spec.approvedOn; if (spec.fixTemplateId) r.fixTemplateId = spec.fixTemplateId; block(spec.block); return; }
       } else if (channel === 'WhatsApp' && b.sessionText === true && windows.has(delivery.digitsOf(raw))) {
         viaWindow = true; // the WhatsApp chat screen: plain words inside the 24-hour window go as plain words (not wrapped in the bulk template)
         r.session = true;

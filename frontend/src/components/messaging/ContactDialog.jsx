@@ -483,6 +483,9 @@ export default function ContactDialog({
       {!result && !sendable && first && !(first.missing && first.missing.length && channelReady && first.status === 'skipped') && (
         <div className="msg-box orange">
           {first.notSetUp ? setupLine : (<><b>{first.status === 'blocked' ? 'Cannot send from here.' : 'Cannot send yet.'}</b> {why}</>)}
+          {/* FIX IT HERE (founder 2026-11-04: "ee option ina evvu, nenu rectify chesukunta"): ask Meta now / send the template to every
+              number's WhatsApp account, without going to Manage Templates. The server allows these to an Admin only; the preview runs again. */}
+          {ch === 'WhatsApp' && first.fixTemplateId && <TemplateFixButtons templateId={first.fixTemplateId} onDone={() => setTick((x) => x + 1)} />}
           {/* the template IS approved on another number's account: one click switches "Sending from" to it (founder 2026-11-03) */}
           {ch === 'WhatsApp' && (first.approvedOn || []).filter((n) => !wa.state || !wa.state.usable || wa.state.usable.some((u) => u.id === n.id)).length > 0 && (
             <div style={{ marginTop: 6 }}>
@@ -526,6 +529,34 @@ function ChannelButtons({ ch, setCh, status, email, phone }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// "Check with Meta now" + "Send to every number's WhatsApp account" for the template that stopped this message (routes/omniGsTemplates.js
+// check-all / submit-all, Admin only on the server). Says what Meta answered, then the message box prepares the message again.
+function TemplateFixButtons({ templateId, onDone }) {
+  const [busy, setBusy] = useState('');
+  const [said, setSaid] = useState('');
+  async function run(kind) {
+    setBusy(kind); setSaid('');
+    try {
+      const r = await api.post(`/outreach/gs/templates/outreach/${templateId}/${kind}`, {});
+      const res = (r.data && r.data.results) || [];
+      const words = res.map((x) => `${(x.numbers || []).join(', ') || 'account'}: ${x.word || x.action}${x.error ? ` (${x.error})` : ''}`).join(' · ');
+      setSaid(kind === 'submit-all'
+        ? `Sent to Meta for approval. ${words}. Meta usually answers in a few minutes; press "Check with Meta now" then.`
+        : `Meta says: ${words || 'nothing new'}.`);
+      onDone();
+    } catch (e) {
+      setSaid(e.response?.data?.error || 'Meta could not be asked now. Try again in a minute.');
+    } finally { setBusy(''); }
+  }
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button type="button" className="btn btn-sm" disabled={!!busy} onClick={() => run('check-all')} style={{ marginRight: 6 }}>{busy === 'check-all' ? 'Asking Meta…' : 'Check with Meta now'}</button>
+      <button type="button" className="btn btn-sm btn-primary" disabled={!!busy} onClick={() => run('submit-all')}>{busy === 'submit-all' ? 'Sending to Meta…' : "Send to every number's WhatsApp account"}</button>
+      {said && <div style={{ marginTop: 6, fontSize: 12.5 }}>{said}</div>}
     </div>
   );
 }
