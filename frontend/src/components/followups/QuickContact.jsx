@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import ContactDialog from '../messaging/ContactDialog.jsx';
 import { useContactRule } from '../messaging/useMayMessage.js';
+import { useReachPriority } from '../candidate/ReachPriorityCard.jsx';
 import './followups.css';
 
 // ---------------------------------------------------------------------------
@@ -29,11 +30,18 @@ const BUTTONS = [
   ['SMS', '📱', 'SMS', 'Write a text message from a template and send it (or copy it)'],
 ];
 
+// BEST WAY TO REACH at the top (founder 2026-11-04): the button of the channel this person answers
+// most gets a "Best" mark, and one line says why. The same answer as the card (ReachPriorityCard.jsx).
+const BUTTON_OF = { 'AI call': 'Call', 'Phone call': 'Call', WhatsApp: 'WhatsApp', SMS: 'SMS', Email: 'Email' };
+
 export default function QuickContact({
   candidate, applicationId = null, role = '', client = '', onLogged, compact = false,
 }) {
   const [open, setOpen] = useState(null);
   const rule = useContactRule('candidates'); // the SERVER's answer for this login (Role Catalog: Contact)
+  const { data: reach } = useReachPriority(candidate && candidate.id);
+  const bestRow = reach && reach.best ? reach.channels.find((c) => c.key === reach.best) : null;
+  const bestButton = bestRow ? BUTTON_OF[bestRow.key] : null;
   if (!candidate || !candidate.id) return null;
   // A role that may not contact people: one plain line, no dead buttons.
   if (rule.loaded && !rule.allowed) {
@@ -44,10 +52,21 @@ export default function QuickContact({
     <div className="fux-quick-wrap">
       <div className="fux-quick">
         {BUTTONS.map(([id, icon, label, hint]) => (
-          <button key={id} type="button" className="btn btn-sm" title={hint} onClick={() => setOpen(id)}>
-            <span aria-hidden="true">{icon}</span> {label}
+          <button
+            key={id}
+            type="button"
+            className={`btn btn-sm${bestButton === id ? ' btn-primary' : ''}`}
+            title={bestButton === id ? `Best way to reach: ${bestRow.key} (${bestRow.words}). ${hint}` : hint}
+            onClick={() => setOpen(id)}
+          >
+            <span aria-hidden="true">{icon}</span> {label}{bestButton === id ? ' ★ Best' : ''}
           </button>
         ))}
+        {bestRow && (
+          <span className="fux-quick-note" style={{ color: 'var(--green, #067647)', fontWeight: 600 }}>
+            Best way to reach: {bestRow.key} ({bestRow.words}){bestRow.key === 'AI call' ? ' · start it from AI Calling' : ''}
+          </span>
+        )}
         {!compact && <span className="fux-quick-note">{rule.masked ? 'TeamLink makes the call and sends the message for you: the number stays hidden. Everything is logged by itself.' : 'Each one opens a window with a ready message. Every call, mail, WhatsApp and SMS is logged by itself.'}</span>}
       </div>
       {open && (

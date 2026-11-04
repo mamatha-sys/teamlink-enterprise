@@ -11,16 +11,30 @@ const when = (iso) => {
   return d <= 0 ? 'today' : d === 1 ? 'yesterday' : `${d} days ago`;
 };
 
-export default function ReachPriorityCard({ candidateId }) {
-  const [data, setData] = useState(null);
-  const [failed, setFailed] = useState(false);
+// One answer per candidate for the card and the Contact bar at the top (QuickContact.jsx):
+// asked once, shared for a minute, so the page does not ask twice.
+const cache = new Map(); // candidateId -> { at, promise }
+export function loadReachPriority(candidateId) {
+  const hit = cache.get(candidateId);
+  if (hit && Date.now() - hit.at < 60000) return hit.promise;
+  const promise = api.get(`/candidates/${candidateId}/reach-priority`).then((r) => r.data);
+  promise.catch(() => cache.delete(candidateId));
+  cache.set(candidateId, { at: Date.now(), promise });
+  return promise;
+}
+export function useReachPriority(candidateId) {
+  const [state, setState] = useState({ data: null, failed: false });
   useEffect(() => {
     let live = true;
-    setData(null);
-    setFailed(false);
-    api.get(`/candidates/${candidateId}/reach-priority`).then((r) => { if (live) setData(r.data); }).catch(() => { if (live) setFailed(true); });
+    setState({ data: null, failed: false });
+    if (candidateId) loadReachPriority(candidateId).then((d) => { if (live) setState({ data: d, failed: false }); }).catch(() => { if (live) setState({ data: null, failed: true }); });
     return () => { live = false; };
   }, [candidateId]);
+  return state;
+}
+
+export default function ReachPriorityCard({ candidateId }) {
+  const { data, failed } = useReachPriority(candidateId);
   if (failed) return null;
   return (
     <section className="pfl-card">
