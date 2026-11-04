@@ -125,5 +125,8 @@ function ownerRecruiter(app) {
   return r && r.recruiter && r.recruiter.name ? { id: r.recruiter.id || r.recruiterId || null, name: r.recruiter.name } : null;
 }
 
+// a login's name from the cache (null when not known yet)
+const nameOf = (id) => (id && NAMES.get(id)) || null;
+
 module.exports = {
-  splitModeOf, setSplitMode, defaultOwnerOf, onJob, before, csv, warmNames, warmSeats, seatOf, warmMiddleware, ownerRecruiter };
+  nameOf, splitModeOf, setSplitMode, defaultOwnerOf, onJob, before, csv, warmNames, warmSeats, seatOf, warmMiddleware, ownerRecruiter };

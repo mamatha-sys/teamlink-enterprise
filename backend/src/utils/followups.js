@@ -115,10 +115,17 @@ function bdeOfRequirement(r) {
   const co = r._clientBdeId || (r.client && !r.internal ? require('./nextAction').clientOwnerUserId(r.client) : null); // eslint-disable-line global-require
   return co ? { id: co, name: r.client.bdeOwner || null } : { id: null, name: null };
 }
-function ownerOf(application, requirement) {
+function ownerOf(application, requirement, names = null) {
   const rule = STAGE_OWNER_ACTION[application.stage] || {};
   const r = requirement || {};
-  const recruiter = { id: r.recruiterId || null, name: (r.recruiter && r.recruiter.name) || null, role: 'Recruiter' };
+  // THE RECRUITER OF THIS CANDIDATE, not the job's main recruiter (founder 2026-11-04: "oka profile ni oka recruiter add chesthey,
+  // add chesina valla name kaakunda, verey evaro recruiters names vasthunnai"): the application's owner - who added it, or was
+  // given it (utils/applicationOwner.js) - owns the recruiter's follow-up; the main recruiter only when it has no owner.
+  const own = application && application.ownerRecruiterId;
+  const ownName = own ? ((names && names.get(own)) || require('./applicationOwner').nameOf(own)) : null; // eslint-disable-line global-require
+  const recruiter = own
+    ? { id: own, name: ownName || null, role: 'Recruiter' }
+    : { id: r.recruiterId || null, name: (r.recruiter && r.recruiter.name) || null, role: 'Recruiter' };
   // The BDE of a client job: the job's own BDE, else the client's Owner BDE (user, 2026-10-10: everything
   // about a client reaches its BDE even when the job names none), else the recruiter takes it.
   const bde = { ...bdeOfRequirement(r), role: 'BDE' };
@@ -135,7 +142,7 @@ function ownerOf(application, requirement) {
 
 // The snapshot written onto every new follow-up row.
 function chainSnapshot(application, requirement, names = null) {
-  const owner = ownerOf(application, requirement);
+  const owner = ownerOf(application, requirement, names);
   const r = requirement || {};
   return {
     ownerUserId: owner.id,
@@ -158,6 +165,7 @@ function chainSnapshot(application, requirement, names = null) {
 // has to be looked up rather than included. Resolved in ONE query for a whole
 // list; `names` is a Map(userId -> name).
 async function resolveNames(requirements) {
+  await require('./applicationOwner').warmNames().catch(() => null); // the candidates' own recruiters by name (ownerOf) // eslint-disable-line global-require
   // The BDE of a client job named only on the CLIENT (Owner / second BDE), looked up once per job.
   for (const r of (requirements || [])) {
     if (r && !r.bdeId && !r.internal && (r.clientId || r.client) && !Object.prototype.hasOwnProperty.call(r, '_clientBdeId')) {

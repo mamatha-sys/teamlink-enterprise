@@ -123,13 +123,51 @@ async function run({ applicationIds = null } = {}) {
   }
 }
 
+// THE FOLLOW-UPS THAT NAMED THE JOB'S MAIN RECRUITER (founder 2026-11-04: "oka profile ni oka recruiter add chesthey, add chesina
+// valla name kaakunda, verey evaro recruiters names vasthunnai"). Until today a new follow-up always named the requirement's main
+// recruiter, so a profile another recruiter added showed the main recruiter. Every OPEN recruiter follow-up - and, where an
+// application has none open, its newest one (what the profile and the lists show) - is put on the application's own recruiter
+// when that is an active recruiter. Once (AppSetting "fix.followup-owner.2026-11-04"); fixOwners({ force: true }) runs it again.
+const FIX_KEY = 'fix.followup-owner.2026-11-04';
+async function fixOwners({ force = false } = {}) {
+  if (!force && await prisma.appSetting.findUnique({ where: { key: FIX_KEY } }).catch(() => null)) return { fixed: 0, skipped: 'done before' };
+  const rows = await prisma.applicationFollowUp.findMany({
+    where: { ownerRole: 'Recruiter', application: { ownerRecruiterId: { not: null } } },
+    select: { id: true, applicationId: true, ownerUserId: true, completedAt: true, createdAt: true, application: { select: { ownerRecruiterId: true } } },
+    orderBy: { createdAt: 'desc' },
+  });
+  const openApps = new Set(rows.filter((r) => !r.completedAt).map((r) => r.applicationId));
+  const newestSeen = new Set();
+  const want = [];
+  rows.forEach((r) => {
+    const isNewest = !newestSeen.has(r.applicationId);
+    newestSeen.add(r.applicationId);
+    const shown = !r.completedAt || (isNewest && !openApps.has(r.applicationId));
+    if (shown && r.ownerUserId !== r.application.ownerRecruiterId) want.push(r);
+  });
+  const owners = await activeRecruiters(want.map((r) => r.application.ownerRecruiterId));
+  let fixed = 0;
+  for (const r of want) {
+    const to = r.application.ownerRecruiterId;
+    if (!owners.has(to)) continue; // eslint-disable-line no-continue
+    // eslint-disable-next-line no-await-in-loop
+    await prisma.applicationFollowUp.update({ where: { id: r.id }, data: { ownerUserId: to, ownerName: owners.get(to) } });
+    fixed += 1;
+  }
+  await prisma.appSetting.upsert({ where: { key: FIX_KEY }, create: { key: FIX_KEY, value: JSON.stringify({ fixed, at: new Date().toISOString() }) }, update: { value: JSON.stringify({ fixed, at: new Date().toISOString() }) } }).catch(() => {});
+  return { fixed, checked: rows.length };
+}
+
 let TIMER = null;
 function startSweep() {
   if (require('./sandbox').isSandbox() || TIMER) return; // eslint-disable-line global-require
-  const tick = () => run().then((r) => { if (r.moved) console.log(`[leaver-handover] ${r.moved} candidate(s) handed over`); }).catch((e) => console.error('[leaver-handover]', e.message)); // eslint-disable-line no-console
+  const tick = () => fixOwners().then((f) => { if (f.fixed) console.log(`[followup-owner] ${f.fixed} follow-up(s) now name the candidate's own recruiter`); }).catch((e) => console.error('[followup-owner]', e.message)) // eslint-disable-line no-console
+    .then(() => run()).then((r) => { if (r.moved) console.log(`[leaver-handover] ${r.moved} candidate(s) handed over`); }).catch((e) => console.error('[leaver-handover]', e.message)); // eslint-disable-line no-console
   setTimeout(tick, 60000).unref?.();
   TIMER = setInterval(tick, 60 * 60000);
   if (TIMER.unref) TIMER.unref();
 }
 
-module.exports = { run, startSweep, leaverIds, followersOf };
+module.exports = {
+  run, fixOwners, startSweep, leaverIds, followersOf,
+};
