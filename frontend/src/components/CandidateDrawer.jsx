@@ -17,6 +17,7 @@ import ConversationView from './messaging/ConversationView.jsx'; // omnichannel 
 import CommunicationTimeline from './messaging/CommunicationTimeline.jsx'; // one communication timeline (Omni-Channel)
 import ProfileLeft, { ResumeTabCard } from './candidate/ProfileLeft.jsx';
 import { RecordDocuments } from './candidate/CandidateRecord.jsx'; // ATS-100 B5
+import FollowUpLog from './clients/FollowUpLog.jsx';
 import {
   FitSlot, AlsoGoodFitSlot, RejectionHistorySlot, HistoryTimelineSlot, AddApplicationSlot,
 } from './candidate/ProfileSlots.jsx';
@@ -225,6 +226,7 @@ export default function CandidateDrawer({
             )}
             {/* ATS-100 B5: certifications + documents with a real file (upload / view / download / delete). */}
             {tab === 'documents' && <RecordDocuments c={c} internal={internal} />}
+            {tab === 'followups' && internal && <FollowUpLog key={c.id} candidateId={c.id} applicationId={app ? app.id : undefined} />}
             {/* The Resume card — its own tab, no longer on the left. */}
             {tab === 'resume' && <ResumeTabCard c={c} />}
             </div>

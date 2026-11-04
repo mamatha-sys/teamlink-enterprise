@@ -36,6 +36,7 @@ import ProfileTop from '../components/candidate/ProfileTop.jsx';
 import CandidateConversation from '../components/messaging/CandidateConversation.jsx'; // Conversation tab: this candidate's WhatsApp chat + the all-channels view (ConversationView, CommunicationTimeline)
 import ProfileLeft, { ResumeTabCard } from '../components/candidate/ProfileLeft.jsx';
 import { RecordDocuments } from '../components/candidate/CandidateRecord.jsx'; // ATS-100 B5
+import FollowUpLog from '../components/clients/FollowUpLog.jsx';
 import JoiningDropPanel from '../components/joindrop/JoiningDropPanel.jsx'; // Joining & Drop: the joining card, the drop, the history and the journey
 import {
   FitSlot, AlsoGoodFitSlot, RejectionHistorySlot, HistoryTimelineSlot, AddApplicationSlot,
@@ -1035,6 +1036,8 @@ export default function CandidateDetail() {
               (upload / view / download, audited; delete with a reason). Old
               name-only rows are listed too. --- */}
       {tab === 'documents' && <RecordDocuments c={c} internal={internal} />}
+      {/* the dated follow-up log (2026-11-03): what each recruiter / TL did with this candidate, day by day */}
+      {tab === 'followups' && internal && <FollowUpLog key={c.id} candidateId={c.id} applicationId={primary ? primary.id : undefined} />}
       {/* The Resume card (file, Edit resume, versions, facts) — its own tab, no longer on the left. */}
       {tab === 'resume' && <ResumeTabCard c={c} />}
 

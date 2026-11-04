@@ -1119,6 +1119,8 @@ function forgetWorld(user) { if (user) WORLD.delete(user.id); else WORLD.clear()
 
 module.exports = {
   TEAM_ROLE_LABELS, METRIC_LABELS, isAdminViewer, teamAccess, teamPeopleWhere,
+  // the people of this caller's team (a TL's recruiters, the BDE TL's BDEs ...) - utils/clientFollowLog.js team history
+  peopleFor,
   teamWorkloadRows, assignmentRows, pendingActionRows, formerWorkloadRows,
   teamMemberDetail, memberMetricList, rememberRows, forgetWorld,
   // The ATS dashboard's Team leads section (utils/atsHome.js, 2026-10-05)

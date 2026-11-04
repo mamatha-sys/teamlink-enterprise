@@ -17,6 +17,7 @@ import PendingWork from '../../components/team/PendingWork.jsx';
 import { RemindButton, useCanRemind } from '../../components/team/pendingWorkKit.jsx'; // "Remind" on a task row (leads)
 import DeptTeamsAdmin from '../../components/team/DeptTeamsAdmin.jsx';
 import FollowUps from './FollowUps.jsx';
+import TeamFollowUpHistory from '../../components/team/TeamFollowUpHistory.jsx';
 import useUnreadReplies from '../../components/messaging/useUnreadReplies.js'; // unread replies badge on the Follow-ups tab
 // ATS layout v3 §5 — the performance snapshot's progress bars (shared kit).
 import { ProgressBar } from '../../components/charts';
@@ -1061,7 +1062,8 @@ export default function Team() {
   const rawView = searchParams.get('view') || (legacy && legacy.view) || 'people';
   // §13 (2026-10-03): 'whohas' = Who has pending work (leads), 'org' = Departments & teams (Admin).
   // 'followups' (2026-10-03): the Follow-ups screen is a tab here, not a module.
-  const view = ['people', 'assignments', 'pending', 'list', 'whohas', 'org', 'followups'].includes(rawView) ? rawView : 'people';
+  // 'followlog' (2026-11-03): who followed up with which candidate / client, day by day ("history antha respective tls ki kanipinchali").
+  const view = ['people', 'assignments', 'pending', 'list', 'whohas', 'org', 'followups', 'followlog'].includes(rawView) ? rawView : 'people';
   const leadView = isAdmin || ['TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER'].includes(atsRole);
   useEffect(() => {
     if (rawView === 'seats' && isAdmin) navigate('/admin/positions?tab=history', { replace: true });
@@ -1200,6 +1202,7 @@ export default function Team() {
     ['pending', selfMode ? 'My tasks' : 'Tasks', pendingCount, selfMode ? 'Next steps that are yours' : 'Every next step and who does it'],
     ...(leadView ? [['whohas', 'Pending work', null, 'Who has work waiting, and a Remind button']] : []),
     ['followups', selfMode ? 'My follow-ups' : 'Follow-ups', replyBadge > 0 ? replyBadge : null, 'Who to contact, why, and by when. Replies from Mail, WhatsApp and SMS are in the Inbox'],
+    ['followlog', selfMode ? 'My follow-up history' : 'Follow-up history', null, 'Who followed up with which candidate or client, day by day'],
     ...(isAdmin ? [['org', 'Departments & teams', null, 'Give a TL departments, move a recruiter — with history']] : []),
   ];
   const exportTab = view === 'people' ? 'recruiters' : view === 'assignments' ? 'assignments' : null;
@@ -1316,6 +1319,7 @@ export default function Team() {
       {view === 'assignments' && <AssignmentsTab key={location.search} rows={assignments.rows} error={assignments.error} initial={assignInitial} />}
       {view === 'whohas' && leadView && <PendingWork />}
       {view === 'followups' && <FollowUps embedded />}
+      {view === 'followlog' && <TeamFollowUpHistory />}
       {view === 'org' && isAdmin && <DeptTeamsAdmin />}
       {view === 'pending' && (
         <PendingTab

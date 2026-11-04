@@ -296,4 +296,153 @@ async function importCommit(user, { token, mapping }) {
   };
 }
 
-module.exports = { list, add, importPreview, importCommit, parseSheet, leadingDate, matcher, mayWrite, mayImport, PREFIX };
+// ---- THE CANDIDATE'S FOLLOW-UP LOG (founder 2026-11-03: "recruiters ki ithey, candidate follow up vundali. ilaaga") --------
+// The same dated log on the candidate profile: what the recruiter wrote for the day, plus the calls / mails logged with
+// "Follow up" (quick log) and the follow-up tasks marked done, so the day-by-day history is in one list. Rows of the log
+// itself live in appSetting 'candlog.<candidateId>.<id>'; the other two are read from where they already are.
+const CPREFIX = 'candlog.';
+const istDay = (d) => new Date(new Date(d).getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+async function candidateFor(user, candidateId) {
+  if (!candidateId) return null;
+  return prisma.candidate.findFirst({ where: { AND: [{ id: String(candidateId) }, S.candidateWhere(user)] }, select: { id: true, name: true } });
+}
+async function appLabels(ids) {
+  const list = [...new Set(ids.filter(Boolean))];
+  if (!list.length) return {};
+  const apps = await prisma.application.findMany({ where: { id: { in: list } }, select: { id: true, requirement: { select: { reqCode: true, title: true, client: { select: { name: true } } } } } });
+  return Object.fromEntries(apps.map((a) => [a.id, a.requirement ? [a.requirement.reqCode, a.requirement.title, a.requirement.client && a.requirement.client.name].filter(Boolean).join(' · ') : null]));
+}
+async function namesOf(ids) {
+  const list = [...new Set(ids.filter(Boolean))];
+  if (!list.length) return {};
+  const us = await prisma.user.findMany({ where: { id: { in: list } }, select: { id: true, name: true } });
+  return Object.fromEntries(us.map((u) => [u.id, u.name]));
+}
+// The other two sources, as log lines.
+async function otherCandidateLines(where) {
+  const [quick, done] = await Promise.all([
+    prisma.candidateMessage.findMany({ where: { ...where.msg, template: 'QUICK_LOG' }, select: { id: true, candidateId: true, applicationId: true, channel: true, body: true, templateLabel: true, senderUserId: true, senderName: true, createdAt: true }, orderBy: { createdAt: 'desc' }, take: 2000 }),
+    prisma.applicationFollowUp.findMany({ where: { ...where.fu, completedAt: { not: null, ...(where.fuAt || {}) } }, select: { id: true, candidateId: true, applicationId: true, purpose: true, nextAction: true, completedNote: true, completedAt: true, completedById: true, ownerName: true, ownerRole: true }, orderBy: { completedAt: 'desc' }, take: 2000 }),
+  ]);
+  const names = await namesOf(done.map((f) => f.completedById));
+  return [
+    ...quick.map((m) => ({
+      id: `q${m.id}`, candidateId: m.candidateId, applicationId: m.applicationId, onDate: istDay(m.createdAt), createdAt: new Date(m.createdAt).toISOString(),
+      note: `${m.channel === 'Email' ? 'Mail' : m.channel}: ${m.body || 'logged'}${m.templateLabel && m.templateLabel !== 'Follow-up' ? ` (${m.templateLabel})` : ''}`,
+      byId: m.senderUserId, byName: m.senderName || null, byRole: null, source: 'quick', topic: m.channel === 'Email' ? 'Mail' : m.channel,
+    })),
+    ...done.map((f) => ({
+      id: `f${f.id}`, candidateId: f.candidateId, applicationId: f.applicationId, onDate: istDay(f.completedAt), createdAt: new Date(f.completedAt).toISOString(),
+      note: `${f.purpose || f.nextAction || 'Follow-up'} - done${f.completedNote ? `: ${f.completedNote}` : ''}`,
+      byId: f.completedById, byName: names[f.completedById] || f.ownerName || null, byRole: f.completedById ? null : (f.ownerRole || null), source: 'task', topic: 'Follow-up task',
+    })),
+  ];
+}
+const publicCand = (e, labels) => ({
+  id: e.id, onDate: e.onDate, note: e.note, topic: e.topic || null, byName: e.byName || null, byRole: e.byRole || null, createdAt: e.createdAt,
+  source: e.source || 'manual', applicationId: e.applicationId || null, requirementLabel: e.applicationId ? (labels[e.applicationId] || null) : null,
+});
+
+async function candidateList(user, { candidateId }) {
+  const cand = await candidateFor(user, candidateId);
+  if (!cand) return { status: 404, body: { error: 'This candidate is outside your area.' } };
+  const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: `${CPREFIX}${cand.id}.` } } });
+  const own = rows.map(parse).filter(Boolean);
+  const other = await otherCandidateLines({ msg: { candidateId: cand.id }, fu: { candidateId: cand.id } });
+  const all = [...own, ...other].sort(newestFirst);
+  const labels = await appLabels(all.map((e) => e.applicationId));
+  return {
+    status: 200,
+    body: {
+      candidate: cand, client: { id: null, name: cand.name }, requirement: null,
+      entries: all.map((e) => publicCand(e, labels)),
+      people: [...new Set(all.map((e) => e.byName).filter(Boolean))].sort(),
+      lastOn: all.length ? all[0].onDate : null, canAdd: mayWrite(user), today: istToday(),
+    },
+  };
+}
+
+async function candidateAdd(user, body) {
+  if (!mayWrite(user)) return { status: 403, body: { error: 'Managers can read the follow-ups; the recruiters, TLs and BDEs write them.' } };
+  const cand = await candidateFor(user, body.candidateId);
+  if (!cand) return { status: 404, body: { error: 'This candidate is outside your area.' } };
+  const note = String(body.note || '').trim().slice(0, 2000);
+  if (note.length < 3) return { status: 400, body: { error: 'Write what happened in the follow-up (at least 3 letters).' } };
+  const onDate = String(body.onDate || istToday()).trim();
+  if (!YMD.test(onDate)) return { status: 400, body: { error: 'Pick the date of the follow-up.' } };
+  if (onDate > istToday()) return { status: 400, body: { error: 'The date cannot be in the future.' } };
+  let applicationId = body.applicationId ? String(body.applicationId) : null;
+  if (applicationId) {
+    const app = await prisma.application.findFirst({ where: { AND: [{ id: applicationId, candidateId: cand.id }, S.applicationWhere(user)] }, select: { id: true } });
+    if (!app) applicationId = null;
+  }
+  const role = roleOf(user);
+  const id = crypto.randomBytes(6).toString('hex');
+  const e = { id, candidateId: cand.id, applicationId, onDate, note, byId: user.id, byName: user.name || null, byRole: role.label || null, createdAt: new Date().toISOString(), source: 'manual' };
+  await prisma.appSetting.create({ data: { key: `${CPREFIX}${cand.id}.${id}`, value: JSON.stringify(e), updatedById: user.id, updatedByName: user.name || null } });
+  await logAudit({ userId: user.id, actorName: user.name || null, action: 'Candidate follow-up comment added', entity: 'Candidate', entityId: cand.id, fieldLabel: 'Follow-up', toValue: onDate, reason: note.slice(0, 500) });
+  return { status: 201, body: { ok: true, message: `Saved for ${onDate}.`, entry: publicCand(e, await appLabels([applicationId])) } };
+}
+
+// ---- THE TEAM'S FOLLOW-UP HISTORY (founder 2026-11-03: "ah history antha respective tls ki kanipinchali") --------------
+// Every follow-up written by the people of this login's team, day by day: client and candidate comments, quick logs and
+// follow-up tasks done. A TL sees their recruiters / BDEs (utils/teamWorkload.js peopleFor - the same team as the Team
+// page), the BDE TL the BDE team, Admin / Manager everyone, a recruiter or BDE only their own.
+const TEAM_ROLE = { RECRUITER: 'Recruiter', BDE: 'BDE', TL: 'TL', STL: 'STL', MANAGER: 'Manager', ASSISTANT_MANAGER: 'Asst Manager', ADMIN: 'Admin', SUPER_ADMIN: 'Admin', HR: 'HR' };
+async function teamHistory(user, q) {
+  const role = roleOf(user);
+  if (!['admin', 'mgmt', 'bdetl', 'tl', 'stl', 'recruiter', 'bde'].includes(role.key)) return { status: 403, body: { error: 'Follow-up history is for the ATS team.' } };
+  const today = istToday();
+  const to = YMD.test(String(q.to || '')) ? String(q.to) : today;
+  let from = YMD.test(String(q.from || '')) ? String(q.from) : new Date(Date.parse(`${to}T00:00:00Z`) - 6 * 86400000).toISOString().slice(0, 10);
+  if (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`) > 92 * 86400000) from = new Date(Date.parse(`${to}T00:00:00Z`) - 92 * 86400000).toISOString().slice(0, 10);
+  if (from > to) from = to;
+  let people;
+  if (['recruiter', 'bde'].includes(role.key)) people = [{ id: user.id, name: user.name, atsRole: role.key === 'bde' ? 'BDE' : 'RECRUITER' }];
+  else {
+    people = await require('./teamWorkload').peopleFor(user); // eslint-disable-line global-require
+    if (!people.some((p) => p.id === user.id)) people.push({ id: user.id, name: user.name, atsRole: user.atsRole });
+  }
+  const pick = q.personId ? people.filter((p) => p.id === String(q.personId)) : people;
+  const ids = pick.map((p) => p.id);
+  if (!ids.length) return { status: 200, body: { from, to, people: [], rows: [], summary: [] } };
+  const startUtc = new Date(Date.parse(`${from}T00:00:00Z`) - 5.5 * 3600000);
+  const endUtc = new Date(Date.parse(`${to}T00:00:00Z`) + 86400000 - 5.5 * 3600000);
+  const [ownRows, other] = await Promise.all([
+    prisma.appSetting.findMany({ where: { AND: [{ OR: [{ key: { startsWith: PREFIX } }, { key: { startsWith: CPREFIX } }] }, { updatedById: { in: ids } }] } }),
+    otherCandidateLines({ msg: { senderUserId: { in: ids }, createdAt: { gte: startUtc, lt: endUtc } }, fu: { completedById: { in: ids } }, fuAt: { gte: startUtc, lt: endUtc } }),
+  ]);
+  const own = ownRows.map(parse).filter((e) => e && e.source !== 'sheet' && ids.includes(e.byId));
+  const all = [...own, ...other].filter((e) => e.onDate >= from && e.onDate <= to && ids.includes(e.byId)).sort(newestFirst).slice(0, 3000);
+  const clientIds = [...new Set(all.map((e) => e.clientId).filter(Boolean))];
+  const candIds = [...new Set(all.map((e) => e.candidateId).filter(Boolean))];
+  const [clients, cands, labels] = await Promise.all([
+    clientIds.length ? prisma.client.findMany({ where: { id: { in: clientIds } }, select: { id: true, name: true } }) : [],
+    candIds.length ? prisma.candidate.findMany({ where: { id: { in: candIds } }, select: { id: true, name: true } }) : [],
+    appLabels(all.map((e) => e.applicationId)),
+  ]);
+  const cName = Object.fromEntries(clients.map((c) => [c.id, c.name]));
+  const kName = Object.fromEntries(cands.map((c) => [c.id, c.name]));
+  const pRole = Object.fromEntries(people.map((p) => [p.id, TEAM_ROLE[p.atsRole] || '']));
+  const pName = Object.fromEntries(people.map((p) => [p.id, p.name]));
+  const rows = all.map((e) => ({
+    id: e.id, onDate: e.onDate, createdAt: e.createdAt, byId: e.byId, byName: pName[e.byId] || e.byName || null, byRole: pRole[e.byId] || e.byRole || null,
+    kind: e.candidateId ? 'Candidate' : 'Client', name: e.candidateId ? (kName[e.candidateId] || 'Candidate') : (cName[e.clientId] || 'Client'),
+    link: e.candidateId ? `/candidates/${e.candidateId}?tab=followups` : `/clients/${e.clientId}?tab=followups`,
+    about: e.applicationId ? (labels[e.applicationId] || null) : null, note: e.note, source: e.source || 'manual', topic: e.topic || null,
+  }));
+  const sum = {};
+  rows.forEach((r) => {
+    const s = sum[r.byId] || (sum[r.byId] = { id: r.byId, name: r.byName, role: r.byRole, total: 0, candidates: 0, clients: 0, days: new Set(), last: null });
+    s.total += 1; if (r.kind === 'Candidate') s.candidates += 1; else s.clients += 1; s.days.add(r.onDate); if (!s.last || r.onDate > s.last) s.last = r.onDate;
+  });
+  const summary = people.map((p) => sum[p.id] || { id: p.id, name: p.name, role: pRole[p.id], total: 0, candidates: 0, clients: 0, days: new Set(), last: null })
+    .filter((s) => !q.personId || s.id === String(q.personId))
+    .map((s) => ({ ...s, days: s.days.size })).sort((a, b) => b.total - a.total || String(a.name).localeCompare(String(b.name)));
+  return {
+    status: 200,
+    body: { from, to, today, scope: ['recruiter', 'bde'].includes(role.key) ? 'mine' : 'team', people: people.map((p) => ({ id: p.id, name: p.name, role: pRole[p.id] })).sort((a, b) => String(a.name).localeCompare(String(b.name))), rows, summary },
+  };
+}
+
+module.exports = { candidateList, candidateAdd, teamHistory, list, add, importPreview, importCommit, parseSheet, leadingDate, matcher, mayWrite, mayImport, PREFIX };

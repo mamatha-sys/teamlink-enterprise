@@ -49,6 +49,8 @@ export const C360_TABS = [
   ['applications', 'Overview'], // the whole profile: personal info, work facts, skills, consent and the applications
   ['resume', 'Resume'], // the Resume card (file, Edit resume, versions, facts) — was on the left of the page
   ['notes', 'Notes'],
+  // 2026-11-03: the dated follow-up log ("recruiters ki ithey, candidate follow up vundali") - TeamLink's own, internal logins only
+  ['followups', 'Follow-ups'],
   ['documents', 'Documents'],
   ['history', 'Timeline'],
   ['conversation', 'Conversation'], // omnichannel: Call · Mail · WhatsApp · SMS in one timeline, with a reply box (internal logins only)
@@ -101,7 +103,7 @@ export function C360Tabs({ tab, setTab, c, className = '' }) {
   const n = tabCounts(c);
   const internal = !!(c && c.viewer && c.viewer.internal);
   // Fit and Notes are TeamLink's own; a client / candidate login has none.
-  const tabs = C360_TABS.filter(([key]) => internal || !['fit', 'notes', 'conversation'].includes(key));
+  const tabs = C360_TABS.filter(([key]) => internal || !['fit', 'notes', 'conversation', 'followups'].includes(key));
   return (
     <div className={`tabs c360t-tabs ${className}`} role="tablist">
       {tabs.map(([key, label]) => (
