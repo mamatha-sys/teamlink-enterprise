@@ -63,6 +63,15 @@ const publicEntry = (e, reqNames) => ({
   source: e.source || 'manual', sheet: e.sheet || null,
   requirementId: e.requirementId || null, requirementLabel: e.requirementId ? (reqNames[e.requirementId] || null) : null,
 });
+const dmyShort = (d) => { const [y, m, dd] = String(d).split('-'); return `${Number(dd)} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][Number(m) - 1]} ${y}`; };
+// the call-back day set on each line (utils/followUpReminders.js), for "Call back on ..." on the list
+async function withCallBacks(entries) {
+  try {
+    // only the lines people wrote can carry a call-back (not the logged calls / tasks or the sheet lines)
+    const m = await require('./followUpReminders').daysOfEntries(entries.filter((e) => e.source === 'manual').map((e) => e.id).slice(0, 900)); // eslint-disable-line global-require
+    return entries.map((e) => (m.has(e.id) ? { ...e, callBackOn: m.get(e.id).remindOn, callBackOpen: m.get(e.id).open } : e));
+  } catch { return entries; }
+}
 const newestFirst = (a, b) => String(b.onDate).localeCompare(String(a.onDate)) || String(b.createdAt).localeCompare(String(a.createdAt));
 
 async function list(user, q) {
@@ -78,7 +87,7 @@ async function list(user, q) {
     body: {
       client: found.client,
       requirement: found.requirement ? { id: found.requirement.id, label: [found.requirement.reqCode, found.requirement.title].filter(Boolean).join(' · ') } : null,
-      entries: all.map((e) => publicEntry(e, reqNames)),
+      entries: await withCallBacks(all.map((e) => publicEntry(e, reqNames))),
       people,
       lastOn: all.length ? all[0].onDate : null,
       canAdd: mayWrite(user),
@@ -104,8 +113,10 @@ async function add(user, body) {
     hash: hashOf(found.client.id, onDate, note),
   };
   await prisma.appSetting.create({ data: { key: keyOf(e.clientId, id), value: JSON.stringify(e), updatedById: user.id, updatedByName: user.name || null } });
+  // the day to call back (picked, or in the words: "call on 7th november") -> a pop-up on that day (utils/followUpReminders.js)
+  const cb = await require('./followUpReminders').fromEntry(e, { remindOn: body.remindOn }).catch(() => null); // eslint-disable-line global-require
   await logAudit({ userId: user.id, actorName: user.name || null, action: 'Client follow-up comment added', entity: 'Client', entityId: e.clientId, fieldLabel: 'Follow-up', toValue: onDate, reason: note.slice(0, 500) });
-  return { status: 201, body: { ok: true, message: `Saved for ${onDate}.`, entry: publicEntry(e, {}) } };
+  return { status: 201, body: { ok: true, message: `Saved for ${onDate}.${cb ? ` A reminder pops up on ${dmyShort(cb.remindOn)}.` : ''}`, entry: { ...publicEntry(e, {}), callBackOn: cb ? cb.remindOn : null } } };
 }
 
 // ---- the Excel sheet ------------------------------------------------------------------------------------
@@ -355,7 +366,7 @@ async function candidateList(user, { candidateId }) {
     status: 200,
     body: {
       candidate: cand, client: { id: null, name: cand.name }, requirement: null,
-      entries: all.map((e) => publicCand(e, labels)),
+      entries: await withCallBacks(all.map((e) => publicCand(e, labels))),
       people: [...new Set(all.map((e) => e.byName).filter(Boolean))].sort(),
       lastOn: all.length ? all[0].onDate : null, canAdd: mayWrite(user), today: istToday(),
     },
@@ -380,8 +391,10 @@ async function candidateAdd(user, body) {
   const id = crypto.randomBytes(6).toString('hex');
   const e = { id, candidateId: cand.id, applicationId, onDate, note, byId: user.id, byName: user.name || null, byRole: role.label || null, createdAt: new Date().toISOString(), source: 'manual' };
   await prisma.appSetting.create({ data: { key: `${CPREFIX}${cand.id}.${id}`, value: JSON.stringify(e), updatedById: user.id, updatedByName: user.name || null } });
+  // the day to call back (picked, or in the words) -> a pop-up to the candidate's recruiter(s) and the writer (utils/followUpReminders.js)
+  const cb = await require('./followUpReminders').fromEntry(e, { remindOn: body.remindOn }).catch(() => null); // eslint-disable-line global-require
   await logAudit({ userId: user.id, actorName: user.name || null, action: 'Candidate follow-up comment added', entity: 'Candidate', entityId: cand.id, fieldLabel: 'Follow-up', toValue: onDate, reason: note.slice(0, 500) });
-  return { status: 201, body: { ok: true, message: `Saved for ${onDate}.`, entry: publicCand(e, await appLabels([applicationId])) } };
+  return { status: 201, body: { ok: true, message: `Saved for ${onDate}.${cb ? ` A reminder pops up on ${dmyShort(cb.remindOn)} for the recruiter.` : ''}`, entry: { ...publicCand(e, await appLabels([applicationId])), callBackOn: cb ? cb.remindOn : null } } };
 }
 
 // ---- THE TEAM'S FOLLOW-UP HISTORY (founder 2026-11-03: "ah history antha respective tls ki kanipinchali") --------------

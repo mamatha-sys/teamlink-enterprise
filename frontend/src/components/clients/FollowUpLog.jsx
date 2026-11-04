@@ -21,6 +21,8 @@ export default function FollowUpLog({ clientId, requirementId, candidateId, appl
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [onDate, setOnDate] = useState('');
+  // CALL BACK ON (2026-11-04): picked here, or read from the words ("call on 7th november") - a pop-up on that day
+  const [remindOn, setRemindOn] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState('');
@@ -40,8 +42,8 @@ export default function FollowUpLog({ clientId, requirementId, candidateId, appl
     if (note.trim().length < 3) { setError('Write what happened in the follow-up.'); return; }
     setBusy(true); setError(''); setFlash('');
     try {
-      const r = await api.post('/client-followlog', { ...params, ...(candidateId && applicationId ? { applicationId } : {}), onDate, note: note.trim() });
-      setNote(''); setFlash(r.data?.message || 'Saved.'); load();
+      const r = await api.post('/client-followlog', { ...params, ...(candidateId && applicationId ? { applicationId } : {}), onDate, note: note.trim(), ...(remindOn ? { remindOn } : {}) });
+      setNote(''); setRemindOn(''); setFlash(r.data?.message || 'Saved.'); load();
     } catch (e) { setError(e.response?.data?.error || 'That did not save. Please try again.'); } finally { setBusy(false); }
   }
 
@@ -89,6 +91,10 @@ export default function FollowUpLog({ clientId, requirementId, candidateId, appl
             <span>What happened?</span>
             <textarea rows="2" value={note} maxLength={2000} placeholder={candidateId ? 'Called the candidate: interested, will attend the interview on Monday' : 'Called the HOD: 5 interviews scheduled for tomorrow at 10:30'} onChange={(e) => setNote(e.target.value)} />
           </label>
+          <label className="flog-date" title="A pop-up reminds the recruiter on this day. A date in the words (call on 7th november, tomorrow, monday) is used when this is empty.">
+            <span>Call back on</span>
+            <input type="date" value={remindOn} min={data.today} onChange={(e) => setRemindOn(e.target.value)} />
+          </label>
           <button type="button" className="btn btn-primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Add follow-up'}</button>
         </div>
       )}
@@ -120,6 +126,7 @@ export default function FollowUpLog({ clientId, requirementId, candidateId, appl
                     : <span><b>{e.byName || 'Someone'}</b>{e.byRole ? ` (${e.byRole})` : ''}</span>}
                   {e.source === 'quick' && <span className="flog-tag">{`Logged ${e.topic === 'Call' ? 'call' : (e.topic || '').toLowerCase()}`}</span>}
                   {e.source === 'task' && <span className="flog-tag">Follow-up task</span>}
+                  {e.callBackOn && <span className="flog-tag" title={e.callBackOpen ? 'A pop-up reminds the recruiter on this day' : 'The reminder was answered'}>{`${e.callBackOpen ? '🔔' : '✓'} Call back on ${fmtDay(e.callBackOn)}`}</span>}
                   {e.requirementLabel && <span className="flog-req">{e.requirementLabel}</span>}
                 </div>
               </div>

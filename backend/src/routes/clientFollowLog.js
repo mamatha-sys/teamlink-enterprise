@@ -32,6 +32,16 @@ router.post('/', async (req, res, next) => {
 });
 // The team's follow-ups, day by day (?from=&to=&personId=): a TL's team, the BDE TL's BDEs, a recruiter's own.
 // The follow-up report in bulk (founder 2026-11-04): ?from=&to=&personId=&kind=Candidate|Client&q=&format=xlsx|csv|pdf
+// FOLLOW-UP CALL-BACKS ON SCREEN (utils/followUpReminders.js): mine due today or before; Done / Tomorrow
+router.get('/reminders', async (req, res, next) => {
+  try { return res.json({ rows: await require('../utils/followUpReminders').dueFor(req.user) }); } catch (e) { return next(e); } // eslint-disable-line global-require
+});
+router.post('/reminders/:id/:what(done|tomorrow)', async (req, res, next) => {
+  try {
+    const ok = await require('../utils/followUpReminders').act(req.user, req.params.id, req.params.what); // eslint-disable-line global-require
+    return ok ? res.json({ ok: true }) : res.status(404).json({ error: 'This reminder is not open any more.' });
+  } catch (e) { return next(e); }
+});
 router.get('/team/export', async (req, res, next) => {
   try {
     const KIT = require('../utils/exportKit'); // eslint-disable-line global-require
