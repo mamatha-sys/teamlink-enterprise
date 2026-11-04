@@ -54,7 +54,7 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
 
     // ---- a call (12:00 India time, inside the calling hours)
     svc.setClock(() => new Date('2026-11-04T06:30:00Z'));
-    const deps = { config: LINE(), ami: AMI, prepare: false };
+    const deps = { config: LINE(), ami: AMI, prepare: false, translate: { config: null } };
     const args = { externalId: 'tgt1:1', toNumber: '90300 48228', name: 'Mrudula Rao', script: SCRIPT, scriptLanguage: 'English', scripts: { Telugu: TELUGU }, agentName: 'Vacancy intro' };
     let r = await omni.create(args, deps);
     check('a call to a plain phone number is dialled through the AI phone line', r.ok && originated.length === 1 && /^PJSIP\/9030048228@trunk$/.test(originated[0].Channel) && originated[0].Application === 'AudioSocket', { r, originated });
@@ -121,6 +121,27 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     check('nothing heard after the opening: "hello? can you hear me?", not the whole greeting again', /^Hello\? Can you hear me/.test(c1.say) && !/AI assistant/.test(c1.say), c1);
     check('the question is asked after "hello"; an unheard answer gets a short sorry and the question again', /^Are you looking/.test(c2.say) && /^Sorry, .*Are you looking for a job right now\?$/.test(c3.say), { c2, c3 });
     check('an answer is acknowledged with a short word before the next line, and a "no" with an understanding one', /^(Okay|Alright|Sure|Right)[^.]*\. We have teaching vacancies\. Shall our team call you\?$/.test(c4.say) && /^(Alright, no problem|Okay, understood|Sure, that is fine)\./.test(c5.say) && c5.done === true, { c4, c5 });
+
+    // THE PERSON'S LANGUAGE: the other versions are made by the local model once and kept; a call with them switches to the language that is spoken
+    const SW = 'Opening: Hello {name}, this is the AI assistant of Teamlink.\nAsk: Are you looking for a job right now?\nClosing: Thank you. Goodbye.';
+    const SW_TE = 'Opening: నమస్కారం {name} గారు, నేను టీమ్‌లింక్ AI అసిస్టెంట్.\nAsk: మీరు ఇప్పుడు ఉద్యోగం వెతుకుతున్నారా?\nClosing: ధన్యవాదాలు. నమస్కారం.';
+    check('the language of a script is read from its letters', omni.detectLang(SW) === 'English' && omni.detectLang(SW_TE) === 'Telugu' && omni.detectLang('नमस्ते {name}') === 'Hindi');
+    const before1 = await omni.versionsFor(SW, 'English', {}, { config: null });
+    check('with no translation made yet the call has no other language (and the missing ones are only asked for)', Object.keys(before1).length === 0, before1);
+    // a translation made earlier (here written into the store, as the translator does)
+    const val = JSON.stringify({ text: SW_TE, at: new Date().toISOString(), by: 'test' });
+    await prisma.appSetting.upsert({ where: { key: omni.trKey(SW, 'Telugu') }, create: { key: omni.trKey(SW, 'Telugu'), value: val }, update: { value: val } });
+    const sw = await omni.create({ externalId: 'sw1', toNumber: '9888888881', name: 'Sravanthi', script: SW }, { ...deps, ami: AMI });
+    const swd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(sw.id));
+    swd.start();
+    const s1 = await swd.hear('అవును చెప్పండి', { heard: 'clear', lang: 'Telugu' });
+    check('a person who answers in Telugu gets the rest of the call in Telugu', swd.language === 'Telugu' && /ఉద్యోగం/.test(s1.say), { lang: swd.language, say: s1.say });
+    const sw2 = await omni.create({ externalId: 'sw2', toNumber: '9888888882', name: 'Ravi', script: SW }, { ...deps, ami: AMI });
+    const swd2 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(sw2.id));
+    swd2.start();
+    const s2 = await swd2.hear('నేను హిందీ లో మాట్లాడతా', { heard: 'clear', lang: 'Hindi' });
+    check('a language with no version made (Hindi here) is never switched to: the call stays as it is', swd2.language === 'English', swd2.language);
+    check('a translation that is asked for in the background never stops the call', sw.ok && sw2.ok);
     check('a version in another language is taken as written too', (await refuse({ scripts: { Telugu: 'నమస్కారం' }, toNumber: '9666666665' })).ok === true);
     check('the line not being ready is said in words', await (async () => { const x = await refuse({}, { ...deps, config: LINE({ ready: false, problems: ['The Asterisk manager login is missing.'] }) }); return !x.ok && /not ready/.test(x.reason); })());
     check('in Test mode only the saved test numbers are called', await (async () => { const x = await refuse({ toNumber: '9111111111' }, { ...deps, config: LINE({ mode: 'Test', testNumbers: ['+919030048228'] }) }); return !x.ok && x.code === 'test_number'; })());
@@ -132,7 +153,7 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     svc.setClock(() => new Date('2026-11-04T20:30:00Z')); // 02:00 India time
     check('outside the calling hours nothing is dialled', await (async () => { const x = await refuse({}); return !x.ok && x.code === 'outside_hours'; })());
     svc.setClock(() => new Date('2026-11-04T06:30:00Z'));
-    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 7, { before, now: originated.length });
+    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 9, { before, now: originated.length });
     check('Asterisk refusing the call fails it in words (and leaves a failed row)', await (async () => { const x = await refuse({ toNumber: '9333333333' }, { ...deps, ami: { action: async () => ({ Response: 'Error', Message: 'no trunk' }) } }); return !x.ok && x.code === 'not_dialled'; })());
   } finally {
     await prisma.$disconnect().catch(() => {});

@@ -20,6 +20,12 @@ router.get('/line', (req, res) => {
   res.json({ ok: true, ready: r.ready, mode: r.mode, problems: r.problems });
 });
 
+// the other-language versions of a script are made now, so the first call can already switch language
+router.post('/prepare', async (req, res) => {
+  const r = await omni.prepare(String((req.body || {}).script || ''));
+  return res.status(r.ok ? 200 : 422).json(r);
+});
+
 router.post('/calls', async (req, res) => {
   const b = req.body || {};
   const r = await omni.create({ externalId: b.externalId, toNumber: b.toNumber, name: b.name, script: b.script, scriptLanguage: b.scriptLanguage, scripts: b.scripts, agentName: b.agentName });

@@ -27,7 +27,7 @@ async function pickModel(c) {
 
 // text (a valid script) -> { ok, text } | { ok:false, error }
 async function translateScript(text, to, deps = {}) {
-  const parsed = SD.parseScript(text);
+  const parsed = SD.parseScript(text, deps.limits);
   if (!parsed.ok) return { ok: false, error: parsed.error };
   if (!LANGS[to]) return { ok: false, error: 'Pick English, Telugu or Hindi.' };
   const c = Object.prototype.hasOwnProperty.call(deps, 'config') ? deps.config : ollama();
@@ -62,7 +62,7 @@ async function translateScript(text, to, deps = {}) {
   }
   const label = { opening: 'Opening', say: 'Say', ask: 'Ask', interest: 'Interest', closing: 'Closing' };
   const draft = parsed.steps.map((s, i) => `${label[s.kind]}: ${String(lines[i]).replace(/\s+/g, ' ').trim()}`).join('\n');
-  const check = SD.parseScript(draft);
+  const check = SD.parseScript(draft, deps.limits);
   if (!check.ok) return { ok: false, error: `The draft cannot be used: ${check.error}` };
   return { ok: true, text: draft };
 }
