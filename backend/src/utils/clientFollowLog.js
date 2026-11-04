@@ -319,10 +319,10 @@ async function namesOf(ids) {
   return Object.fromEntries(us.map((u) => [u.id, u.name]));
 }
 // The other two sources, as log lines.
-async function otherCandidateLines(where) {
+async function otherCandidateLines(where, take = 2000) {
   const [quick, done] = await Promise.all([
-    prisma.candidateMessage.findMany({ where: { ...where.msg, template: 'QUICK_LOG' }, select: { id: true, candidateId: true, applicationId: true, channel: true, body: true, templateLabel: true, senderUserId: true, senderName: true, createdAt: true }, orderBy: { createdAt: 'desc' }, take: 2000 }),
-    prisma.applicationFollowUp.findMany({ where: { ...where.fu, completedAt: { not: null, ...(where.fuAt || {}) } }, select: { id: true, candidateId: true, applicationId: true, purpose: true, nextAction: true, completedNote: true, completedAt: true, completedById: true, ownerName: true, ownerRole: true }, orderBy: { completedAt: 'desc' }, take: 2000 }),
+    prisma.candidateMessage.findMany({ where: { ...where.msg, template: 'QUICK_LOG' }, select: { id: true, candidateId: true, applicationId: true, channel: true, body: true, templateLabel: true, senderUserId: true, senderName: true, createdAt: true }, orderBy: { createdAt: 'desc' }, take }),
+    prisma.applicationFollowUp.findMany({ where: { ...where.fu, completedAt: { not: null, ...(where.fuAt || {}) } }, select: { id: true, candidateId: true, applicationId: true, purpose: true, nextAction: true, completedNote: true, completedAt: true, completedById: true, ownerName: true, ownerRole: true }, orderBy: { completedAt: 'desc' }, take }),
   ]);
   const names = await namesOf(done.map((f) => f.completedById));
   return [
@@ -389,13 +389,14 @@ async function candidateAdd(user, body) {
 // follow-up tasks done. A TL sees their recruiters / BDEs (utils/teamWorkload.js peopleFor - the same team as the Team
 // page), the BDE TL the BDE team, Admin / Manager everyone, a recruiter or BDE only their own.
 const TEAM_ROLE = { RECRUITER: 'Recruiter', BDE: 'BDE', TL: 'TL', STL: 'STL', MANAGER: 'Manager', ASSISTANT_MANAGER: 'Asst Manager', ADMIN: 'Admin', SUPER_ADMIN: 'Admin', HR: 'HR' };
-async function teamHistory(user, q) {
+// opts (the bulk export): { maxDays, maxRows } - a longer range and every row, not the screen's 92 days / 3,000 rows.
+async function teamHistory(user, q, { maxDays = 92, maxRows = 3000 } = {}) {
   const role = roleOf(user);
   if (!['admin', 'mgmt', 'bdetl', 'tl', 'stl', 'recruiter', 'bde'].includes(role.key)) return { status: 403, body: { error: 'Follow-up history is for the ATS team.' } };
   const today = istToday();
   const to = YMD.test(String(q.to || '')) ? String(q.to) : today;
   let from = YMD.test(String(q.from || '')) ? String(q.from) : new Date(Date.parse(`${to}T00:00:00Z`) - 6 * 86400000).toISOString().slice(0, 10);
-  if (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`) > 92 * 86400000) from = new Date(Date.parse(`${to}T00:00:00Z`) - 92 * 86400000).toISOString().slice(0, 10);
+  if (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`) > maxDays * 86400000) from = new Date(Date.parse(`${to}T00:00:00Z`) - maxDays * 86400000).toISOString().slice(0, 10);
   if (from > to) from = to;
   let people;
   if (['recruiter', 'bde'].includes(role.key)) people = [{ id: user.id, name: user.name, atsRole: role.key === 'bde' ? 'BDE' : 'RECRUITER', atsDepartment: user.atsDepartment }];
@@ -410,10 +411,10 @@ async function teamHistory(user, q) {
   const endUtc = new Date(Date.parse(`${to}T00:00:00Z`) + 86400000 - 5.5 * 3600000);
   const [ownRows, other] = await Promise.all([
     prisma.appSetting.findMany({ where: { AND: [{ OR: [{ key: { startsWith: PREFIX } }, { key: { startsWith: CPREFIX } }] }, { updatedById: { in: ids } }] } }),
-    otherCandidateLines({ msg: { senderUserId: { in: ids }, createdAt: { gte: startUtc, lt: endUtc } }, fu: { completedById: { in: ids } }, fuAt: { gte: startUtc, lt: endUtc } }),
+    otherCandidateLines({ msg: { senderUserId: { in: ids }, createdAt: { gte: startUtc, lt: endUtc } }, fu: { completedById: { in: ids } }, fuAt: { gte: startUtc, lt: endUtc } }, Math.max(2000, maxRows)),
   ]);
   const own = ownRows.map(parse).filter((e) => e && e.source !== 'sheet' && ids.includes(e.byId));
-  const all = [...own, ...other].filter((e) => e.onDate >= from && e.onDate <= to && ids.includes(e.byId)).sort(newestFirst).slice(0, 3000);
+  const all = [...own, ...other].filter((e) => e.onDate >= from && e.onDate <= to && ids.includes(e.byId)).sort(newestFirst).slice(0, maxRows);
   const clientIds = [...new Set(all.map((e) => e.clientId).filter(Boolean))];
   const candIds = [...new Set(all.map((e) => e.candidateId).filter(Boolean))];
   const [clients, cands, labels] = await Promise.all([
@@ -571,5 +572,27 @@ async function simpleCommit(user, { token }) {
   return { status: 200, body: { ok: true, added: data.length, message: `${data.length} follow-up line${data.length === 1 ? '' : 's'} imported.` } };
 }
 
+// THE FOLLOW-UP REPORT IN BULK (founder 2026-11-04: "followup report ni bulk lo export cheyyali"): every row of the team
+// follow-up history for the chosen days (up to a year), person and side (kind = Candidate | Client, or both), as a file.
+const HOW = { manual: 'Comment', quick: 'Logged contact', task: 'Follow-up task', sheet: 'From a sheet' };
+async function teamExportRows(user, q) {
+  const out = await teamHistory(user, q, { maxDays: 366, maxRows: 50000 });
+  if (out.status !== 200) return out;
+  const b = out.body;
+  const kind = ['Candidate', 'Client'].includes(q.kind) ? q.kind : null;
+  const needle = String(q.q || '').trim().toLowerCase();
+  const rows = b.rows
+    .filter((r) => (!kind || r.kind === kind) && (!needle || `${r.name} ${r.note} ${r.about || ''} ${r.byName || ''}`.toLowerCase().includes(needle)))
+    .map((r) => [dmy(r.onDate), r.byName || '', r.byRole || '', r.kind === 'Candidate' ? 'Recruiter follow-up (candidate)' : 'BDE follow-up (client)', r.name, r.note, r.about || '', HOW[r.source] || 'Comment']);
+  return {
+    status: 200,
+    body: {
+      from: b.from, to: b.to, kind, rows,
+      headers: ['Date', 'Person', 'Role', 'Follow-up of', 'Candidate / client', 'What happened', 'Job', 'How'],
+      scope: b.scope === 'mine' ? 'own follow-ups' : 'team',
+    },
+  };
+}
+
 module.exports = {
-  exportRows, simplePreview, simpleCommit, parseSimpleSheet, candidateList, candidateAdd, teamHistory, list, add, importPreview, importCommit, parseSheet, leadingDate, matcher, mayWrite, mayImport, PREFIX };
+  teamExportRows, exportRows, simplePreview, simpleCommit, parseSimpleSheet, candidateList, candidateAdd, teamHistory, list, add, importPreview, importCommit, parseSheet, leadingDate, matcher, mayWrite, mayImport, PREFIX };

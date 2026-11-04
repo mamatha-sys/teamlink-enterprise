@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../api';
+import ExportMenu from '../ExportMenu.jsx';
 import '../clients/followUpLog.css';
 
 // THE TEAM'S FOLLOW-UP HISTORY (founder 2026-11-03: "ah history antha respective tls ki kanipinchali"). Reports & Team -> Team
@@ -65,6 +66,15 @@ export default function TeamFollowUpHistory() {
           {mine ? 'Every follow-up you wrote or logged, day by day.' : 'Who followed up with which candidate or client, day by day: comments, logged calls and mails, and follow-up tasks done.'}
         </div>
       </div>
+
+      {/* THE REPORT IN BULK (founder 2026-11-04: "followup report ni bulk lo export cheyyali"): the days, person and search
+          chosen above; this tab only, or both tabs in one file (GET /client-followlog/team/export, up to a year). */}
+      {data && (
+        <div className="flog-filters" style={{ justifyContent: 'flex-end' }}>
+          <ExportMenu url="/client-followlog/team/export" label={`Export ${kind === 'Client' ? 'BDE' : 'recruiter'} follow-ups`} params={{ from: range.from, to: range.to, personId, kind, q }} />
+          <ExportMenu url="/client-followlog/team/export" label="Export all follow-ups" params={{ from: range.from, to: range.to, personId, q }} />
+        </div>
+      )}
 
       <div className="flog-filters" role="tablist" aria-label="Whose follow-ups">
         {SIDES.map((t) => (

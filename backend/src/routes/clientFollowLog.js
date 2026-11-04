@@ -31,6 +31,21 @@ router.post('/', async (req, res, next) => {
   } catch (e) { return next(e); }
 });
 // The team's follow-ups, day by day (?from=&to=&personId=): a TL's team, the BDE TL's BDEs, a recruiter's own.
+// The follow-up report in bulk (founder 2026-11-04): ?from=&to=&personId=&kind=Candidate|Client&q=&format=xlsx|csv|pdf
+router.get('/team/export', async (req, res, next) => {
+  try {
+    const KIT = require('../utils/exportKit'); // eslint-disable-line global-require
+    const format = KIT.formatOf(req.query) || 'xlsx';
+    const out = await FL.teamExportRows(req.user, req.query || {});
+    if (out.status !== 200) return send(res, out);
+    const b = out.body;
+    const what = b.kind === 'Candidate' ? 'recruiter' : b.kind === 'Client' ? 'bde' : 'all';
+    return KIT.sendTable(req, res, {
+      format, name: `follow-ups-${what}-${b.from}-to-${b.to}`, title: `Follow-up report ${b.from} to ${b.to}`, headers: b.headers, rows: b.rows,
+      sheet: 'Follow-ups', entity: 'FollowUp', what: 'Follow-up report', scope: b.scope, period: { from: b.from, to: b.to }, screen: 'Team',
+    });
+  } catch (e) { return next(e); }
+});
 router.get('/team', async (req, res, next) => {
   try { return send(res, await FL.teamHistory(req.user, req.query || {})); } catch (e) { return next(e); }
 });
