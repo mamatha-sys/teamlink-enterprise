@@ -131,6 +131,12 @@ const make = (script = SCRIPT) => new ScriptDialogue({ purpose: 'Screening', lan
   check('"please speak Telugu" switches and asks the same question again in Telugu', d.language === 'Telugu' && /ఉద్యోగం|నమస్కారం|గారేనా/.test(r.say), { lang: d.language, say: r.say });
 
   d = multi(); d.start();
+  r = await d.hear('avunandi cheppandi', { heard: 'clear', lang: 'Telugu' });
+  check('the phone gateway heard Telugu by sound: the call goes on in Telugu even when the words are spelled in English letters', d.language === 'Telugu' && /ఉద్యోగం/.test(r.say), { lang: d.language, say: r.say });
+  d = multi(); d.start();
+  r = await d.hear('yes ok', { heard: 'clear', lang: 'Hindi' });
+  check('a language the script has no version of is never switched to, whatever the gateway says', d.language === 'English', d.language);
+  d = multi(); d.start();
   r = await d.hear('yes speaking');
   check('a candidate who answers in English stays in English', d.language === 'English' && /Staff Nurse/.test(r.say), r.say);
   r = await d.hear('ok');

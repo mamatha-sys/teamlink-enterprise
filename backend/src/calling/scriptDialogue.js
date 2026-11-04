@@ -143,7 +143,10 @@ class ScriptDialogue extends D.Dialogue {
     sc.silent = 0;
     // the person's language: from this sentence on, the script goes on in it (not announced). A language the script has no version of is not switched to.
     if (this.autoLanguage) {
-      const lg = D.detectLanguage(text);
+      const byWords = D.detectLanguage(text);
+      // the phone gateway also judges the language by SOUND (and checks real Telugu / Hindi words); when it moved the call, that outranks the spelling of the words
+      const bySound = meta.lang && meta.lang !== this.language && S.LANGS.includes(meta.lang) ? { lang: meta.lang, only: !!(byWords && byWords.only) } : null;
+      const lg = bySound || byWords;
       const shortEnglish = lg && lg.lang === 'English' && this.language !== 'English' && !lg.only && text.trim().split(/\s+/).length < 4;
       if (lg && lg.lang !== this.language && !shortEnglish && this.byLang[lg.lang]) {
         this.setLanguage(lg.lang);
