@@ -18,8 +18,8 @@ const S = require('./scripts');
 const { parseScript, ScriptDialogue } = require('./scriptDialogue');
 
 const AUD = 'teamlink-voice';
-// Green Start steps may be 600 characters and a script has up to 30 steps, so the ATS limits (300 characters, 14 lines) are wider here
-const LIMITS = { maxLine: 700, maxLines: 40, noQuestionOk: true };
+// The ATS agent rules (300 characters, 14 lines, one question, a closing, forbidden words) do not apply to a script from Omni-Channel
+const LIMITS = { maxLine: 5000, maxLines: 300, noQuestionOk: true, lenient: true }; // the team's own script, as written (founder 2026-11-04: accept any script, no layout rules)
 const seen = new Map(); // jti -> expiry (a signed request is accepted once)
 
 const secret = () => String(process.env.GREENSTART_SSO_SECRET || '');

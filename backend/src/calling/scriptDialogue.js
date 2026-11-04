@@ -43,8 +43,14 @@ function parseScript(raw, lim = {}) {
     const text = (m ? m[2] : lines[i]).trim();
     if (!text) return { ok: false, steps: [], error: `Line ${i + 1} has a label but no words.` };
     if (text.length > maxLine) return { ok: false, steps: [], error: `Line ${i + 1} is too long (at most ${maxLine} characters).` };
-    if (S.hasForbidden(text.replace(/\{[a-z]+\}/gi, ''))) return { ok: false, steps: [], error: `Line ${i + 1} uses words the assistant must never say (selected, hired, offered, congratulations, a promise of a job).` };
+    if (!lim.lenient && S.hasForbidden(text.replace(/\{[a-z]+\}/gi, ''))) return { ok: false, steps: [], error: `Line ${i + 1} uses words the assistant must never say (selected, hired, offered, congratulations, a promise of a job).` };
     steps.push({ kind, text });
+  }
+  if (lim.lenient) { // the team's own script, as written: the first line opens the call, a closing is not needed, and a label in the wrong place is only a plain line
+    steps[0].kind = 'opening';
+    const lastClosing = steps.map((s) => s.kind).lastIndexOf('closing');
+    steps.forEach((s, i) => { if (i > 0 && s.kind === 'opening') s.kind = 'say'; if (s.kind === 'closing' && i !== lastClosing) s.kind = 'say'; });
+    return { ok: true, steps, error: null };
   }
   if (steps[0].kind !== 'opening') return { ok: false, steps: [], error: 'The first line must be the opening ("Opening: Hello {name}, ...").' };
   if (steps.slice(1).some((s) => s.kind === 'opening')) return { ok: false, steps: [], error: 'There can be only one Opening line, and it is the first.' };
@@ -54,6 +60,23 @@ function parseScript(raw, lim = {}) {
   if (!lim.noQuestionOk && !steps.some((s) => s.kind === 'ask' || s.kind === 'interest')) return { ok: false, steps: [], error: 'Add at least one question (a line starting with "Ask:" or "Interest:").' };
   return { ok: true, steps, error: null };
 }
+
+// HOW A PERSON SOUNDS (founder 2026-11-04: "human laga matladali, ai laga kakunda"): a short "okay" before the next line, a short "sorry, once more" (not the whole greeting again),
+// and a "hello? can you hear me?" when the first answer is not heard. The words of the script itself are never changed.
+const HUMAN = {
+  English: {
+    ack: ['Okay.', 'Alright.', 'Sure.', 'Okay, thanks.', 'Right.'], no: ['Alright, no problem.', 'Okay, understood.', 'Sure, that is fine.'],
+    sorry: ['Sorry, could you say that once more?', 'Sorry, I missed that. Could you repeat?', 'Sorry, the line is not clear. One more time please?'], hear: 'Hello? Can you hear me okay?',
+  },
+  Telugu: {
+    ack: ['సరే.', 'సరే అండి.', 'బాగుంది.', 'ఓకే అండి.'], no: ['సరే, పర్వాలేదు అండి.', 'సరే అండి, అర్థమైంది.'],
+    sorry: ['క్షమించండి, ఇంకోసారి చెప్తారా?', 'సారీ అండి, సరిగ్గా వినపడలేదు. మళ్ళీ చెప్తారా?', 'క్షమించండి, లైన్ సరిగా లేదు. ఇంకోసారి చెప్పండి.'], hear: 'హలో? నేను చెప్పేది వినపడుతోందా?',
+  },
+  Hindi: {
+    ack: ['ठीक है।', 'जी, ठीक है।', 'अच्छा।', 'जी।'], no: ['ठीक है, कोई बात नहीं।', 'जी, समझ गया।'],
+    sorry: ['माफ़ कीजिए, एक बार फिर से बोलेंगे?', 'सॉरी, ठीक से सुनाई नहीं दिया। दोबारा बोलिए।', 'माफ़ कीजिए, आवाज़ साफ़ नहीं आ रही। एक बार और बोलिए।'], hear: 'हैलो? आपको मेरी आवाज़ आ रही है?',
+  },
+};
 
 const fillWith = (text, data) => String(text).replace(/\{(name|job|company|location|salary)\}/gi, (_, k) => {
   const key = k.toLowerCase();
@@ -147,7 +170,10 @@ class ScriptDialogue extends D.Dialogue {
       turn.understood = 'not_clear';
       sc.silent += 1;
       if (sc.silent > 2) return this.endWith('Unclear', 'could not hear the person clearly', this.P.audioClose);
-      return { say: this.speak(this.P.notClear, this.again()), done: false };
+      const h = HUMAN[this.language] || HUMAN.English;
+      const kind = this.steps[sc.idx].kind;
+      if (kind === 'opening') return { say: this.speak(h.hear), done: false };
+      return { say: this.speak(h.sorry[(sc.silent - 1) % h.sorry.length], kind === 'ask' || kind === 'interest' ? this.line(sc.idx) : this.again()), done: false };
     }
     sc.silent = 0;
     // the person's language: from this sentence on, the script goes on in it (not announced). A language the script has no version of is not switched to.
@@ -189,7 +215,7 @@ class ScriptDialogue extends D.Dialogue {
         return { say: this.speak(this.again()), done: false }; // the question again; the person's own question is for the team
       }
       if (cur.kind === 'interest') {
-        if (k.intent === 'no') { st.interest = 'no'; st.declineReason = S.clean(text, 120); sc.got.push({ q: this.line(sc.idx), a: S.clean(text, 160) }); return this.endWith('Not Interested', 'not interested'); }
+        if (k.intent === 'no') { st.interest = 'no'; st.declineReason = S.clean(text, 120); sc.got.push({ q: this.line(sc.idx), a: S.clean(text, 160) }); return this.endWith('Not Interested', 'not interested', this.ackText(k, cur) + (this.steps[this.steps.length - 1].kind === 'closing' ? ` ${this.line(this.steps.length - 1)}` : '')); }
         if (k.intent === 'yes') st.interest = 'yes';
         else if (k.intent === 'maybe') st.interest = 'unsure';
         else { // not a plain yes / no: asked once more, then taken as unsure
@@ -204,11 +230,19 @@ class ScriptDialogue extends D.Dialogue {
     const nxt = this.upTo(sc.idx + 1);
     if (nxt.closing !== undefined || nxt.stopAt >= this.steps.length) {
       const outcome = st.interest === 'no' ? 'Not Interested' : (st.interest === 'yes' ? 'Interested' : 'Unclear');
-      return this.endWith(outcome, 'script finished', S.clean([...nxt.parts, nxt.closing].filter(Boolean).join(' '), 600) || undefined);
+      return this.endWith(outcome, 'script finished', S.clean([this.ackText(k, cur), ...nxt.parts, nxt.closing].filter(Boolean).join(' '), 3000) || undefined);
     }
     sc.idx = nxt.stopAt;
     sc.silent = 0;
-    return { say: this.speak(...nxt.parts), done: false };
+    return { say: this.speak(this.ackText(k, cur), ...nxt.parts), done: false };
+  }
+
+  // the short word a person says before going on (nothing after the opening: they only said hello)
+  ackText(k, cur) {
+    if (!cur || cur.kind === 'opening') return '';
+    const h = HUMAN[this.language] || HUMAN.English;
+    const list = k && k.intent === 'no' ? h.no : h.ack;
+    return list[this.st.turns % list.length];
   }
 
   summaryText() {
