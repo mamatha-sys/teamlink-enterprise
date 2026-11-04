@@ -185,8 +185,7 @@ export const REPORTS_TEAM_TABS = [
   leaf('📊', '/reports/ats', 'Reports', [['reports', 'ATS Reports', 'view']], 'ats'),
   leaf('📊', '/reports/my-results', 'My Results', [['reports', 'My Results', 'view']], 'ats', [['reports', 'ATS Reports', 'view']]),
   leaf('👥', '/ats/team', 'Team', [['recruiterbde', 'Team View', 'view']]),
-  // EXOTEL AI CALLING (2026-10-22): the AI assistant's calls - a tab here, not a sidebar entry. The server decides who may place calls.
-  leaf('🤖', '/ats/ai-calling', 'AI Calling', [['candidates', 'Applications', 'view']]),
+  // AI Calling is its own sidebar entry now (ATS_ITEMS below): it places calls, it is not a report (founder 2026-11-04).
   // NO Settings tab (user, 2026-10-03: 'settings already Administration lo
   // vunnai, extra em cheyyaku'). Settings stay in Administration only.
 ];
@@ -220,6 +219,9 @@ export const ATS_ITEMS = [
   moduleLeaf('clients-req', '💼', '/clients', 'Clients & Requirements', CLIENTS_REQ_TABS),
   { ...leaf('👥', '/candidates', 'Candidates & Pipeline', [['candidates', 'Candidate List', 'view']]), id: 'candidates' },
   { ...leaf('📅', '/ats/calendar', 'Interview Calendar', [['interviews', 'Calendar View', 'view']]), id: 'calendar' },
+  // EXOTEL AI CALLING (2026-10-22): the AI assistant's calls. Its own entry since 2026-11-04 (founder: "Yes, move it" - out of
+  // Reports & Team, where a calling tool did not belong among the reports). The server decides who may place calls.
+  { ...leaf('🤖', '/ats/ai-calling', 'AI Calling', [['candidates', 'Applications', 'view']]), id: 'ai-calling' },
   moduleLeaf('reports-team', '🎯', '/reports/ats', 'Reports & Team', REPORTS_TEAM_TABS),
 ];
 
@@ -227,7 +229,7 @@ export const ATS_ITEMS = [
 // the detail pages.
 export const MODULE_PATHS = {
   'clients-req': /^\/(clients|requirements|agreements)(\/|$)/,
-  'reports-team': /^\/(reports\/(ats|my-results|job-portal)|ats\/(team|settings|followups|ai-calling))(\/|$)/,
+  'reports-team': /^\/(reports\/(ats|my-results|job-portal)|ats\/(team|settings|followups))(\/|$)/,
 };
 export function moduleOfPath(pathname) {
   return Object.keys(MODULE_PATHS).find((k) => MODULE_PATHS[k].test(pathname)) || null;
