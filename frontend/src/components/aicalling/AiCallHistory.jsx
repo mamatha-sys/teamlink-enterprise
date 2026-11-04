@@ -11,8 +11,9 @@ import {
 
 // "Calls by the AI assistant" on a candidate: the history (what was asked, what they said, what is next) and the button
 // to place a new call. Shown inside the existing candidate History tab. A login that may not use AI calling sees nothing.
-export default function AiCallHistory({ candidate, refreshKey = 0 }) {
+export default function AiCallHistory({ candidate, refreshKey = 0, showDenied = false }) {
   const [rows, setRows] = useState(null);
+  const [denied, setDenied] = useState(false);
   const [offers, setOffers] = useState([]);
   const [allowed, setAllowed] = useState(false);
   const [dialog, setDialog] = useState(null);
@@ -22,13 +23,14 @@ export default function AiCallHistory({ candidate, refreshKey = 0 }) {
   const [purpose, setPurpose] = useState('Screening');
   const load = useCallback(() => {
     api.get('/ai-calling/history', { params: { candidateId: candidate.id } })
-      .then((r) => { setRows(r.data.rows || []); setAllowed(true); })
-      .catch(() => { setRows(null); setAllowed(false); });
+      .then((r) => { setRows(r.data.rows || []); setAllowed(true); setDenied(false); })
+      .catch(() => { setRows(null); setAllowed(false); setDenied(true); });
     api.get('/ai-calling/offers').then((r) => setOffers((r.data.rows || []).filter((o) => apps.some((a) => a.id === o.applicationId)))).catch(() => setOffers([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candidate.id]);
   useEffect(load, [load, refreshKey]);
-  if (!allowed) return null;
+  // the AI Calling tab says why it is empty; elsewhere a login that may not use AI calling sees nothing
+  if (!allowed) return showDenied && denied ? <div className="small-muted">AI calling is not part of your role, or it is not switched on yet.</div> : null;
 
   return (
     <section className="cdw-card" style={{ marginBottom: 12 }}>

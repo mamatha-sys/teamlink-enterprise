@@ -19,7 +19,7 @@ import ProfileLeft, { ResumeTabCard } from './candidate/ProfileLeft.jsx';
 import { RecordDocuments } from './candidate/CandidateRecord.jsx'; // ATS-100 B5
 import FollowUpLog from './clients/FollowUpLog.jsx';
 import {
-  FitSlot, AlsoGoodFitSlot, RejectionHistorySlot, HistoryTimelineSlot, AddApplicationSlot,
+  FitSlot, AlsoGoodFitSlot, RejectionHistorySlot, HistoryTimelineSlot, AddApplicationSlot, AiCallingSlot,
 } from './candidate/ProfileSlots.jsx';
 
 // ---------------------------------------------------------------------------
@@ -197,6 +197,7 @@ export default function CandidateDrawer({
             )}
 
             {tab === 'conversation' && internal && <CommunicationTimeline candidateId={c.id} />}
+            {tab === 'aicalling' && internal && <AiCallingSlot {...slot} refreshKey={refreshKey} />}
             {tab === 'conversation' && internal && <ConversationView audience="candidates" personId={c.id} name={c.name} applicationId={app ? app.id : undefined} requirementId={app ? app.requirementId : undefined} onChanged={changed} />}
 
             {tab === 'history' && (

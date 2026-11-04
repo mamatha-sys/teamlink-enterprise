@@ -185,7 +185,7 @@ export const REPORTS_TEAM_TABS = [
   leaf('📊', '/reports/ats', 'Reports', [['reports', 'ATS Reports', 'view']], 'ats'),
   leaf('📊', '/reports/my-results', 'My Results', [['reports', 'My Results', 'view']], 'ats', [['reports', 'ATS Reports', 'view']]),
   leaf('👥', '/ats/team', 'Team', [['recruiterbde', 'Team View', 'view']]),
-  // AI Calling is its own sidebar entry now (ATS_ITEMS below): it places calls, it is not a report (founder 2026-11-04).
+  // AI Calling is a tab on the candidate profile now (founder 2026-11-04), not a tab here or a sidebar entry.
   // NO Settings tab (user, 2026-10-03: 'settings already Administration lo
   // vunnai, extra em cheyyaku'). Settings stay in Administration only.
 ];
@@ -219,9 +219,8 @@ export const ATS_ITEMS = [
   moduleLeaf('clients-req', '💼', '/clients', 'Clients & Requirements', CLIENTS_REQ_TABS),
   { ...leaf('👥', '/candidates', 'Candidates & Pipeline', [['candidates', 'Candidate List', 'view']]), id: 'candidates' },
   { ...leaf('📅', '/ats/calendar', 'Interview Calendar', [['interviews', 'Calendar View', 'view']]), id: 'calendar' },
-  // EXOTEL AI CALLING (2026-10-22): the AI assistant's calls. Its own entry since 2026-11-04 (founder: "Yes, move it" - out of
-  // Reports & Team, where a calling tool did not belong among the reports). The server decides who may place calls.
-  { ...leaf('🤖', '/ats/ai-calling', 'AI Calling', [['candidates', 'Applications', 'view']]), id: 'ai-calling' },
+  // AI CALLING is not a sidebar entry (founder 2026-11-04: "ai calling side bar lo vundakudadhu"): it is a tab on the candidate
+  // profile (Candidate360Tabs.jsx), and that tab links to /ats/ai-calling for the company-wide lists (the route stays).
   moduleLeaf('reports-team', '🎯', '/reports/ats', 'Reports & Team', REPORTS_TEAM_TABS),
 ];
 

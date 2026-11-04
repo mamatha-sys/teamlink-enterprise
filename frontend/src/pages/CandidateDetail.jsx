@@ -39,7 +39,7 @@ import { RecordDocuments } from '../components/candidate/CandidateRecord.jsx'; /
 import FollowUpLog from '../components/clients/FollowUpLog.jsx';
 import JoiningDropPanel from '../components/joindrop/JoiningDropPanel.jsx'; // Joining & Drop: the joining card, the drop, the history and the journey
 import {
-  FitSlot, AlsoGoodFitSlot, RejectionHistorySlot, HistoryTimelineSlot, AddApplicationSlot,
+  FitSlot, AlsoGoodFitSlot, RejectionHistorySlot, HistoryTimelineSlot, AddApplicationSlot, AiCallingSlot,
 } from '../components/candidate/ProfileSlots.jsx';
 
 // The candidate record, in nine tabs:
@@ -595,6 +595,7 @@ export default function CandidateDetail() {
             Due Date · Next Follow-up · Status
           Status is Upcoming / Due Today / Overdue / Completed, derived on the
           server from the due date so it is never stale. --- */}
+      {tab === 'aicalling' && internal && <AiCallingSlot {...slot} refreshKey={refreshKey} />}
       {tab === 'conversation' && internal && <CandidateConversation candidateId={c.id} name={c.name} applicationId={primary ? primary.id : undefined} requirementId={primary ? primary.requirementId : undefined} onChanged={load} />}
       {tab === 'history' && <HistoryTimelineSlot {...slot} refreshKey={refreshKey} withActivity={false} />}
       {tab === 'history' && internal && <div className="section-label">{followUpCount ? `Follow-ups (${followUpCount}) — one per requirement` : 'Follow-ups — one per requirement'}</div>}

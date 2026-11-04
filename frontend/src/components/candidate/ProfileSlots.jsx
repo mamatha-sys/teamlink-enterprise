@@ -26,6 +26,7 @@
 //   logContactClick       follow-ups agent    (kept as a no-op: QuickContact logs
 //                                             its own clicks)
 // ---------------------------------------------------------------------------
+import { Link } from 'react-router-dom';
 import ResumePanel from '../resume/ResumePanel.jsx';
 import { EligibleRequirementsPanel, AlsoGoodFitCard } from '../resume/MatchSplit.jsx';
 import RejectionHistory from '../rejections/RejectionHistory.jsx';
@@ -134,6 +135,19 @@ export function RejectionHistorySlot({ c, internal, onChanged }) {
   return <RejectionHistory candidateId={c.id} onChanged={onChanged} />;
 }
 
+// --- AI Calling tab (2026-11-04): this candidate's AI calls + the Call button; the company-wide lists stay one click away ------
+export function AiCallingSlot({ c, internal, refreshKey = 0 }) {
+  if (!internal) return null;
+  return (
+    <>
+      <AiCallHistory candidate={c} refreshKey={refreshKey} showDenied />
+      <div className="small-muted" style={{ marginTop: 4 }}>
+        Calling many candidates at once, the call-backs and the numbers: <Link to="/ats/ai-calling">all AI calls</Link>.
+      </div>
+    </>
+  );
+}
+
 // --- History timeline (follow-ups agent) ---------------------------------------
 export function HistoryTimelineSlot({
   c, internal, refreshKey = 0, withActivity = true,
@@ -142,7 +156,6 @@ export function HistoryTimelineSlot({
     <>
       {internal && <CandidateAutoMessages candidateId={c.id} />}
       {internal && <FollowUpTimeline candidateId={c.id} refreshKey={refreshKey} />}
-      {internal && <AiCallHistory candidate={c} refreshKey={refreshKey} />}
       {withActivity && <ActivityTab c={c} internal={internal} limit={60} />}
     </>
   );
