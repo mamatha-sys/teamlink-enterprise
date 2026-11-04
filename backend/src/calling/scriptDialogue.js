@@ -51,7 +51,7 @@ function parseScript(raw, lim = {}) {
   const ci = steps.findIndex((s) => s.kind === 'closing');
   if (ci < 0) return { ok: false, steps: [], error: 'The last line must be the closing ("Closing: Thank you for your time...").' };
   if (ci !== steps.length - 1) return { ok: false, steps: [], error: 'The Closing line must be the last line.' };
-  if (!steps.some((s) => s.kind === 'ask' || s.kind === 'interest')) return { ok: false, steps: [], error: 'Add at least one question (a line starting with "Ask:" or "Interest:").' };
+  if (!lim.noQuestionOk && !steps.some((s) => s.kind === 'ask' || s.kind === 'interest')) return { ok: false, steps: [], error: 'Add at least one question (a line starting with "Ask:" or "Interest:").' };
   return { ok: true, steps, error: null };
 }
 
@@ -76,6 +76,8 @@ class ScriptDialogue extends D.Dialogue {
       if (p.ok && sameShape(p.steps, main.steps)) this.byLang[lang] = p.steps; // a version that does not match line for line is not used
     });
     this.scriptLanguage = first;
+    // no question in the script (only what the AI says): the call says all of it and ends
+    this.noQuestion = !main.steps.some((s) => s.kind === 'ask' || s.kind === 'interest');
     this.autoLanguage = Object.keys(this.byLang).length > 1; // follow the person's language only when there is another version to speak
     // the language the call starts in: the call's own if the script has it, else the script's
     if (!this.byLang[this.language]) this.setLanguage(first);
@@ -102,6 +104,10 @@ class ScriptDialogue extends D.Dialogue {
   }
 
   start() {
+    if (this.noQuestion) { // nothing to ask: Opening, the Say lines and the Closing are said together, then the call ends
+      this.st.step = 'script';
+      return this.endWith('Unclear', 'the message was said (the script has no question)', this.steps.map((_, i) => this.line(i)).join(' '));
+    }
     const text = this.speak(this.line(0));
     this.st.step = 'script';
     this.st.script.idx = 0;

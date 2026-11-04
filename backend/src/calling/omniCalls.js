@@ -19,7 +19,7 @@ const { parseScript, ScriptDialogue } = require('./scriptDialogue');
 
 const AUD = 'teamlink-voice';
 // Green Start steps may be 600 characters and a script has up to 30 steps, so the ATS limits (300 characters, 14 lines) are wider here
-const LIMITS = { maxLine: 700, maxLines: 40 };
+const LIMITS = { maxLine: 700, maxLines: 40, noQuestionOk: true };
 const seen = new Map(); // jti -> expiry (a signed request is accepted once)
 
 const secret = () => String(process.env.GREENSTART_SSO_SECRET || '');

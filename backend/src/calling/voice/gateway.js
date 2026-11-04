@@ -581,6 +581,8 @@ function handle(sock, engines, opts = {}) {
     await keepTurns();
     if (opts.onStart) opts.onStart(row);
     await say(first.say);
+    // a message with nothing to ask (an Omni-Channel script of statements only): said, then the call ends
+    if (first.done) { ended = true; await speaker.whenIdle(); await save(); hangup(); return; }
     // SILENCE: nothing said for SILENCE_MS after the assistant went quiet -> "are you still there?" (never yes / no / consent)
     quietTimer = setInterval(() => {
       if (ended || busy || !d || speaker.busy || speaker.timer || vad.talking) return;

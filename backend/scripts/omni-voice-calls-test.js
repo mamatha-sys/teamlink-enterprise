@@ -98,6 +98,17 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     check('a step over 700 characters is still refused', await (async () => { const x = await refuse({ script: `Opening: Hi\nAsk: ${'x '.repeat(400)}\nClosing: Bye` }); return !x.ok && /too long/.test(x.reason); })());
     const sd = require('../src/calling/scriptDialogue');
     check('the ATS agent limits are unchanged (300 characters, 14 lines)', !sd.parseScript(`Opening: Hi\nAsk: ${longText}\nClosing: Bye`).ok && !sd.parseScript(many).ok);
+    // a message with nothing to ask: said in one go, then the call ends (the founder's "hello, good morning, this is AI from Teamlink")
+    const hello = 'Opening: Hello {name}, good morning. This is an automated AI call from Teamlink Consultants.\nSay: Have a nice day.\nClosing: Thank you. Goodbye.';
+    check('an ATS agent script still needs a question', !sd.parseScript(hello).ok);
+    const hr = await omni.create({ externalId: 'hello1', toNumber: '9555555555', name: 'Sravanthi Rao', script: hello, agentName: 'Greeting' }, { ...deps, ami: AMI });
+    check('a script with nothing to ask is accepted for an Omni-Channel call', hr.ok === true, hr);
+    const hrow = await svc.getCall(hr.id);
+    const hd = await require('../src/calling/webTalk').dialogueFor(hrow);
+    const hs = hd.start();
+    check('it is said in one go (opening, the line, the closing) and the call ends', hs.done === true && /Hello Sravanthi, good morning/.test(hs.say) && /Have a nice day/.test(hs.say) && /Thank you\. Goodbye/.test(hs.say), hs);
+    const ho = hd.outcome();
+    check('the result is written for Green Start: a finished call, not "could not hear you"', !!ho.outcome && !/could not hear|not clear/i.test(ho.summary || ''), ho);
     check('a Telugu version that is not valid is refused', (await refuse({ scripts: { Telugu: 'no opening here' } })).ok === false);
     check('the line not being ready is said in words', await (async () => { const x = await refuse({}, { ...deps, config: LINE({ ready: false, problems: ['The Asterisk manager login is missing.'] }) }); return !x.ok && /not ready/.test(x.reason); })());
     check('in Test mode only the saved test numbers are called', await (async () => { const x = await refuse({ toNumber: '9111111111' }, { ...deps, config: LINE({ mode: 'Test', testNumbers: ['+919030048228'] }) }); return !x.ok && x.code === 'test_number'; })());
@@ -109,7 +120,7 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     svc.setClock(() => new Date('2026-11-04T20:30:00Z')); // 02:00 India time
     check('outside the calling hours nothing is dialled', await (async () => { const x = await refuse({}); return !x.ok && x.code === 'outside_hours'; })());
     svc.setClock(() => new Date('2026-11-04T06:30:00Z'));
-    check('none of the refused calls was dialled (only the one long-script call that was accepted)', originated.length === before + 1, { before, now: originated.length });
+    check('none of the refused calls was dialled (only the two calls that were accepted: the long script and the greeting)', originated.length === before + 2, { before, now: originated.length });
     check('Asterisk refusing the call fails it in words (and leaves a failed row)', await (async () => { const x = await refuse({ toNumber: '9333333333' }, { ...deps, ami: { action: async () => ({ Response: 'Error', Message: 'no trunk' }) } }); return !x.ok && x.code === 'not_dialled'; })());
   } finally {
     await prisma.$disconnect().catch(() => {});
