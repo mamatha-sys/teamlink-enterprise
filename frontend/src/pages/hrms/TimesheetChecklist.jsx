@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import api from '../../api';
 import Combo from '../../components/Combo.jsx';
+import { AiAssist } from '../../components/ComposeForm.jsx';
 
 // ---------------------------------------------------------------------------
 // Timesheet > Checklist (founder 2026-11-03). Each person writes what they did: the day (today by default), from / to time,
@@ -34,12 +35,14 @@ function EntryForm({ statuses, initial, date, onSaved, onCancel }) {
       <label>Status
         <select value={f.status} onChange={set('status')}>{statuses.map((s) => <option key={s} value={s}>{s}</option>)}</select>
       </label>
-      <label className="tcl-desc">What did you do?<textarea rows={2} value={f.description} onChange={set('description')} placeholder="For example: called 20 candidates for the Staff Nurse requirement" /></label>
+      <label className="tcl-desc">What did you do?<textarea rows={4} value={f.description} onChange={set('description')} placeholder="For example: called 20 candidates for the Staff Nurse requirement" /></label>
+      {/* the same AI Assist as Timesheet (founder 2026-11-04): fixes the words of the description; nothing is saved until Save */}
+      <AiAssist kind="checklist" title={`Work done${f.fromTime && f.toTime ? ` ${f.fromTime} to ${f.toTime}` : ''} (${f.status})`} text={f.description} onText={(t) => setF((x) => ({ ...x, description: t }))} />
       <div className="tcl-actions">
         <button type="button" className="btn btn-primary" disabled={busy} onClick={save}>{busy ? 'Saving...' : 'Save'}</button>
         {onCancel && <button type="button" className="btn" onClick={onCancel}>Cancel</button>}
       </div>
-      {err && <div className="error-text" style={{ gridColumn: '1 / -1' }}>{err}</div>}
+      {err && <div className="error-text">{err}</div>}
     </div>
   );
 }

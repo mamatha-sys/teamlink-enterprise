@@ -120,10 +120,11 @@
 .tcl-bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 12px; }
 .tcl-bar label, .tcl-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--muted, #5b6b7b); }
 .tcl-bar label { min-width: 190px; }
-.tcl-form { display: grid; grid-template-columns: 150px 120px 120px 150px 1fr auto; gap: 10px; align-items: end; margin-bottom: 12px; }
-.tcl-form .tcl-desc textarea { resize: vertical; min-height: 38px; }
+.tcl-form { display: flex; flex-direction: column; gap: 12px; width: 100%; margin-bottom: 14px; } /* one field under the other, full width (founder 2026-11-04) */
+.tcl-form input, .tcl-form select, .tcl-form textarea { width: 100%; box-sizing: border-box; }
+.tcl-form .tcl-desc textarea { resize: vertical; min-height: 96px; }
 .tcl-actions { display: flex; gap: 8px; }
 .tcl-table td { vertical-align: top; }
 .tcl-group { margin-bottom: 16px; }
 .tcl-group-head { font-weight: 700; font-size: 14px; padding: 6px 0; border-bottom: 1px solid var(--line, #e3e8ee); margin-bottom: 6px; }
-@media (max-width: 900px) { .tcl-form { grid-template-columns: 1fr 1fr; } .tcl-form .tcl-desc, .tcl-actions { grid-column: 1 / -1; } }
+

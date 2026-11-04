@@ -43,6 +43,7 @@ const KINDS = {
   kt: 'notes for a knowledge-transfer session',
   project: 'a short project description',
   task: 'a work task description',
+  checklist: 'one entry of an employee daily work checklist: what they did in that time, in clear simple English (fix spelling and grammar, keep every fact, number and name)',
   disciplinary: 'a factual, neutral description of a disciplinary matter',
   helpdesk: 'a helpdesk ticket description',
   resignation: 'a polite resignation reason',
