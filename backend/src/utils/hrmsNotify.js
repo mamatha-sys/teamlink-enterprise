@@ -62,6 +62,9 @@ const EVENTS = {
   taskLate: { label: 'Tasks not finished on time', instant: true },
   taskDayEnd: { label: 'End-of-day task report (Super Admin): completed, waiting for TL, partly done, in progress' },
   goalNotMet: { label: 'Monthly target not reached', instant: true },
+  // 2026-11-04 (founder: morning / afternoon / evening reminders + a popup; LMS "complete this course"): utils/dayNudges.js
+  dayNudge: { label: 'Morning, afternoon and evening reminder (your tasks, courses, Timesheet checklist)', instant: true },
+  courseAssigned: { label: 'A course was given to you - complete it', instant: true },
 };
 const EVENT_KEYS = Object.keys(EVENTS);
 // Spec: important HRMS activities send BOTH in-app and email.

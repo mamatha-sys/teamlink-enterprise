@@ -13,6 +13,7 @@ import ProfileStatusBanner from './ProfileStatusBanner.jsx';
 import SetupTabs from './SetupTabs.jsx';
 import InterviewTabs from './InterviewTabs.jsx';
 import NotificationBell from './NotificationBell.jsx';
+import NudgePopup from './NudgePopup.jsx';
 import TaskPopup from './dashboard/TaskPopup.jsx';
 import JobRequestPopup from './JobRequestPopup.jsx';
 import HealthDot from './dashboard/HealthDot.jsx';
@@ -372,6 +373,8 @@ export default function Shell() {
 
       {/* Floating, role-aware assistant (bottom right). */}
       <AiAssistant />
+      {/* morning / afternoon / evening reminders and "complete this course" (staff only; utils/dayNudges.js) */}
+      {user && !['CLIENT', 'CANDIDATE'].includes(user.role) && <NudgePopup />}
     </div>
   );
 }

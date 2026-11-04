@@ -223,6 +223,8 @@ export default function Timesheet({ standalone = false }) {
   const mineCount = tasks.filter((t) => t.assigneeId === myId && OPEN.includes(t.status)).length;
   const gaveCount = tasks.filter((t) => t.assignedById === myId && t.assigneeId !== myId && OPEN.includes(t.status)).length;
   const viewsOn = true; // the Checklist button is for everyone (2026-11-03)
+  // the "Ask for more time" tab: my late tasks with no reason yet + the asks waiting for my answer (the same two lists LateStrip shows)
+  const lateCount = options ? tasks.filter((t) => (t.assigneeId === options.me.id && t.needsReason) || (t.assigneeId !== options.me.id && t.delayPending && t.rights && t.rights.manage)).length : 0;
   const cur = view || 'mine';
 
   return (
@@ -247,6 +249,8 @@ export default function Timesheet({ standalone = false }) {
             <button className="btn" onClick={() => setDayEndOpen(true)} title="Every task today: completed (TL approved), waiting for TL approval, partly done, in progress">End of day</button>
             <button className="btn" onClick={() => { setError(''); setNotice(''); setFeedbackOpen(true); }} disabled={!options} title="Send feedback to the R&D team">💬 Feedback to R&D</button>
             <IdeasBox />
+            {/* Checklist beside New task (founder 2026-11-04: "checklist aney tab ni new task pakkana pettu") */}
+            <button type="button" className={`btn${cur === 'checklist' ? ' btn-primary' : ''}`} onClick={() => setView('checklist')}>Checklist</button>
             <button className="btn btn-primary" onClick={() => { setError(''); setNotice(''); setNewOpen(true); }} disabled={!options}>+ New task</button>
           </span>
         </div>
@@ -257,12 +261,13 @@ export default function Timesheet({ standalone = false }) {
               <button type="button" className={`tt-view${cur === 'mine' ? ' on' : ''}`} onClick={() => setView('mine')}>Given to me <b>{mineCount}</b></button>
               {canGive && <button type="button" className={`tt-view${cur === 'gave' ? ' on' : ''}`} onClick={() => setView('gave')}>Tasks I gave <b>{gaveCount}</b></button>}
               {canPickEmployee && <button type="button" className={`tt-view${cur === 'all' ? ' on' : ''}`} onClick={() => setView('all')}>{canGive ? 'My whole area' : 'Everyone'} <b>{tasks.length}</b></button>}
-              <button type="button" className={`tt-view${cur === 'checklist' ? ' on' : ''}`} onClick={() => setView('checklist')}>Checklist</button>
+              {/* ASK FOR MORE TIME as its own tab (founder 2026-11-04): late tasks to explain + asks waiting for my answer; opened on click */}
+              <button type="button" className={`tt-view${cur === 'late' ? ' on' : ''}`} onClick={() => setView('late')}>Ask for more time <b>{lateCount}</b></button>
             </div>
           )}
 
           {!options && <div className="small-muted">Loading...</div>}
-          {options && <LateStrip tasks={tasks} me={options.me.id} dlg={dlg} />}
+          {options && cur === 'late' && (lateCount ? <LateStrip tasks={tasks} me={options.me.id} dlg={dlg} /> : <div className="small-muted" style={{ padding: '8px 0' }}>Nothing here: no late task of yours needs a reason, and nobody is asking you for more time.</div>)}
           {cur === 'checklist' && <TimesheetChecklist />}
           {options && cur === 'mine' && <GivenToMe tasks={tasks} options={options} dlg={dlg} busy={busyId} onStart={onStart} />}
           {options && cur === 'gave' && canGive && (

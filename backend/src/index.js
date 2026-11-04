@@ -276,6 +276,7 @@ app.use('/api/applications', applicationRoutes);
 // followup_: the follow-up record, one per application. See routes/followups.js.
 app.use('/api/followups', followUpRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/nudges', require('./routes/nudges')); // reminder popups (utils/dayNudges.js, 2026-11-04)
 app.use('/api/new-items', require('./routes/newItems')); // the New button on every dashboard (2026-10-13)
 app.use('/api/employees', employeeRoutes);
 app.use('/api/employee-fields', employeeFieldRoutes);
@@ -515,6 +516,8 @@ const server = app.listen(PORT, () => {
   require('./outreach/tplFromMeta').start(); // WhatsApp template approvals from Meta, TeamLink + Omni-Channel, every 15 minutes
   // TEST SANDBOX: no background workers or timers at all (utils/sandbox.js).
   if (sandbox.isSandbox()) { sandbox.banner(PORT); return; }
+  // Morning / afternoon / evening reminders + "complete this course" (bell, email, popup) - utils/dayNudges.js (2026-11-04)
+  require('./utils/dayNudges').start();
   // Requests waiting since before 2026-11-02 whose own TL was skipped as "below the requester's level" go back to that TL (once, at start).
   setTimeout(() => require('./utils/approvalWorkflow').reopenOwnLeads().then((r) => { if (r.moved) console.log(`[approvals] ${r.moved} request(s) sent back to the requester's own TL`); }).catch((e) => console.error('[approvals] reopen own TL:', e.message)), 20 * 1000).unref();
   // AI phone calls through our own SIP line with free voices (calling/voice/sipCall.js): off unless AI_VOICE_GATEWAY=1.
