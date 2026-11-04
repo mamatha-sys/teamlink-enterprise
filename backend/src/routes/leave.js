@@ -17,6 +17,7 @@ const hrmsNotify = require('../utils/hrmsNotify');
 const earlyLogout = require('../utils/earlyLogoutCheck');
 const genuine = require('../utils/leaveGenuine');
 const leaveMeta = require('../utils/leaveMeta');
+const attachments = require('../utils/attachments'); // leave work-handover documents (2026-11-04)
 const leadRule = require('../utils/leadLeave');
 const markedLeave = require('../utils/markedLeave');
 
@@ -202,6 +203,89 @@ router.get('/', async (req, res, next) => {
 // Current Owner · Current Status · Next Approver · Previous Approvers ·
 // Pending Since · Due Date — plus every step with its state, which is what the
 // Approval Workflow panel draws.
+// ---- WORK HANDOVER (2026-11-04) ----------------------------------------------------------------------------------------------------------
+const HANDOVER_MAX_FILES = 10;
+const HANDOVER_LEFT = ['Relieved', 'Exited'];
+async function saveHandover(leave, employee, b, user) {
+  const toId = String(b.handoverToId || '').trim();
+  const notes = String(b.handoverNotes || '').trim().slice(0, 3000);
+  if (!toId && !notes) return null;
+  let to = null;
+  if (toId) {
+    to = await prisma.employee.findUnique({ where: { id: toId }, select: { id: true, name: true, employeeCode: true, department: true, userId: true, employmentStatus: true } });
+    if (!to || HANDOVER_LEFT.includes(to.employmentStatus) || (employee && to.id === employee.id)) to = null;
+  }
+  const h = { toId: to ? to.id : null, toName: to ? to.name : null, toCode: to ? to.employeeCode : null, toDepartment: to ? to.department : null, notes, files: [], at: new Date().toISOString(), by: user.name };
+  await leaveMeta.setMeta(leave.id, { handover: h });
+  if (to && to.userId) {
+    const who = employee ? employee.name : 'A colleague';
+    await prisma.notification.create({ data: {
+      userId: to.userId, channel: 'In-App', status: 'Delivered', recipient: to.name,
+      title: `${who} handed over work to you (leave ${leave.fromDate}${leave.toDate !== leave.fromDate ? ` to ${leave.toDate}` : ''})`.slice(0, 190),
+      message: `${notes ? `What to take over: ${notes}\n` : ''}Open: /leave?tab=requests&open=${leave.id}`,
+    } }).catch(() => {});
+  }
+  return h;
+}
+const publicHandover = (h, id) => (h ? { ...h, files: (h.files || []).map((f, i) => ({ n: i, name: f.name, size: f.size, type: f.type, at: f.at, url: `/leave/${id}/handover-files/${i}` })) } : null);
+
+// the people work can be handed over to: everybody working here except the applicant, the applicant's department first
+router.get('/handover-people', async (req, res, next) => {
+  try {
+    const me = await prisma.employee.findUnique({ where: { userId: req.user.id }, select: { id: true, department: true } });
+    const forId = String(req.query.employeeId || '') || (me && me.id) || '';
+    const of = forId ? await prisma.employee.findUnique({ where: { id: forId }, select: { id: true, department: true } }) : me;
+    const rows = await prisma.employee.findMany({ where: { employmentStatus: { notIn: HANDOVER_LEFT }, ...(of ? { id: { not: of.id } } : {}) }, select: { id: true, name: true, employeeCode: true, department: true }, orderBy: { name: 'asc' } });
+    const dep = of && of.department;
+    res.json({ people: rows.sort((a, b) => (b.department === dep) - (a.department === dep) || a.name.localeCompare(b.name)) });
+  } catch (err) { next(err); }
+});
+
+// a document for the handover, one per request (PDF, picture, Word, Excel; 10 MB): the applicant or whoever applied for them
+router.post('/:id/handover-files', async (req, res, next) => {
+  try {
+    const request = await prisma.leaveRequest.findUnique({ where: { id: req.params.id }, include: { employee: true } });
+    if (!request) return res.status(404).json({ error: 'Leave request not found' });
+    const mine = request.employee && request.employee.userId === req.user.id;
+    if (!mine && !employeeInScope(req.user, request.employee)) return res.status(403).json(OUT_OF_SCOPE);
+    const meta = (await leaveMeta.getMeta(request.id)) || {};
+    const h = meta.handover || { toId: null, toName: null, notes: '', files: [], at: new Date().toISOString(), by: req.user.name };
+    if ((h.files || []).length >= HANDOVER_MAX_FILES) return res.status(400).json({ error: `At most ${HANDOVER_MAX_FILES} documents for one leave.` });
+    let stored;
+    try {
+      const parsed = await attachments.parseMultipart(req, { maxBytes: 10 * 1024 * 1024 });
+      stored = attachments.store(parsed.file, { maxBytes: 10 * 1024 * 1024, allowWord: true, allowSheet: true });
+    } catch (err) {
+      return res.status(err.code === 'TOO_LARGE' ? 413 : 400).json({ error: err.code === 'BAD_TYPE' ? 'Add a PDF, a picture, a Word or an Excel file.' : (attachments.MESSAGE[err.code] || 'The file could not be added.') });
+    }
+    h.files = [...(h.files || []), { stored: stored.billFile, name: stored.billName, type: stored.billMime, size: stored.billSize, at: new Date().toISOString(), by: req.user.name }];
+    await leaveMeta.setMeta(request.id, { handover: h });
+    await logAudit({ userId: req.user.id, action: 'Leave handover document added', entity: 'LeaveRequest', entityId: request.id, toValue: stored.billName });
+    return res.status(201).json({ handover: publicHandover(h, request.id) });
+  } catch (err) { return next(err); }
+});
+
+// open a handover document: whoever may see the leave, and the person taking over
+router.get('/:id/handover-files/:n', async (req, res, next) => {
+  try {
+    const request = await prisma.leaveRequest.findUnique({ where: { id: req.params.id }, include: { employee: true } });
+    if (!request) return res.status(404).json({ error: 'Leave request not found' });
+    const meta = (await leaveMeta.getMeta(request.id)) || {};
+    const h = meta.handover;
+    const f = h && (h.files || [])[Number(req.params.n)];
+    if (!f) return res.status(404).json({ error: 'Document not found' });
+    let taker = false;
+    if (h.toId) { const t = await prisma.employee.findUnique({ where: { id: h.toId }, select: { userId: true } }); taker = !!(t && t.userId === req.user.id); }
+    if (!taker && !await workflow.canSee(WF, request.id, req.user, request.employee)) return res.status(403).json(OUT_OF_SCOPE);
+    const full = attachments.resolveStored(f.stored);
+    if (!full) return res.status(404).json({ error: 'The file is no longer on the server' });
+    res.setHeader('Content-Type', f.type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${String(f.name || 'document').replace(/[^\w.\- ]/g, '_')}"`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    return res.sendFile(full);
+  } catch (err) { return next(err); }
+});
+
 router.get('/:id/workflow', async (req, res, next) => {
   try {
     const request = await prisma.leaveRequest.findUnique({ where: { id: req.params.id }, include: { employee: true } });
@@ -242,6 +326,7 @@ router.get('/:id/workflow', async (req, res, next) => {
       else if (request.employee) { try { early = { ...(await earlyLogout.compute(request.employee, request.fromDate)), snapshot: false }; } catch { early = null; } }
     }
     const meta = await leaveMeta.getMeta(request.id);
+    const handover = publicHandover(meta && meta.handover, request.id);
     const handoffs = (await prisma.auditLog.findMany({
       where: { entity: 'LeaveRequest', entityId: request.id, action: policy.REASSIGNED },
       orderBy: { createdAt: 'asc' },
@@ -256,6 +341,7 @@ router.get('/:id/workflow', async (req, res, next) => {
       from: a.fromValue || null, to: a.toValue || null, reason: a.reason || null,
     }));
     return res.json({
+      handover,
       history,
       leave: {
         id: request.id,
@@ -456,7 +542,10 @@ router.post('/', async (req, res, next) => {
   try { if (employee) early = await earlyLogout.snapshot(leave, employee); } catch (err) { console.error('[leave] early-logout check failed', err.message); }
   // HRMS item 2: the first approver on the chain (the TL) hears at once, bell + email, once per request.
   hrmsNotify.leaveRaised({ leave, employee, early }).catch((e) => console.error('[leave] notify approver failed', e.message));
-  return res.status(201).json({ ...leave, workflow: chain, ...(req.leaveTeamNotice ? { teamNotice: req.leaveTeamNotice } : {}) });
+  // WORK HANDOVER (founder 2026-11-04: "leave ki apply chesetappudu work handover employee assign ... reports and documents upload ki apply
+  // chese daggare evvu"): who takes over, what to hand over, and (uploaded right after) the documents. Kept in leave meta; the person told.
+  const handover = await saveHandover(leave, employee, req.body || {}, req.user).catch((e) => { console.error('[leave] handover', e.message); return null; });
+  return res.status(201).json({ ...leave, workflow: chain, ...(handover ? { handover } : {}), ...(req.leaveTeamNotice ? { teamNotice: req.leaveTeamNotice } : {}) });
   } catch (err) {
     return next(err);
   }

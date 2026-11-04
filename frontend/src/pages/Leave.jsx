@@ -78,7 +78,7 @@ function ApprovalWorkflowModal({ requestId, onClose, onActed }) {
           <div className="wf-head">
             <div><span className="cell-muted">Leave ID:</span> <b>LV-{String(leave.id).slice(-4).toUpperCase()}</b></div>
           </div>
-          <LeaveFacts leave={leave} handoffs={data.handoffs} early={data.earlyLogout} source={data.source} pulse={data.pulse} />
+          <LeaveFacts leave={leave} handoffs={data.handoffs} early={data.earlyLogout} source={data.source} pulse={data.pulse} handover={data.handover} />
 
           {/* No chain picture here any more (founder 2026-11-02: "approve/reject unchi and chain thisai"): only who it waits for.
               APPROVE · REJECT · REASSIGN — the TL rule is decided by the server. */}
@@ -209,7 +209,14 @@ function WhoElseOnLeave({ from, to, employeeId }) {
 
 // The prototype's Apply Leave modal (openApplyLeaveModal, line 3908).
 function ApplyLeaveModal({ types, employees, isHR, canOverride, onClose, onSaved }) {
-  const [form, setForm] = useState({ employeeId: '', type: types[0]?.name || '', dayMode: 'full', halfDay: 'First Half', days: 1, fromDate: '', toDate: '', reason: '' });
+  const [form, setForm] = useState({ employeeId: '', type: types[0]?.name || '', dayMode: 'full', halfDay: 'First Half', days: 1, fromDate: '', toDate: '', reason: '', handoverToId: '', handoverNotes: '' });
+  // WORK HANDOVER (founder 2026-11-04): who takes over, what to hand over, and documents - all right here in the apply form
+  const [handPeople, setHandPeople] = useState([]);
+  const [handFiles, setHandFiles] = useState([]);
+  useEffect(() => {
+    api.get('/leave/handover-people', { params: { employeeId: isHR && form.employeeId ? form.employeeId : undefined } })
+      .then((r) => setHandPeople(r.data.people || [])).catch(() => setHandPeople([]));
+  }, [isHR, form.employeeId]);
   const [error, setError] = useState('');
   const [avail, setAvail] = useState(null);
   const [override, setOverride] = useState(false);
@@ -250,7 +257,9 @@ function ApplyLeaveModal({ types, employees, isHR, canOverride, onClose, onSaved
     if (!half && (days <= 0 || (span && days > span))) { setError(`Days must be between 0.5 and ${span || 1}.`); return; }
     if (over && !(canOverride && override)) { setError(`Not enough ${form.type} balance: ${a.available} day(s) available, ${days} requested.`); return; }
     try {
-      await api.post('/leave', {
+      const made = await api.post('/leave', {
+        handoverToId: form.handoverToId || undefined,
+        handoverNotes: form.handoverNotes || undefined,
         employeeId: isHR ? form.employeeId : undefined,
         type: form.type,
         fromDate: form.fromDate,
@@ -260,6 +269,15 @@ function ApplyLeaveModal({ types, employees, isHR, canOverride, onClose, onSaved
         reason: form.reason,
         overrideBalance: canOverride && override ? true : undefined,
       });
+      // the handover documents, one by one, once the leave exists
+      const failed = [];
+      for (const file of handFiles) {
+        const fd = new FormData();
+        fd.append('file', file);
+        // eslint-disable-next-line no-await-in-loop
+        try { await api.post(`/leave/${made.data.id}/handover-files`, fd); } catch (e) { failed.push(`${file.name}: ${e.response?.data?.error || 'not added'}`); }
+      }
+      if (failed.length) window.alert(`The leave was applied, but some documents were not added:\n${failed.join('\n')}`); // eslint-disable-line no-alert
       onSaved();
     } catch (err) {
       setError(err.response?.data?.error || 'Could not submit the request');
@@ -321,6 +339,19 @@ function ApplyLeaveModal({ types, employees, isHR, canOverride, onClose, onSaved
       )}
       <WhoElseOnLeave from={form.fromDate} to={half ? form.fromDate : form.toDate} employeeId={isHR ? form.employeeId : undefined} />
       <div className="field"><label>Reason</label><textarea rows="2" value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} /></div>
+      <div className="field"><label>Work handed over to</label>
+        <Combo value={form.handoverToId} onChange={(e) => setForm({ ...form, handoverToId: e.target.value })}>
+          <option value="">Nobody (no handover)</option>
+          {handPeople.map((p) => <option key={p.id} value={p.id}>{`${p.name}${p.employeeCode ? ` · ${p.employeeCode}` : ''}${p.department ? ` · ${p.department}` : ''}`}</option>)}
+        </Combo>
+      </div>
+      <div className="field"><label>What to hand over (reports, pending work)</label>
+        <textarea rows="3" value={form.handoverNotes} maxLength={3000} placeholder="For example: send the daily candidate report to the TL at 6 PM; call back the 3 candidates in the sheet" onChange={(e) => setForm({ ...form, handoverNotes: e.target.value })} />
+      </div>
+      <div className="field"><label>Documents for the handover (PDF, picture, Word, Excel - up to 10)</label>
+        <input type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx,.csv" onChange={(e) => setHandFiles(Array.from(e.target.files || []).slice(0, 10))} />
+        {handFiles.length > 0 && <div className="small-muted">{handFiles.map((f) => f.name).join(', ')}</div>}
+      </div>
       {over && canOverride && (
         <label className="lvx-muted" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <input type="checkbox" style={{ width: 'auto' }} checked={override} onChange={(e) => setOverride(e.target.checked)} /> Apply beyond the balance (HR override)

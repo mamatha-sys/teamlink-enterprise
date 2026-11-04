@@ -130,7 +130,18 @@ export function EarlyLogoutBlock({ early }) {
   );
 }
 
-export function LeaveFacts({ leave, handoffs, early = null, source = null, pulse = null }) {
+// a handover document opens in a new tab (fetched with the login, never a public link)
+async function openHandoverDoc(url) {
+  const w = window.open('', '_blank');
+  try {
+    const r = await api.get(url, { responseType: 'blob' });
+    const u = URL.createObjectURL(r.data);
+    if (w) w.location.href = u; else window.open(u, '_blank');
+    setTimeout(() => URL.revokeObjectURL(u), 120000);
+  } catch { if (w) w.close(); window.alert('The document could not be opened.'); } // eslint-disable-line no-alert
+}
+
+export function LeaveFacts({ leave, handoffs, early = null, source = null, pulse = null, handover = null }) {
   if (!leave) return null;
   const e = leave.employee || {};
   return (
@@ -157,6 +168,17 @@ export function LeaveFacts({ leave, handoffs, early = null, source = null, pulse
       {Object.entries(leave.details || {}).filter(([k]) => !['Half day', 'Approver'].includes(k)).map(([k, v]) => (
         <div key={k}><span>{k}</span><b>{v}</b></div>
       ))}
+      {handover && (handover.toName || handover.notes || (handover.files || []).length > 0) && (
+        <div style={{ margin: '8px 0', padding: '8px 10px', border: '1px solid var(--line, #e5e7eb)', borderRadius: 8 }}>
+          <div><span className="cell-muted">Work handed over to:</span> <b>{handover.toName ? `${handover.toName}${handover.toCode ? ` (${handover.toCode})` : ''}` : 'nobody named'}</b></div>
+          {handover.notes && <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}><span className="cell-muted">What to hand over:</span> {handover.notes}</div>}
+          {(handover.files || []).length > 0 && (
+            <div style={{ marginTop: 4 }}><span className="cell-muted">Documents:</span>{' '}
+              {handover.files.map((f) => <button key={f.n} type="button" className="btn btn-sm" style={{ margin: '2px 4px 2px 0' }} onClick={() => openHandoverDoc(f.url)}>{f.name}</button>)}
+            </div>
+          )}
+        </div>
+      )}
       {handoffs && handoffs.length > 0 && (
         <div className="lvx-wide">
           <span>Reassigned</span>
