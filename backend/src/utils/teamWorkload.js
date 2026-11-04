@@ -67,6 +67,10 @@ const {
 const {
   ATTR_SELECT, attribute, creditAt, stepAt, loadDirectory,
 } = require('./workers');
+// THE JOINING DAY (founder 2026-11-04: "oct 30 evaru join avvaledhu"): the typed joining date, else joined-at, else the move into
+// Joined - the one rule every report uses (utils/joinDayShared.js). Never the day the record was last changed.
+const { joinDay } = require('./joinDayShared');
+const endOfDay = (d) => (d ? `${d}T23:59:59+05:30` : null);
 
 const TEAM_ROLES = ['RECRUITER', 'BDE', 'TL', 'STL'];
 const TEAM_ROLE_ORDER = { RECRUITER: 0, BDE: 1, TL: 2, STL: 3 };
@@ -201,6 +205,7 @@ const APP_SELECT = {
   interviewStatus: true,
   hiringType: true,
   joinedAt: true,
+  joiningDate: true, // the typed joining day (joinDay)
   interviewResult: true,
   interviewCompletedAt: true,
   candidate: { select: { id: true, name: true } },
@@ -505,7 +510,8 @@ async function buildWorld(user) {
       // joining each to the recruiter who had the person at that moment - not to whoever took the seat or the job later.
       sentBy: creditUserOf(a, stepAt(a.stageEvents, SUBMITTED_STAGES, a.updatedAt)),
       interviewBy: creditUserOf(a, stepAt(a.stageEvents, INTERVIEW_STAGES, a.interviewAt || a.updatedAt)),
-      joinedBy: JOINED_STAGES.includes(a.stage) ? creditUserOf(a, a.joinedAt || stepAt(a.stageEvents, JOINED_STAGES, a.updatedAt)) : null,
+      joinDay: JOINED_STAGES.includes(a.stage) ? joinDay(a, stepAt(a.stageEvents, JOINED_STAGES, null)) : null,
+      joinedBy: JOINED_STAGES.includes(a.stage) ? creditUserOf(a, endOfDay(joinDay(a, stepAt(a.stageEvents, JOINED_STAGES, null))) || a.updatedAt) : null,
       tlUserId: at.tl && at.tl.userId,
       tlName: at.tl && at.tl.label,
       bdeUserId: at.bde && at.bde.userId,
@@ -844,8 +850,11 @@ function listRows(world, kind, ids, { clientDesk }) {
         stage: a.stage, stageLabel: a.stageLabel, updatedAt: a.updatedAt, interviewAt: a.interviewAt,
         recruiter: a.recruiterName || null,
         nextAction: na ? na.action : null, owner: na ? na.owner : null, dueStatus: na ? na.dueStatus : null,
+        ...(kind === 'joined' ? { joinDay: a.joinDay || null } : {}),
       };
-    }).sort((x, y) => new Date(y.updatedAt) - new Date(x.updatedAt));
+    }).sort((x, y) => (kind === 'joined'
+      ? String(y.joinDay || '').localeCompare(String(x.joinDay || '')) // newest joining first; not recorded last
+      : new Date(y.updatedAt) - new Date(x.updatedAt)));
   }
   if (kind === 'actions') {
     return world.actions.filter((x) => want.has(x.id))

@@ -115,6 +115,8 @@ function Rows({ sec, empty }) {
             </div>
             <div className="r360-right">
               {r.interviewAt && ['INTERVIEW_SCHEDULED', 'INTERVIEW_COMPLETED'].includes(r.stage) && <span className="small-muted">{dayTime(r.interviewAt)}</span>}
+              {/* a joining: the joining day itself (2026-11-04), or that none was entered */}
+              {Object.prototype.hasOwnProperty.call(r, 'joinDay') && <span className="small-muted">{r.joinDay ? `Joined ${new Date(`${r.joinDay}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}` : 'Joining day not recorded'}</span>}
               <StatusChip status={r.stageLabel}>{r.stageLabel}</StatusChip>
             </div>
           </div>

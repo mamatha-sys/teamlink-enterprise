@@ -984,7 +984,8 @@ function MetricList({ personId, metric, onOpen }) {
         <table className="pw-table">
           <thead>
             {kind === 'requirements' && <tr><th>Requirement</th><th>Client</th><th>Type</th><th>Department · Section</th><th>Team lead</th><th>Recruiter</th><th>Status</th></tr>}
-            {(kind === 'applications' || kind === 'joined') && <tr><th>Candidate</th><th>Requirement</th><th>Client</th><th>Step</th><th>Next step</th><th>Updated</th></tr>}
+            {/* joined: the joining day itself (the day the record last changed read like a joining day, 2026-11-04) */}
+            {(kind === 'applications' || kind === 'joined') && <tr><th>Candidate</th><th>Requirement</th><th>Client</th><th>Step</th><th>Next step</th><th>{kind === 'joined' ? 'Joined on' : 'Updated'}</th></tr>}
             {kind === 'clients' && <tr><th>Client</th><th className="num">Open requirements</th><th className="num">All requirements</th><th>Status</th></tr>}
             {kind === 'people' && <tr><th>Recruiter</th><th>Section</th><th className="num">Open requirements</th><th className="num">People in process</th><th className="num">Needs action</th></tr>}
             {kind === 'actions' && <tr><th>Candidate</th><th>Requirement</th><th>Client</th><th>Step</th><th>Next step</th><th>Owner</th><th>Due</th></tr>}
@@ -1008,7 +1009,7 @@ function MetricList({ personId, metric, onOpen }) {
                 <td>{r.client || '—'}</td>
                 <td><StatusChip status={r.stageLabel}>{r.stageLabel}</StatusChip></td>
                 <td>{r.nextAction ? <>{r.nextAction}{r.owner && <div className="small-muted">{r.owner}</div>}</> : <span className="cell-muted">—</span>}</td>
-                <td>{day(r.updatedAt)}</td>
+                <td>{kind === 'joined' ? (r.joinDay ? day(r.joinDay) : <span className="cell-muted" title="No joining date was entered for this person">Not recorded</span>) : day(r.updatedAt)}</td>
               </tr>
             ))}
             {kind === 'clients' && page.slice.map((r) => (

@@ -576,7 +576,8 @@ async function loadContext(user, f, { appDate = 'createdAt' } = {}) {
     // never somebody who joined the company after that (utils/workers.js creditAt). A person not past the first steps stays with
     // whoever has them now.
     const steps = Object.values(crossedAt).filter(Boolean).map((d) => new Date(d).getTime());
-    const creditTime = joined ? (crossedAt.joined || a.joinedAt || null) : (steps.length ? new Date(Math.max(...steps)) : null);
+    const typedJoin = /^(\d{4})-\d{2}-\d{2}/.test(String(a.joiningDate || '')) && +String(a.joiningDate).slice(0, 4) >= 2015 ? `${String(a.joiningDate).slice(0, 10)}T23:59:59+05:30` : null;
+    const creditTime = joined ? (typedJoin || a.joinedAt || crossedAt.joined || null) : (steps.length ? new Date(Math.max(...steps)) : null);
     const recruiter = creditTime ? (workers.creditAt(reqForAttr, fus, evs, person, creditTime) || recruiterNow) : recruiterNow;
 
     const fb = fbBy.get(a.id) || [];

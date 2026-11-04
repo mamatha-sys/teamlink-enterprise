@@ -223,7 +223,7 @@ async function monthApplications(month, { fresh = false } = {}) {
     // the joining is the work of who had the person on the joining day (utils/workers.js creditAt, founder 2026-11-04): not of a
     // recruiter who took the seat or the job later
     if (joined) {
-      const by = workers.creditAt(reqForAttr, a.followUps || [], evs, dir.person, (firstMove && firstMove.createdAt) || (day ? `${day}T12:00:00+05:30` : null));
+      const by = workers.creditAt(reqForAttr, a.followUps || [], evs, dir.person, day ? `${day}T23:59:59+05:30` : (firstMove && firstMove.createdAt) || null);
       if (by) at.recruiter = by;
     }
     const client = req.internal ? 'TeamLink Internal' : (req.client && req.client.name) || '—';
