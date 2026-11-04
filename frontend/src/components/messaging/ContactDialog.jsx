@@ -59,7 +59,7 @@ export default function ContactDialog({
   // masked = it may not SEE the number: the server fills in and sends, the screen shows a hint, calls go through TeamLink.
   const rule = useContactRule(audience);
   const masked = rule.masked;
-  const usable = useUsable(audience);
+  const usableAll = useUsable(audience);
   const status = useChannels();
   const tokenInfo = useTokens();
   const [ch, setCh] = useState(fixed || 'Email');
@@ -79,6 +79,22 @@ export default function ContactDialog({
   const [attach, setAttach] = useState({ resume: false, offer: false }); // WhatsApp: send the resume / offer letter file with the message
   // WhatsApp: which company number the message leaves from (only the numbers the Admin gave this login; none = no sending)
   const wa = useWaSender(ch === 'WhatsApp', pv && pv.waNumber);
+  // ONLY THIS NUMBER'S TEMPLATES (founder 2026-11-04: "only ahh number templates matrame kanipinchali"): for WhatsApp the list keeps the
+  // templates Meta approved in the sending number's own account; unknown (Meta not reachable) = every template, as before.
+  const sendingId = ch === 'WhatsApp' ? (wa.numberId || (pv && pv.waNumber && pv.waNumber.id) || (wa.state && wa.state.selected) || '') : '';
+  const [waOk, setWaOk] = useState(null); // { known, names }
+  useEffect(() => {
+    if (ch !== 'WhatsApp') { setWaOk(null); return undefined; }
+    let on = true;
+    api.get('/messaging/templates/wa-approved', { params: { numberId: sendingId || undefined } }).then((r) => { if (on) setWaOk(r.data); }).catch(() => { if (on) setWaOk(null); });
+    return () => { on = false; };
+  }, [ch, sendingId]);
+  const usable = useMemo(() => {
+    if (!usableAll || ch !== 'WhatsApp' || !waOk || !waOk.known) return usableAll;
+    const ok = new Set(waOk.names || []);
+    return usableAll.filter((t) => t.channel !== 'WhatsApp' || (t.waTemplateName && ok.has(t.waTemplateName)));
+  }, [usableAll, ch, waOk]);
+  const noneForNumber = ch === 'WhatsApp' && waOk && waOk.known && usableAll && usable && !usable.some((t) => t.channel === 'WhatsApp');
   // call
   const [script, setScript] = useState(null);
   const [vocab, setVocab] = useState(null);
@@ -429,6 +445,11 @@ export default function ContactDialog({
           <option value="__own">Write my own message</option>
         </Combo>
       </div>
+      {ch === 'WhatsApp' && waOk && waOk.known && (
+        <div className="small-muted" style={{ marginTop: -4, marginBottom: 8 }}>
+          {noneForNumber ? 'No WhatsApp template is approved by Meta for this number yet. Pick another number under Sending from, or get a template approved for it.' : 'Only the templates Meta approved for this number are listed.'}
+        </div>
+      )}
       {langs.length > 1 && purpose && (
         <div className="field"><label>Language</label>
           <div className="msg-filter">{langs.map((l) => <button key={l} type="button" className={`msg-chip${language === l ? ' on' : ''}`} onClick={() => setLanguage(l)}>{l}</button>)}</div>

@@ -49,6 +49,26 @@ router.get('/usable', async (req, res, next) => {
   } catch (err) { return next(err); }
 });
 
+// THE TEMPLATES META APPROVED FOR ONE NUMBER (founder 2026-11-04: "only ahh number templates matrame kanipinchali"): the names Meta
+// lists as APPROVED in that number's own WhatsApp account, so the message box offers only what that number can really send.
+// { known: false } when Meta cannot be asked (the box then shows every template, as before). Kept 5 minutes per account.
+const approvedCache = new Map();
+router.get('/wa-approved', async (req, res, next) => {
+  try {
+    if (!staff(req.user)) return res.status(403).json({ error: 'Not available to this login' });
+    const numberId = String(req.query.numberId || '');
+    const cfg = await require('../utils/whatsappCloud').whatsappConfig(numberId ? { numberId } : undefined); // eslint-disable-line global-require
+    if (!cfg || !cfg.configured || !cfg.wabaId || require('../utils/whatsappCloud').simulated(cfg)) return res.json({ known: false }); // eslint-disable-line global-require
+    const k = String(cfg.wabaId);
+    const c = approvedCache.get(k);
+    if (c && Date.now() - c.at < 5 * 60 * 1000) return res.json(c.v);
+    const got = await require('../outreach/tplFromMeta').listAt(cfg); // eslint-disable-line global-require
+    const v = got.error ? { known: false } : { known: true, names: [...new Set(got.list.filter((t) => String(t.status).toUpperCase() === 'APPROVED').map((t) => t.name))] };
+    if (!got.error) approvedCache.set(k, { at: Date.now(), v });
+    return res.json(v);
+  } catch (err) { return next(err); }
+});
+
 router.get('/', async (req, res, next) => {
   try {
     if (!T.canView(req.user)) return res.status(403).json({ error: 'Only an Admin, HR, a Team Lead or a manager can open Message templates.' });
