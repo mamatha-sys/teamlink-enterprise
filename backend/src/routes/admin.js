@@ -2289,6 +2289,8 @@ router.put('/integrations/:id/configure', requirePerm(null, 'administration', 'I
       return res.status(422).json({ ...shapeIntegration(channel, off), error: `Saved, but SMS is NOT switched on - fix this first: ${problems.join(' ')}`, problems, saved: true });
     }
   }
+  // WhatsApp: the form's details BEFORE this save, so the numbers that read them can keep them (waNumbers.keepOldNumbers, 2026-11-04)
+  const waBefore = channel.id === 'whatsapp' ? await require('../utils/whatsappCloud').legacyConfig().catch(() => null) : null; // eslint-disable-line global-require
   const row = await prisma.integration.update({
     where: { id: channel.id },
     data: {
@@ -2325,8 +2327,11 @@ router.put('/integrations/:id/configure', requirePerm(null, 'administration', 'I
     try {
       const WN = require('../utils/waNumbers'); // eslint-disable-line global-require
       const wa = require('../utils/whatsappCloud'); // eslint-disable-line global-require
+      // a new account's token / number in this form never disconnects the numbers that were working (founder 2026-11-04)
+      const kept = await WN.keepOldNumbers(waBefore, await wa.legacyConfig().catch(() => null));
       const r = await WN.afterLegacyTokenChange(req.user);
       const parts = [];
+      if (kept.length) parts.push(`Still connected as before: ${kept.map((k) => `${k.label} (${k.what})`).join(', ')}.`);
       let rejected = false; let why = '';
       if (r.noList) {
         const t = await wa.testConnection();

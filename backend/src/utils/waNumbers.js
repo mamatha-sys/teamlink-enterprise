@@ -958,6 +958,48 @@ async function afterLegacyTokenChange(user) {
   }
   return out;
 }
+// CONNECTING A NEW ACCOUNT NEVER DISCONNECTS THE OLD NUMBERS (founder 2026-11-04: "okka dani connect chestuntey inkoti disconnect ani
+// vastundhi"). The WhatsApp Business form holds ONE token (and the Main number's Phone number ID). Pasting a new account's token or
+// number there used to move every number that reads the form - the Main number and each number on "the shared token" - to the new
+// account, where Meta does not know them: Disconnected. Now, the moment the form changes, each such number that the NEW details cannot
+// reach but the OLD ones can keeps the old details as its own (token stored encrypted; the old Main number becomes a normal listed
+// number with its old Phone number ID). -> [{ label, what }]
+async function keepOldNumbers(before, after) {
+  const kept = [];
+  try {
+    if (!before || !before.token || !(await tableReady())) return kept;
+    const tokenChanged = before.token !== (after && after.token);
+    const phoneChanged = !!before.phoneId && before.phoneId !== (after && after.phoneId);
+    if (!tokenChanged && !phoneChanged) return kept;
+    const reach = async (token, phoneId) => {
+      if (!token || !phoneId) return false;
+      const g = await graphGet({ base: before.base, token }, `${encodeURIComponent(phoneId)}?fields=display_phone_number`).catch(() => null);
+      return !!(g && g.ok && g.json && (g.json.display_phone_number || g.json.id));
+    };
+    const rows = (await q('SELECT * FROM "WaNumber" WHERE "removedAt" IS NULL')).map(norm);
+    for (const r of rows) { // eslint-disable-line no-restricted-syntax
+      if (r.credSource === 'legacy') {
+        // the old Main number: the form now points at another number (or another account's token)
+        const phone = before.phoneId;
+        if (!phone) continue; // eslint-disable-line no-continue
+        if (!phoneChanged && await reach(after && after.token, phone)) continue; // eslint-disable-line no-await-in-loop, no-continue
+        if (!(await reach(before.token, phone))) continue; // eslint-disable-line no-await-in-loop, no-continue
+        await writeSecrets(r.id, { token: before.token, ...(before.appSecret ? { appSecret: before.appSecret } : {}) }); // eslint-disable-line no-await-in-loop
+        await run(`UPDATE "WaNumber" SET "credSource" = 'own', "tokenMode" = 'own', "phoneNumberId" = ?, "wabaId" = COALESCE(NULLIF("wabaId", ''), ?), "updatedAt" = ? WHERE "id" = ?`, phone, before.wabaId || '', nowIso(), r.id); // eslint-disable-line no-await-in-loop
+        kept.push({ label: r.label, what: 'kept its own number and token (it was the number of the WhatsApp Business form)' });
+      } else if (r.tokenMode === 'shared' && tokenChanged) {
+        if (await reach(after && after.token, r.phoneNumberId)) continue; // eslint-disable-line no-await-in-loop, no-continue
+        if (!(await reach(before.token, r.phoneNumberId))) continue; // eslint-disable-line no-await-in-loop, no-continue
+        await writeSecrets(r.id, { token: before.token }); // eslint-disable-line no-await-in-loop
+        await run(`UPDATE "WaNumber" SET "tokenMode" = 'own', "updatedAt" = ? WHERE "id" = ?`, nowIso(), r.id); // eslint-disable-line no-await-in-loop
+        kept.push({ label: r.label, what: 'kept the old token as its own' });
+      }
+    }
+    if (kept.length) bust();
+  } catch (e) { console.error('[wa-numbers] keep old numbers:', e.message); } // eslint-disable-line no-console
+  return kept;
+}
+
 // A real send failed in a way that says the number / token is not usable: the chip turns red at once (not only at the next check).
 async function noteSendFailure(numberId, f) {
   try {
@@ -1443,7 +1485,7 @@ module.exports = {
   resolveSender, planNumber, recheck, authorisedRows, mayUse, visibleNumberIds, holdsAccess, departmentsOfUser, rolesOfUser, isAdminLike,
   filterRows, threadNumbers, hiddenPersons, noteMessage, tagThread, numberOfMessage, numbersOfMessages, threadsOfContact, windowOpenOn, openWindowsOn, windowOpenFor, openWindowsFor, windowOpenSystem, anyUsable,
   rowByPhoneId, verifyTokens, appSecretOf, allAppSecrets, noteUnknown, unknownCount,
-  statusFromMeta, check, wabaFix, ensureSubscribed, noteSendOk, afterLegacyTokenChange, tagOf, reconnectAllowed, reconnectLimit: () => RECONNECT_LIMIT, noteSendFailure,
+  statusFromMeta, check, wabaFix, ensureSubscribed, noteSendOk, afterLegacyTokenChange, keepOldNumbers, tagOf, reconnectAllowed, reconnectLimit: () => RECONNECT_LIMIT, noteSendFailure,
   importMain, create, update, setDefault, setActive, remove, setAccess, historyCount,
   adminList, people, departmentCounts, effectivePeople, myNumbers, labelsOf, chipOf, validate, cleanE164,
   ASSIGNABLE_ROLES, WORDS, CHIP, UNKNOWN_PROVIDER, DDL,
