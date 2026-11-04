@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import api from '../../api';
 import {
-  KpiRow, KpiTile, Panel, QuickActions, Avatar, Icon, fmtNum, pctChange,
+  KpiRow, KpiTile, Panel, Avatar, Icon, fmtNum, pctChange,
 } from '../atskit/AtsKit.jsx';
 import { DATE_RANGES, rangeDates } from '../ui/PageFilterBar.jsx';
 import { plainWords } from '../ui/Guide.jsx';
@@ -83,17 +83,6 @@ const KPIS = [
   { key: 'hold', label: 'Hold', icon: 'pause', tone: 'slate', bad: true },
 ];
 
-// Quick reports: existing report tabs only (card id rides along for the
-// report's views switch).
-const QUICK = [
-  { tab: 'recruitment', card: 'people', icon: 'file', label: 'Applications report', sub: 'Every application, step by step' },
-  { tab: 'clients', card: 'clientsjobs', icon: 'building', label: 'Client-wise report', sub: 'Requirements and joinings per client' },
-  { tab: 'recruiters', card: 'team', icon: 'user', label: 'Recruiter performance', sub: 'Sent, interviews, joined' },
-  { tab: 'departments', card: 'depts', icon: 'chart', label: 'Department report', sub: 'Open requirements to joined, per department' },
-  { tab: 'daily', card: 'daily', icon: 'calendar', label: 'Daily & monthly summary', sub: 'What each recruiter did, day or month' },
-  { tab: 'rejections', card: 'rejections', icon: 'x', label: 'Rejection analysis', sub: 'Who rejects people, and why' },
-];
-
 const ACT_ICON = {
   added: 'plus', calls: 'chat', mails: 'send', followUps: 'refresh', reviewed: 'file', sentTl: 'team', sentClient: 'send',
   interviews: 'calendar', attended: 'check', feedback: 'chat', offers: 'star', joined: 'handshake',
@@ -139,6 +128,11 @@ export default function ReportsOverview({
   pf, setPf, queryFor, cat, canExport, busy, onExport, onDrill, onOpen, children,
 }) {
   const allowed = !!(cat && cat.view);
+  // THE PANELS ARE THE LEADS' (founder 2026-11-04: "ey role vallaki reports lo em vundalo, clear ga chusi modify cheyyu"): they read
+  // the team-wide reports, which a BDE / BDE TL does not open - those logins get the hiring funnel and their own report cards,
+  // never a panel that says "not part of your role".
+  const can = (id) => !!cat && (!Array.isArray(cat.reports) || cat.reports.includes(id));
+  const full = allowed && can('recruitment');
   const [error, setError] = useState('');
   const doExport = async (format) => { setError(''); const msg = await onExport(format); if (msg) setError(msg); };
   const isMonth = pf.range === 'month';
@@ -149,16 +143,16 @@ export default function ReportsOverview({
   const qTl = queryFor({ groupBy: 'tl' });
   const qLoc = queryFor({ groupBy: 'location' });
   const qPlain = queryFor({});
-  const dept = useGet(`/ats-reports/recruitment?${qDept}`, null, allowed);
-  const tl = useGet(`/ats-reports/recruitment?${qTl}`, null, allowed);
-  const loc = useGet(`/ats-reports/recruitment?${qLoc}`, null, allowed);
-  const recs = useGet(`/ats-reports/recruiters?${qPlain}`, null, allowed);
-  const fun = useGet(`/ats-reports/funnel?${qPlain}`, null, allowed);
+  const dept = useGet(`/ats-reports/recruitment?${qDept}`, null, full);
+  const tl = useGet(`/ats-reports/recruitment?${qTl}`, null, full);
+  const loc = useGet(`/ats-reports/recruitment?${qLoc}`, null, full);
+  const recs = useGet(`/ats-reports/recruiters?${qPlain}`, null, full);
+  const fun = useGet(`/ats-reports/funnel?${qPlain}`, null, allowed && can('funnel'));
   const tParams = useMemo(() => trendParams(pf), [pf]);
   const { anyTime, ...insightParams } = tParams;
-  const trend = useGet('/insights/ats', insightParams, allowed);
+  const trend = useGet('/insights/ats', insightParams, full);
   const dailyParams = pf.department ? { department: pf.department } : {};
-  const today = useGet('/ats-daily/day', dailyParams, allowed);
+  const today = useGet('/ats-daily/day', dailyParams, full);
 
   // Interviews scheduled per day (Daily report, month view) — only when the
   // trend is drawn day by day (a range of up to a month: one or two months).
@@ -166,8 +160,8 @@ export default function ReportsOverview({
     ? (trend.data.charts.find((c) => c.id === 'ats-trend') || trend.data.charts.find((c) => c.kind === 'trend')) : null;
   const tr = trChart && Array.isArray(trChart.rows) ? { ...trChart, period: trend.data.period } : null;
   const dayMonths = tr && tr.bucket === 'day' ? [...new Set(tr.rows.map((r) => String(r.key).slice(0, 7)))].slice(0, 2) : [];
-  const m1 = useGet('/ats-daily/month', { month: dayMonths[0], ...dailyParams }, allowed && dayMonths.length > 0);
-  const m2 = useGet('/ats-daily/month', { month: dayMonths[1], ...dailyParams }, allowed && dayMonths.length > 1);
+  const m1 = useGet('/ats-daily/month', { month: dayMonths[0], ...dailyParams }, full && dayMonths.length > 0);
+  const m2 = useGet('/ats-daily/month', { month: dayMonths[1], ...dailyParams }, full && dayMonths.length > 1);
 
   const drill = (tab, query, section, row, col, title) => onDrill({ tab, query, section, row, col, title });
 
@@ -200,15 +194,6 @@ export default function ReportsOverview({
   const locRest = locAll.slice(locTop.length).reduce((n, r) => n + num(locSec.get(r, 'applications')), 0);
   const funSec = sectionOf(fun.data, 'funnel');
 
-  // --- key insights (from the same department rows) ----------------------------
-  const named = deptRows.filter((r) => r.key !== NOT_SET);
-  const best = (k, pred = () => true) => named.filter(pred).reduce((b, r) => (!b || num(deptSec.get(r, k)) > num(deptSec.get(b, k)) ? r : b), null);
-  const hiConv = deptSec && best('conv', (r) => num(deptSec.get(r, 'applications')) > 0);
-  const hiApps = deptSec && best('applications');
-  const hiJoin = deptSec && best('joined');
-  const hiRej = deptSec && deptSec.has('rejected') ? best('rejected') : null;
-  const insight = (r, k, fmt) => (r && num(deptSec.get(r, k)) > 0 ? `${plainWords(String(r.c[0]))} (${fmt(deptSec.get(r, k))})` : null);
-
   // --- trend series ------------------------------------------------------------------
   const ivByDay = new Map();
   [m1.data, m2.data].forEach((m) => (m && Array.isArray(m.days) ? m.days : []).forEach((x) => ivByDay.set(x.date, num(x.interviews))));
@@ -233,10 +218,6 @@ export default function ReportsOverview({
     setPf({ ...pf, range: 'custom', from: next.from, to: next.to });
   };
   const allRef = useRef(null);
-  const toAll = () => allRef.current && allRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  const quick = QUICK.filter(() => allowed).map((q) => ({
-    key: q.tab, icon: q.icon, label: q.label, sub: q.sub, onClick: () => onOpen(q.tab, { card: q.card }),
-  }));
   const loadingTxt = <div className="ak-empty">Loading…</div>;
   const errTxt = (st) => (st.error ? <div className="ak-empty">{st.error}</div> : null);
 
@@ -244,7 +225,7 @@ export default function ReportsOverview({
     <div className="rv4">
       <div className="ak-page-head rv4-head">
         <div>
-          <h1>Reports &amp; Analytics</h1>
+          <h1>{full ? 'Reports & Analytics' : 'Reports'}</h1>
           <p>
             Track hiring performance, open any report and export it
             {cat && cat.scope ? <> — your area: <b>{cat.scope}</b></> : null}
@@ -262,7 +243,7 @@ export default function ReportsOverview({
             onChange={(e) => setPf({ ...pf, range: e.target.value, ...(e.target.value === 'custom' ? {} : { from: '', to: '' }) })}>
             {DATE_RANGES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
           </Combo>
-          {canExport && allowed && <ExportMenu busy={busy} onExport={doExport} />}
+          {canExport && full && <ExportMenu busy={busy} onExport={doExport} />}
         </div>
       </div>
 
@@ -274,7 +255,7 @@ export default function ReportsOverview({
       )}
       {error && <div className="notice red" style={{ marginBottom: 10 }}>{error}</div>}
 
-      {allowed && (
+      {full && (
         <>
           <KpiRow className="rv4-kpis">
             {KPIS.map((k) => {
@@ -300,7 +281,7 @@ export default function ReportsOverview({
             })}
           </KpiRow>
 
-          <div className="rv4-row rv4-r2">
+          <div className="rv4-row rv4-two">
             <Panel
               title="Application trend"
               sub={tr ? `${anyTime ? 'Last 12 months' : (tr.period && tr.period.label) || ''} · by ${tr.bucket}${otherFilters ? ' · client / person filters not applied' : ''}` : undefined}
@@ -315,7 +296,25 @@ export default function ReportsOverview({
                 : <div className="ak-empty">No applications in this period.</div>)}
             </Panel>
 
-            <Panel title="Department-wise performance" action={{ label: 'View details', onClick: () => onOpen('departments', { card: 'depts' }) }} flush>
+            <Panel title="Hiring funnel" action={{ label: 'View details', onClick: () => onOpen('funnel', { card: 'funnel' }) }}>
+              {fun.loading && !fun.data ? loadingTxt : errTxt(fun) || (funSec && funSec.rows.length && num(funSec.get(funSec.rows[0], 'count')) > 0 ? (
+                <FunnelShape
+                  steps={funSec.rows.map((r) => ({
+                    key: r.key,
+                    label: plainWords(String(r.c[0]).replace(/\s*\(.*\)\s*$/, '')),
+                    title: plainWords(String(r.c[0])),
+                    value: funSec.get(r, 'count'),
+                    pct: funSec.get(r, 'ofAll'),
+                    onClick: () => drill('funnel', qPlain, 'funnel', r.key, 'count', String(r.c[0])),
+                  }))}
+                />
+              ) : <div className="ak-empty">No applications in this period.</div>)}
+            </Panel>
+
+          </div>
+
+          <div className="rv4-row rv4-three">
+            <Panel title="Department-wise performance" action={{ label: 'View details', onClick: () => onOpen('departments', { card: 'funnel' }) }} flush>
               {dept.loading && !d ? loadingTxt : errTxt(dept) || (deptRows.length ? (
                 <table className="ak-table rv4-table">
                   <thead><tr><th>Department</th><th className="num">Applications</th><th className="num">Conversion %</th><th className="num">Joined</th></tr></thead>
@@ -334,12 +333,6 @@ export default function ReportsOverview({
               {deptRows.length > 5 && <div className="rv4-more">Top 5 of {fmtNum(deptRows.length)} by applications</div>}
             </Panel>
 
-            <Panel title="Quick reports" action={{ label: 'All reports', onClick: toAll }} className="rv4-quick">
-              <QuickActions items={quick} />
-            </Panel>
-          </div>
-
-          <div className="rv4-row rv4-r3">
             <Panel title="Top performing recruiters" action={{ label: 'View all', onClick: () => onOpen('recruiters', { card: 'team' }) }} flush>
               {recs.loading && !recs.data ? loadingTxt : errTxt(recs) || (topRecs.length ? (
                 <table className="ak-table rv4-table">
@@ -380,6 +373,28 @@ export default function ReportsOverview({
               ) : <div className="ak-empty">No team lead work in this period.</div>)}
             </Panel>
 
+          </div>
+
+          <div className="rv4-row rv4-two">
+            <Panel title="Location-wise performance" sub="Applications by requirement location" action={{ label: 'View all', onClick: () => onOpen('recruitment', { card: 'people' }, 'location') }}>
+              {loc.loading && !loc.data ? loadingTxt : errTxt(loc) || (locTop.length ? (
+                <ul className="rv4-locs">
+                  {[...locTop.map((r) => ({ key: r.key, label: r.key === NOT_SET ? 'Location not set' : String(r.c[0]), value: num(locSec.get(r, 'applications')), row: r })),
+                    ...(locRest > 0 ? [{ key: '__others', label: 'Others', value: locRest }] : [])].map((x) => (
+                    <li key={x.key}>
+                      <Icon name="pin" size={15} className="rv4-pin" />
+                      <span className="rv4-loc-label" title={x.label}>{x.label}</span>
+                      <span className="rv4-loc-track"><span style={{ width: `${Math.max(3, (x.value / Math.max(1, num(locSec.get(locTop[0], 'applications')))) * 100)}%` }} /></span>
+                      <span className="rv4-loc-val">
+                        {x.row ? <NumBtn value={x.value} onClick={() => drill('recruitment', qLoc, 'recruitment', x.key, 'applications', `${x.label} · Applications`)} /> : fmtNum(x.value)}
+                        <span className="rv4-loc-pct">({locTotal ? Math.round((x.value / locTotal) * 100) : 0}%)</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : <div className="ak-empty">No data available</div>)}
+            </Panel>
+
             <Panel title="Recent activity" sub={td ? `Today${td.selfOnly ? ' · your own work' : ''}` : undefined} action={{ label: 'View all', onClick: () => onOpen('daily', { card: 'daily' }) }}>
               {today.loading && !td ? loadingTxt : errTxt(today) || (
                 <>
@@ -404,71 +419,26 @@ export default function ReportsOverview({
               )}
             </Panel>
           </div>
-
-          <div className="rv4-row rv4-r4">
-            <Panel title="Hiring funnel" action={{ label: 'View details', onClick: () => onOpen('funnel', { card: 'funnel' }) }}>
-              {fun.loading && !fun.data ? loadingTxt : errTxt(fun) || (funSec && funSec.rows.length && num(funSec.get(funSec.rows[0], 'count')) > 0 ? (
-                <FunnelShape
-                  steps={funSec.rows.map((r) => ({
-                    key: r.key,
-                    label: plainWords(String(r.c[0]).replace(/\s*\(.*\)\s*$/, '')),
-                    title: plainWords(String(r.c[0])),
-                    value: funSec.get(r, 'count'),
-                    pct: funSec.get(r, 'ofAll'),
-                    onClick: () => drill('funnel', qPlain, 'funnel', r.key, 'count', String(r.c[0])),
-                  }))}
-                />
-              ) : <div className="ak-empty">No applications in this period.</div>)}
-            </Panel>
-
-            <Panel title="Location-wise performance" sub="Applications by requirement location" action={{ label: 'View all', onClick: () => onOpen('recruitment', { card: 'people' }, 'location') }}>
-              {loc.loading && !loc.data ? loadingTxt : errTxt(loc) || (locTop.length ? (
-                <ul className="rv4-locs">
-                  {[...locTop.map((r) => ({ key: r.key, label: r.key === NOT_SET ? 'Location not set' : String(r.c[0]), value: num(locSec.get(r, 'applications')), row: r })),
-                    ...(locRest > 0 ? [{ key: '__others', label: 'Others', value: locRest }] : [])].map((x) => (
-                    <li key={x.key}>
-                      <Icon name="pin" size={15} className="rv4-pin" />
-                      <span className="rv4-loc-label" title={x.label}>{x.label}</span>
-                      <span className="rv4-loc-track"><span style={{ width: `${Math.max(3, (x.value / Math.max(1, num(locSec.get(locTop[0], 'applications')))) * 100)}%` }} /></span>
-                      <span className="rv4-loc-val">
-                        {x.row ? <NumBtn value={x.value} onClick={() => drill('recruitment', qLoc, 'recruitment', x.key, 'applications', `${x.label} · Applications`)} /> : fmtNum(x.value)}
-                        <span className="rv4-loc-pct">({locTotal ? Math.round((x.value / locTotal) * 100) : 0}%)</span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : <div className="ak-empty">No data available</div>)}
-            </Panel>
-
-            <Panel title="Key insights" icon="bolt" iconTone="amber" sub="From the department numbers above" action={{ label: 'View all', onClick: () => onOpen('departments', { card: 'depts' }) }}>
-              {dept.loading && !d ? loadingTxt : errTxt(dept) || (
-                <div className="rv4-insights">
-                  {[
-                    { key: 'conv', icon: 'trend', tone: 'green', label: 'Highest conversion rate', text: insight(hiConv, 'conv', (v) => `${v}%`), none: 'No joinings yet', row: hiConv },
-                    { key: 'apps', icon: 'file', tone: 'blue', label: 'Most applications', text: insight(hiApps, 'applications', fmtNum), none: 'No applications yet', row: hiApps },
-                    { key: 'join', icon: 'handshake', tone: 'violet', label: 'Highest joined', text: insight(hiJoin, 'joined', fmtNum), none: 'No joinings yet', row: hiJoin },
-                    { key: 'rej', icon: 'alert', tone: 'red', label: 'Needs attention — most rejected', text: insight(hiRej, 'rejected', (v) => `${fmtNum(num(v))} rejected`), none: 'No rejections', row: hiRej },
-                  ].map((x) => (
-                    <button
-                      key={x.key}
-                      type="button"
-                      className="rv4-insight"
-                      disabled={!x.text}
-                      onClick={() => x.row && onOpen('departments', { card: 'depts', department: x.row.key })}
-                      title={x.text ? 'Open the department report for this department' : undefined}
-                    >
-                      <span className={`rv4-ins-ic ak-t-${x.tone}`}><Icon name={x.icon} size={16} /></span>
-                      <span className="rv4-ins-txt">
-                        <span className="rv4-ins-label">{x.label}</span>
-                        <span className="rv4-ins-val">{x.text || x.none}</span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </Panel>
-          </div>
         </>
+      )}
+      {allowed && !full && can('funnel') && (
+        <div className="rv4-row rv4-one">
+          <Panel title="Hiring funnel" action={{ label: 'View details', onClick: () => onOpen('funnel', { card: 'funnel' }) }}>
+            {fun.loading && !fun.data ? loadingTxt : errTxt(fun) || (funSec && funSec.rows.length && num(funSec.get(funSec.rows[0], 'count')) > 0 ? (
+              <FunnelShape
+                steps={funSec.rows.map((r) => ({
+                  key: r.key,
+                  label: plainWords(String(r.c[0]).replace(/\s*\(.*\)\s*$/, '')),
+                  title: plainWords(String(r.c[0])),
+                  value: funSec.get(r, 'count'),
+                  pct: funSec.get(r, 'ofAll'),
+                  onClick: () => drill('funnel', qPlain, 'funnel', r.key, 'count', String(r.c[0])),
+                }))}
+              />
+            ) : <div className="ak-empty">No applications in this period.</div>)}
+          </Panel>
+
+        </div>
       )}
 
       <section className="rv4-all" ref={allRef}>

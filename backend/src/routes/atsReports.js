@@ -2453,7 +2453,16 @@ router.get('/catalog', guarded(async (req, res) => {
   ]);
   // A recruiter's Reports screen is the own-only one (OwnReports.jsx): the catalog says so, and offers no team / money card.
   const ownOnly = OWN.isOwnOnly(req.user);
+  // THE REPORTS THIS LOGIN OPENS (founder 2026-11-04: "ey role vallaki reports lo em vundalo, clear ga chusi modify cheyyu"): the
+  // screens show only these, so nobody meets a card or a panel that answers "not part of your role". null = every report.
+  //   Recruiter  their own numbers (utils/ownOnly.js)       BDE  client-wise (BDE_REPORTS)
+  //   BDE TL     the BDE side (BDE_TL_REPORTS)              HR   internal hiring: no client, money or partner reports
+  let reports = null;
+  if (ownOnly) reports = OWN.OWN_REPORTS;
+  else if (isBdeTeam(req.user)) reports = bdeTlOf(req.user) ? BDE_TL_REPORTS : BDE_REPORTS;
+  else if (scopeOf(req.user).atsRole === 'HR' && !scopeOf(req.user).global) reports = HR_REPORTS;
   res.json({
+    reports,
     view, export: exp, revenue: PLUSX.mayRevenue(req.user), myResults: mine, jobPortal: portal, accounts, myBusiness: myBiz,
     recruiterRevenue: PLUSX.mayRevenue(req.user), // B9.7: the same gate as Client revenue
     scope: view ? scopeLabel(req.user, 'ats') : null,
@@ -2626,6 +2635,8 @@ const isBdeTeam = (user) => { const fl = require('../utils/clientRedact').privac
 // performance and the client promises (SLA) too, and every report filters by BDE. Recruiter / TL filters stay cut.
 const BDE_TL_REPORTS = [...BDE_REPORTS, 'recruiters', 'sla'];
 const bdeTlOf = (user) => require('../utils/scope').isBdeTl(user); // eslint-disable-line global-require
+// HR runs TeamLink's own hiring (every number is cut to internal openings above): the reports that mean something there.
+const HR_REPORTS = ['funnel', 'candidates', 'recruitment', 'departments', 'interviews', 'joining', 'joindrop', 'timetofill', 'sla', 'followups', 'rejections', 'sources', 'came', 'daily', 'workflow', 'requirements', 'ai'];
 router.param('report', (req, res, next, id) => {
   if (!isBdeTeam(req.user)) return next();
   if (bdeTlOf(req.user)) {

@@ -202,12 +202,6 @@ export default function TeamOverview({
   const mostFu = fuOwners.reduce((acc, o) => (fuOpen(o) > 0 && (!acc || fuOpen(o) > fuOpen(acc)) ? o : acc), null);
   const mostWaiting = best(active.filter((r) => r.counts), (r) => Number(r.counts.needsAction) || 0);
 
-  // --- members list ------------------------------------------------------------
-  const members = [...active]
-    .sort((a, b) => ((b.counts?.interviews || 0) + (b.counts?.joined || 0)) - ((a.counts?.interviews || 0) + (a.counts?.joined || 0))
-      || String(a.name).localeCompare(String(b.name)))
-    .slice(0, TOP);
-
   const tlRows = [...tls].sort((a, b) => (b.counts?.candidates || 0) - (a.counts?.candidates || 0) || String(a.name).localeCompare(String(b.name)));
   const recruitersOf = (tl) => recruiters.filter((r) => r.tlUserId === tl.id);
 
@@ -217,7 +211,7 @@ export default function TeamOverview({
     { key: 'tl', label: 'Team leads', value: tls.length, color: C.violet },
     { key: 'bde', label: 'Client managers', value: bdes.length, color: C.green },
     { key: 'oth', label: 'Others', value: others.length, color: C.slate },
-  ].filter((s) => s.value > 0 || s.key !== 'oth');
+  ].filter((s) => s.value > 0 || s.key !== 'oth').filter((s) => !bdeTl || !['rec', 'tl'].includes(s.key));
   const pct = (n, of) => (of ? `${Math.round((n / of) * 100)}%` : '—');
 
   // --- calendar -----------------------------------------------------------------------
@@ -393,28 +387,41 @@ export default function TeamOverview({
           </Panel>
         </div>
 
+        {/* ONE list of who does best (founder 2026-11-04: "clear ga, neat ga"): "Team Members" showed the same people in the same order */}
         <div className="ak-span-4 tv4-cell">
-          <Panel title="Team Members" action={{ label: 'View all', onClick: () => goView('people') }} flush>
-            {!members.length ? <div className="ak-empty">{loading ? 'Loading…' : 'Nobody on the team in your area yet.'}</div> : (
-              <ul className="tv4-members">
-                {members.map((r) => (
-                  <li key={r.id}>
-                    <button type="button" className="tv4-member" onClick={() => onOpen(r.id)} title={`Open ${r.name}'s 360`}>
-                      <Avatar name={r.name} size={30} />
-                      <span className="tv4-member-txt">
-                        <span className="tv4-member-name">{r.name}</span>
-                        <span className="tv4-member-role">{roleText(r)}{r.department ? ` · ${r.department}` : ''}</span>
-                      </span>
-                      <span className="tv4-member-n">{`${fmtNum(r.counts?.interviews || 0)} int | ${fmtNum(r.counts?.joined || 0)} join`}</span>
-                      {onLeave && onLeave.has(r.id) ? <Pill tone="amber">On leave</Pill> : <Pill tone="green">Active</Pill>}
-                    </button>
-                  </li>
-                ))}
-              </ul>
+          <Panel title="Top Team Performers" sub="Joined, then interviews" action={{ label: 'View all', onClick: () => goView('people') }} flush>
+            {!performers.length ? <div className="ak-empty">{loading ? 'Loading…' : 'Nobody here has a person at the client yet.'}</div> : (
+              <table className="ak-table tv4-perf">
+                <thead>
+                  <tr><th>#</th><th>Name</th><th className="num">Interviews</th><th className="num">Joined</th><th className="num" title="Joined ÷ (sent to client + at interview + selected + joined)">Join %</th></tr>
+                </thead>
+                <tbody>
+                  {performers.map((r, i) => {
+                    const c = r.counts;
+                    const rate = joinRate(c);
+                    return (
+                      <tr key={r.id} className="ak-row-click" onClick={() => onOpen(r.id)}>
+                        <td className="tv4-rank">{i + 1}</td>
+                        <td>
+                          <span className="ak-person">
+                            <Avatar name={r.name} size={24} />
+                            <span className="tv4-perf-who"><span>{r.name}</span><small>{roleText(r)}</small></span>
+                          </span>
+                        </td>
+                        <td className="num">{c.interviews ? <Link to={metricLink(r.id, 'interviews')} onClick={(e) => e.stopPropagation()}>{fmtNum(c.interviews)}</Link> : 0}</td>
+                        <td className="num">{c.joined ? <Link to={metricLink(r.id, 'joined')} onClick={(e) => e.stopPropagation()}>{fmtNum(c.joined)}</Link> : 0}</td>
+                        <td className="num">{rate === null ? '—' : `${rate.toFixed(1)}%`}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             )}
           </Panel>
         </div>
 
+        {/* the recruiting side: a BDE TL leads BDEs, so these stay empty for them and are not drawn */}
+        {!bdeTl && (
         <div className={`${calendarPanel ? 'ak-span-5' : 'ak-span-7'} tv4-cell`}>
           <Panel title="Workload by Team Lead" sub="Click a row for the recruiters under them"
             action={tls.length ? { label: 'View all', onClick: () => goView('people', { role: 'TL' }) } : null} flush>
@@ -468,42 +475,13 @@ export default function TeamOverview({
           </Panel>
         </div>
 
-        <div className={`${calendarPanel ? 'ak-span-4' : 'ak-span-5'} tv4-cell`}>{activityPanel}</div>
+        )}
+
+        <div className={`${calendarPanel ? (bdeTl ? 'ak-span-9' : 'ak-span-4') : (bdeTl ? 'ak-span-12' : 'ak-span-5')} tv4-cell`}>{activityPanel}</div>
         {calendarPanel && <div className="ak-span-3 tv4-cell">{calendarPanel}</div>}
 
+        {!bdeTl && (
         <div className="ak-span-4 tv4-cell">
-          <Panel title="Top Team Performers" sub="Joined, then interviews" action={{ label: 'View all', onClick: () => goView('people') }} flush>
-            {!performers.length ? <div className="ak-empty">{loading ? 'Loading…' : 'Nobody here has a person at the client yet.'}</div> : (
-              <table className="ak-table tv4-perf">
-                <thead>
-                  <tr><th>#</th><th>Name</th><th className="num">Interviews</th><th className="num">Joined</th><th className="num" title="Joined ÷ (sent to client + at interview + selected + joined)">Join %</th></tr>
-                </thead>
-                <tbody>
-                  {performers.map((r, i) => {
-                    const c = r.counts;
-                    const rate = joinRate(c);
-                    return (
-                      <tr key={r.id} className="ak-row-click" onClick={() => onOpen(r.id)}>
-                        <td className="tv4-rank">{i + 1}</td>
-                        <td>
-                          <span className="ak-person">
-                            <Avatar name={r.name} size={24} />
-                            <span className="tv4-perf-who"><span>{r.name}</span><small>{roleText(r)}</small></span>
-                          </span>
-                        </td>
-                        <td className="num">{c.interviews ? <Link to={metricLink(r.id, 'interviews')} onClick={(e) => e.stopPropagation()}>{fmtNum(c.interviews)}</Link> : 0}</td>
-                        <td className="num">{c.joined ? <Link to={metricLink(r.id, 'joined')} onClick={(e) => e.stopPropagation()}>{fmtNum(c.joined)}</Link> : 0}</td>
-                        <td className="num">{rate === null ? '—' : `${rate.toFixed(1)}%`}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-          </Panel>
-        </div>
-
-        <div className="ak-span-3 tv4-cell">
           <Panel title="Team Workload" sub="People in process, per recruiter">
             <BarList
               showShare
@@ -517,11 +495,13 @@ export default function TeamOverview({
           </Panel>
         </div>
 
-        <div className="tv4-span-2 tv4-cell">
+        )}
+
+        <div className="ak-span-3 tv4-cell">
           <Panel title="Quick Actions"><QuickActions items={quick} /></Panel>
         </div>
 
-        <div className="ak-span-3 tv4-cell">
+        <div className={`${bdeTl ? 'ak-span-9' : 'ak-span-5'} tv4-cell`}>
           <Panel title="Key Insights" icon="bolt" iconTone="amber">
             <div className="tv4-insights">
               <Insight icon="trend" tone="green" label="Highest join rate" who={bestRate && bestRate.r.name}

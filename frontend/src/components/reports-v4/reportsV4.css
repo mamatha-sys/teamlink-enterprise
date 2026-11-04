@@ -163,3 +163,8 @@
 .rv4 .rv4-trunc{max-width:260px;overflow:visible;text-overflow:clip;white-space:normal;overflow-wrap:anywhere;line-height:1.3}
 .rv4 .rv4-trunc.ak-person{max-width:none}
 .rv4 .ak-person span:last-child{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
+/* the landing rows (2026-11-04): two, three or one panel a row */
+.rv4 .rv4-two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.rv4 .rv4-three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.rv4 .rv4-one{grid-template-columns:minmax(0,1fr)}
+@media (max-width:760px){.rv4 .rv4-two,.rv4 .rv4-three{grid-template-columns:minmax(0,1fr)}}

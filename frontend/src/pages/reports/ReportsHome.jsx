@@ -15,47 +15,78 @@ import { useReportCatalog } from './ReportBits.jsx';
 // A report tab another screen adds to ATS_REPORT_TABS without a card here
 // still gets one, under "More".
 // ---------------------------------------------------------------------------
-// ATS layout v3 §5 (2026-10-03): the seven chart reports first — each its
-// own card, at most three charts on its screen — then everything that was
-// here before (Daily report, Supply vs demand, Results vs target, Time to
-// fill … all still one click away). The same report may sit on two cards; the
-// card it was opened from rides in the URL (?card=) for its views switch.
+// ONE CARD PER REPORT, IN SIX PLAIN GROUPS (founder 2026-11-04: "reports & team module lo antha, chaala messy ga, clumsy ga
+// vundhi ... ey role vallaki reports lo em vundalo, clear ga chusi modify cheyyu"). Before, the same report sat on two or three
+// cards under different names and every login saw every card - even the ones the server then refused. Now each report has one
+// card and one name, a card's views are the closely related reports, and a login sees only the cards (and the views) its role
+// opens: GET /api/ats-reports/catalog -> reports (routes/atsReports.js). Nothing was removed: every report is still here.
 export const REPORT_GROUPS = [
   {
-    id: 'main',
-    title: 'Main reports',
+    id: 'progress',
+    title: 'Hiring progress',
     cards: [
-      { id: 'clientsjobs', icon: '🏢', title: 'Client-wise requirements & joinings', answers: 'Which clients get their requirements filled, and which are stuck?', views: [['clients', 'Clients'], ['requirements', 'Requirements'], ['specialisations', 'Supply vs demand']] },
-      { id: 'depts', icon: '🗂️', title: 'Department performance', answers: 'How is each department doing, from open requirements to joined?', views: [['departments', 'Departments'], ['funnel', 'Funnel']] },
-      { id: 'team', icon: '👥', title: 'Recruiter & BDE performance', answers: 'Who sends people, gets interviews and joinings?', views: [['recruiters', 'Recruiters & BDEs'], ['targets', 'Against target'], ['costperhire', 'Cost per hire']] },
-      { id: 'teamwise', icon: '📥', title: 'Team & person reports', answers: 'Every number for each team and each person, by day, week or month — and download it.', views: [['teamwise', 'Team & person']] },
-      { id: 'rejections', icon: '✋', title: 'Rejection analysis', answers: 'Who rejects people, and why?', views: [['rejections', 'Rejection reasons']] },
-      { id: 'ttf', icon: '⚡', title: 'Time to hire', answers: 'How many days to fill a requirement, and how long each step takes?', views: [['timetofill', 'Time to fill'], ['sla', 'Time in each step']] },
-      { id: 'sources', icon: '🧲', title: 'Source-wise candidates', answers: 'Where do candidates come from, and who joins?', views: [['came', 'People & dates'], ['sources', 'All sources'], ['quality', 'Best sources'], ['campaigns', 'Campaigns & referrals'], ['partners', 'Partners']] },
-      { id: 'revenue', icon: '💰', title: 'Revenue', answers: 'How much did we invoice and receive, month by month?', views: [['revenue', 'Client revenue'], ['recruiter-revenue', 'Recruiter revenue']], needs: 'revenue' },
+      { id: 'funnel', icon: '🔻', title: 'Hiring funnel', answers: 'How many people go from applied to joined, by step and by department?', views: [['funnel', 'Steps'], ['departments', 'By department']] },
+      { id: 'people', icon: '🧭', title: 'People in process', answers: 'Where is everyone now, and how is each team doing?', views: [['candidates', 'Where they are'], ['recruitment', 'By team']] },
+      { id: 'daily', icon: '📅', title: 'Daily report', answers: 'What was done today, and day by day this month?', views: [['daily', 'Daily report']] },
+      { id: 'workflow', icon: '🔀', title: 'Hiring steps', answers: 'Every hiring step, with how many people are at each.', views: [['workflow', 'Hiring steps']] },
     ],
   },
   {
-    id: 'more',
-    title: 'More reports',
+    id: 'people',
+    title: 'Team & people',
     cards: [
-      { id: 'daily', icon: '📅', title: 'Daily report', answers: 'What did each recruiter do today?', views: [['daily', 'Daily report']] },
+      { id: 'team', icon: '👥', title: 'Recruiter & BDE performance', answers: 'Who sends people, gets interviews and joinings - and who is reaching target?', views: [['recruiters', 'Performance'], ['targets', 'Against target'], ['costperhire', 'Cost per hire']] },
+      { id: 'teamwise', icon: '📥', title: 'Team & person numbers', answers: 'Every number for each team and each person, by day, week or month - and download it.', views: [['teamwise', 'Team & person']] },
+    ],
+  },
+  {
+    id: 'clients',
+    title: 'Clients & requirements',
+    cards: [
+      { id: 'clientsjobs', icon: '🏢', title: 'Client-wise requirements', answers: 'Which clients get their requirements filled, and which are stuck?', views: [['clients', 'Clients'], ['requirements', 'Requirements']] },
+      { id: 'mybusiness', icon: '💼', title: 'My business', answers: 'My clients, my requirements and my follow-ups in one place.', views: [['mybusiness', 'My business']] },
       { id: 'supply', icon: '⚖️', title: 'Supply vs demand', answers: 'Which specializations need more candidates?', views: [['specialisations', 'Supply vs demand']] },
-      { id: 'targets', icon: '🎯', title: 'Results vs target', answers: 'Who is reaching their target this month?', views: [['targets', 'Against target'], ['recruiters', 'All numbers']] },
-      { id: 'funnel', icon: '🔻', title: 'Funnel', answers: 'How many people go from applied to joined?', views: [['funnel', 'Steps'], ['departments', 'By department']] },
-      { id: 'people', icon: '🧭', title: 'People in process', answers: 'Where is everyone now, and who waits too long?', views: [['candidates', 'Where they are'], ['recruitment', 'By team']] },
-      { id: 'ops', icon: '⏱️', title: 'Late and waiting', answers: 'What is late: steps, follow-ups, interviews, joining?', views: [['sla', 'Late and waiting'], ['followups', 'Follow-ups'], ['interviews', 'Interviews'], ['joining', 'Joining'], ['ai', 'AI interviews']] },
-      // B8: people added although they did not meet the job's rules.
-      { id: 'joindrop', icon: '🤝', title: 'Joinings and drops', answers: 'Who joined, who dropped, how many replacements, and what happened with each client?', views: [['joindrop', 'Joinings and drops']] },
+    ],
+  },
+  {
+    id: 'interviews',
+    title: 'Interviews & joining',
+    cards: [
+      { id: 'interviews', icon: '🗓️', title: 'Interviews', answers: 'Interviews booked, done and waiting for feedback - and the AI interviews.', views: [['interviews', 'Interviews'], ['ai', 'AI interviews']] },
+      { id: 'joining', icon: '🤝', title: 'Joinings and drops', answers: 'Who is joining, who joined, who dropped, and the replacements.', views: [['joining', 'Joining'], ['joindrop', 'Joinings and drops']] },
+    ],
+  },
+  {
+    id: 'speed',
+    title: 'Speed & quality',
+    cards: [
+      { id: 'ttf', icon: '⚡', title: 'Time to hire', answers: 'How many days to fill a requirement?', views: [['timetofill', 'Time to fill']] },
+      { id: 'ops', icon: '⏱️', title: 'Late & waiting', answers: 'What is late: steps past their time, follow-ups not done?', views: [['sla', 'Late steps'], ['followups', 'Follow-ups']] },
+      { id: 'rejections', icon: '✋', title: 'Rejections', answers: 'Who rejects people, and why?', views: [['rejections', 'Rejection reasons']] },
       { id: 'overrides', icon: '⚠️', title: 'Added by override', answers: 'Who was added although they did not fit the requirement, and why?', views: [['overrides', 'Added by override']] },
-      { id: 'workflow', icon: '🔀', title: 'Hiring steps', answers: 'All hiring steps, with how many people are at each.', views: [['workflow', 'Hiring steps']] },
-      { id: 'mybusiness', icon: '💼', title: 'My business', answers: 'My clients, my requirements and my follow-ups in one place.', views: [['mybusiness', 'My business']], needs: 'myBusiness' },
-      { id: 'myresults', icon: '🏁', title: 'My results', answers: 'What did I send, and who joined?', link: '/reports/my-results', needs: 'myResults', open: true },
-      { id: 'portal', icon: '🌐', title: 'Job portal', answers: 'How many people applied from our website?', views: [['jobportal', 'Job portal']], needs: 'jobPortal' },
+    ],
+  },
+  {
+    id: 'sources',
+    title: 'Sources & money',
+    cards: [
+      { id: 'sources', icon: '🧲', title: 'Where candidates come from', answers: 'Which sources bring people, and who joins from each?', views: [['came', 'People & dates'], ['sources', 'All sources'], ['quality', 'Best sources'], ['campaigns', 'Campaigns & referrals'], ['partners', 'Partners']] },
+      { id: 'portal', icon: '🌐', title: 'Job portal', answers: 'How many people applied from our website?', views: [['jobportal', 'Job portal']] },
+      { id: 'revenue', icon: '💰', title: 'Revenue', answers: 'How much did we invoice and receive, month by month?', views: [['revenue', 'Client revenue'], ['recruiter-revenue', 'Recruiter revenue']] },
       { id: 'accounts', icon: '🧾', title: 'Accounts reports', answers: 'Invoices, payments and dues in detail.', link: '/reports/accounts', needs: 'accounts', open: true },
     ],
   },
 ];
+
+// MAY THIS LOGIN OPEN THIS REPORT? The catalog's answer: a few reports have their own switch, the rest are the role's list
+// (catalog.reports; null = every report for a login with ATS Reports).
+const OWN_SWITCH = { mybusiness: 'myBusiness', jobportal: 'jobPortal', revenue: 'revenue', 'recruiter-revenue': 'recruiterRevenue' };
+export function mayOpen(cat, id) {
+  if (!cat) return false;
+  if (OWN_SWITCH[id]) return !!cat[OWN_SWITCH[id]];
+  if (Array.isArray(cat.reports)) return cat.reports.includes(id);
+  return !!cat.view;
+}
 
 // The card a report tab belongs to (for the views switch and the title).
 export function cardOfTab(tab, extraTabs = [], cardId = '') {
@@ -78,7 +109,7 @@ export function cardOfTab(tab, extraTabs = [], cardId = '') {
 function allowed(card, cat) {
   if (!cat) return false;
   if (card.needs) return !!cat[card.needs];
-  return !!cat.view;
+  return (card.views || []).some(([id]) => mayOpen(cat, id));
 }
 
 // embedded: drawn under the Reports & Analytics overview (2026-10-08) — the
@@ -89,9 +120,10 @@ export default function ReportsHome({ tabs = [], onOpen, embedded = false }) {
   const extra = tabs.filter(([id]) => !known.has(id)).map(([id, label]) => ({ id, icon: '📊', title: label, answers: '', views: [[id, label]] }));
   const groups = REPORT_GROUPS.map((g) => ({
     ...g,
-    cards: [...g.cards, ...(g.id === 'more' ? extra : [])]
-      // a report card shows only when its first view is still a tab here
-      .filter((c) => c.link || tabs.some(([id]) => id === c.views[0][0]))
+    cards: [...g.cards, ...(g.id === 'speed' ? extra : [])]
+      // only the views that are still a tab here AND that this login opens; a card with none left is not shown
+      .map((c) => (c.link ? c : { ...c, views: c.views.filter(([id]) => tabs.some(([t]) => t === id) && mayOpen(cat, id)) }))
+      .filter((c) => c.link || c.views.length)
       .filter((c) => allowed(c, cat)),
   })).filter((g) => g.cards.length);
 
@@ -113,6 +145,7 @@ export default function ReportsHome({ tabs = [], onOpen, embedded = false }) {
                     <span className="rphome-t">{c.title}</span>
                     {c.answers && <span className="rphome-a">{c.answers}</span>}
                     {c.id === 'revenue' && <span className="rphome-lock">Only Super Admin, Admin and Accounts see this</span>}
+                    {c.views && c.views.length > 1 && <span className="rphome-views">{c.views.map(([, l]) => l).join(' · ')}</span>}
                   </span>
                 </>
               );

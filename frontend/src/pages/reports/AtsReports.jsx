@@ -17,7 +17,7 @@ import ListPageHeader, {
 } from '../../components/ui/ListPageHeader.jsx';
 // Section 17 (2026-10-03): the landing page of report cards, and the small
 // pieces every report uses (compare, "12 of 20", Excel / PDF buttons).
-import ReportsHome, { cardOfTab } from './ReportsHome.jsx';
+import ReportsHome, { cardOfTab, mayOpen } from './ReportsHome.jsx';
 import MyBusinessReports from './MyBusinessReports.jsx';
 // Reports & Analytics overview on the landing page (redesign 2026-10-08).
 import ReportsOverview from '../../components/reports-v4/ReportsOverview.jsx';
@@ -678,7 +678,7 @@ function AtsReportsFull({ fixedTab = '' } = {}) {
   }
 
   const card = (own && OWN_CARDS[tab]) || cardOfTab(tab, ATS_REPORT_TABS, params.get('card')) || { title: 'Report', answers: '', views: [[tab, tab]] };
-  const views = own ? [] : (card.views || []).filter(([id]) => TAB_IDS.includes(id));
+  const views = own ? [] : (card.views || []).filter(([id]) => TAB_IDS.includes(id) && (!cat || mayOpen(cat, id) || id === tab)); // only the views this role opens (2026-11-04)
   const back = fixedTab ? null : <button type="button" className="rpv-back" onClick={() => goTab('')}>← All reports</button>;
   const viewSwitch = !fixedTab && views.length > 1 ? (
     <span className="rpv-views" role="tablist" aria-label="Views of this report">

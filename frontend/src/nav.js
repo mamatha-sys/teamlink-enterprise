@@ -416,9 +416,9 @@ export function atsRoleOf(user) {
 const ROLE_LABELS = {
   RECRUITER: {
     dashboard: 'My Work', 'clients-req': 'My Requirements', candidates: 'My Candidates',
-    calendar: 'My Interviews', 'reports-team': 'My Results',
+    calendar: 'My Interviews', 'reports-team': 'My Reports',
   },
-  BDE: { dashboard: 'My Work', 'clients-req': 'Clients & Requirements', 'reports-team': 'My Results' },
+  BDE: { dashboard: 'My Work', 'clients-req': 'Clients & Requirements', 'reports-team': 'My Reports' },
   TL: { dashboard: 'My Team' },
   // THE HR DESK (user, 2026-10-13): TeamLink's own openings only, never clients. Same slot, same routes.
   HR: { 'clients-req': 'Internal Hiring', 'reports-team': 'Reports' },
@@ -426,8 +426,9 @@ const ROLE_LABELS = {
 const ROLE_ICONS = { 'reports-team': { RECRUITER: '🗂️', BDE: '🗂️' } };
 // The tabs inside a module, in a recruiter's / BDE's own words.
 const ROLE_TAB_LABELS = {
-  RECRUITER: { '/requirements': 'My Requirements', '/ats/team': 'My Workload' },
-  BDE: { '/clients': 'My Clients', '/requirements': 'Requirements', '/ats/team': 'My Workload' },
+  // one name for one screen (2026-11-04): the sidebar entry, its Reports tab and the page all say "My reports"
+  RECRUITER: { '/requirements': 'My Requirements', '/reports/ats': 'My reports', '/ats/team': 'My Workload' },
+  BDE: { '/clients': 'My Clients', '/requirements': 'Requirements', '/reports/ats': 'My reports', '/ats/team': 'My Workload' },
   HR: { '/requirements': 'Internal requirements' },
 };
 export function moduleTabsFor(user, tabs) {

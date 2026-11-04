@@ -1106,8 +1106,10 @@ export default function Team() {
   // Where "Performance report" / "Daily report" go: a Recruiter / BDE to their
   // own results when the role has them, everyone else to ATS Reports.
   const ownResults = selfMode && can(user, null, 'reports', 'My Results', 'view');
-  const reportTo = ownResults ? '/reports/my-results' : canReports ? '/reports/ats?tab=recruiters' : null;
-  const dailyTo = ownResults ? '/reports/my-results' : canReports ? '/reports/ats?tab=daily' : null;
+  // a BDE's own numbers are My business (the recruiter-wise and daily reports are not part of the BDE view, 2026-11-04)
+  const bdeSelf = selfMode && atsRole === 'BDE';
+  const reportTo = ownResults ? '/reports/my-results' : bdeSelf ? '/reports/ats?tab=mybusiness' : canReports ? '/reports/ats?tab=recruiters' : null;
+  const dailyTo = ownResults ? '/reports/my-results' : bdeSelf ? null : canReports ? '/reports/ats?tab=daily' : null;
 
   // 360 drawer — closes whenever the address changes (a number was followed).
   const [openPerson, setOpenPerson] = useState(null);
