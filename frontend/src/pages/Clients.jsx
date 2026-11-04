@@ -496,6 +496,9 @@ export default function Clients() {
   const seeAgreement = allowedCols.includes('agreement');
   const activeN = filtered.filter((c) => statusOf(c) === 'Active').length;
   const prospectN = filtered.filter((c) => statusOf(c) === 'Prospect').length;
+  // INACTIVE (founder 2026-11-04, for the BDE / BDE TL logins: "active, inactive, no req ... add cheyu"): counted past the
+  // All Active view, which hides them; pressing the card lists them (Status = Inactive).
+  const inactiveN = searched.filter((c) => statusOf(c) === 'Inactive').length;
   const waitingN = clients.filter((c) => c.agreementWaiting).length;
   const unsignedN = filtered.filter((c) => !agreementIsSigned(c.agreementStatus)).length;
   const noOpenN = filtered.filter((c) => !(c.openRequirements > 0)).length;
@@ -590,6 +593,7 @@ export default function Clients() {
           <KpiRow className="crq4-kpis">
             <KpiTile icon="building" tone="blue" label="Total Clients" value={filtered.length} sub="In the list below" onClick={toTable} title="Go to the list" />
             <KpiTile icon="check" tone="green" label="Active" value={activeN} sub="Working with them" active={filters.status === 'Active'} onClick={has('status') ? () => setFilter({ status: filters.status === 'Active' ? '' : 'Active' }) : undefined} />
+            <KpiTile icon="x" tone="red" label="Inactive" value={inactiveN} sub="Not working with them now" active={filters.status === 'Inactive'} onClick={has('status') ? () => setFilter({ status: filters.status === 'Inactive' ? '' : 'Inactive' }) : undefined} />
             <KpiTile icon="star" tone="violet" label={<>New clients, no requirement yet <Help text={newHelp} focusable={false} /></>} value={prospectN} sub={blind ? 'Waiting for the first requirement' : 'Send the agreement or ask for the first requirement'} title={newHelp} active={filters.status === 'Prospect'} onClick={has('status') ? () => { const on = filters.status === 'Prospect'; setFilter({ status: on ? '' : 'Prospect' }); setSortBy(on ? 'name' : 'onFile'); } : undefined} />
             {(waitingN > 0 || filters.waiting) && <KpiTile icon="file" tone="blue" label="Agreements waiting for you" value={waitingN} sub="Your turn: press one to see them" active={!!filters.waiting} onClick={() => setFilter({ waiting: filters.waiting ? '' : '1' })} />}
             {seeAgreement && <KpiTile icon="file" tone="amber" label="Unsigned Agreement" value={unsignedN} sub="Requirements wait for it" active={filters.signed === 'no'} onClick={() => setFilter({ signed: filters.signed === 'no' ? '' : 'no' })} />}
