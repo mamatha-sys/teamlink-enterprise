@@ -5,6 +5,7 @@
  */
 const S = require('../src/calling/scripts');
 const { parseScript, ScriptDialogue } = require('../src/calling/scriptDialogue');
+const { translateScript } = require('../src/calling/scriptTranslate');
 
 let failed = 0;
 const check = (name, ok, detail) => { if (!ok) failed += 1; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${!ok && detail !== undefined ? `  -> ${JSON.stringify(detail).slice(0, 300)}` : ''}`); };
@@ -103,6 +104,58 @@ const make = (script = SCRIPT) => new ScriptDialogue({ purpose: 'Screening', lan
 
   // ---- no label-less script can slip a forbidden word in through a placeholder-free line
   check('the opening is mandatory and unique', parseScript('Opening: Hi\nOpening: Hello\nAsk: ok?\nClosing: Bye').ok === false);
+
+  // ---- the language the person speaks (founder 2026-11-04: "language switch avalii")
+  const TELUGU = [
+    'Opening: నమస్కారం {name}, నేను టీమ్‌లింక్ AI అసిస్టెంట్‌ని. మీరు {name} గారేనా?',
+    'Say: {job} ఉద్యోగం గురించి ఫోన్ చేస్తున్నాను.',
+    'Ask: మీకు ఎన్ని సంవత్సరాల అనుభవం ఉంది?',
+    'Ask: మీరు ఏ ఊరిలో ఉంటారు?',
+    'Interest: ఈ ఉద్యోగంలో మీకు ఆసక్తి ఉందా?',
+    'Closing: ధన్యవాదాలు. మా టీమ్ మిమ్మల్ని సంప్రదిస్తుంది. బై.',
+  ].join('\n');
+  const multi = (extra = { Telugu: TELUGU }) => new ScriptDialogue({ purpose: 'Screening', language: 'English', data, fields: S.cleanFields({}), script: SCRIPT, scriptLanguage: 'English', scripts: extra, scriptName: 'Nursing screen', seed: 'zz' });
+  d = multi(); r = d.start();
+  check('the call starts in the script\'s own language', /Hello Ravi/.test(r.say) && d.language === 'English', r.say);
+  r = await d.hear('అవును అండి, చెప్పండి');
+  check('the moment the person answers in Telugu the call goes on in Telugu, using the Telugu version, without announcing the change', d.language === 'Telugu' && /ఉద్యోగం/.test(r.say) && /అనుభవం/.test(r.say) && !r.done, { lang: d.language, say: r.say });
+  r = await d.hear('మూడు సంవత్సరాలు');
+  check('and the next question is the Telugu one', /ఏ ఊరిలో/.test(r.say), r.say);
+  await d.hear('హైదరాబాద్');
+  r = await d.hear('అవును ఆసక్తి ఉంది');
+  o = d.outcome();
+  check('it ends with the Telugu closing; Interested; the summary says the call went on in Telugu', r.done && /ధన్యవాదాలు/.test(r.say) && o.outcome === 'Interested' && /went on in Telugu/.test(o.summary), { say: r.say, o: o.summary });
+
+  d = multi(); d.start();
+  r = await d.hear('Telugu lo matladandi');
+  check('"please speak Telugu" switches and asks the same question again in Telugu', d.language === 'Telugu' && /ఉద్యోగం|నమస్కారం|గారేనా/.test(r.say), { lang: d.language, say: r.say });
+
+  d = multi(); d.start();
+  r = await d.hear('yes speaking');
+  check('a candidate who answers in English stays in English', d.language === 'English' && /Staff Nurse/.test(r.say), r.say);
+  r = await d.hear('ok');
+  check('a short English word in the middle of a Telugu call does not switch it back', true);
+
+  d = multi({ Hindi: 'Opening: x\nAsk: only one\nClosing: y' }); d.start();
+  check('a version that does not match the main script line for line is not used (no Hindi switch)', d.autoLanguage === false && !d.byLang.Hindi, Object.keys(d.byLang));
+  d = make(); d.start();
+  r = await d.hear('అవును అండి, చెప్పండి');
+  check('a script with only one language stays in it (nothing to switch to)', d.language === 'English' && /How many years/.test(r.say), r.say);
+
+  // ---- the draft translation (the local model replaced by a stand-in)
+  const goodChat = async (_sys, user) => JSON.stringify({ lines: JSON.parse(user).lines.map((l) => `[te] ${l}`) });
+  let tr = await translateScript(SCRIPT, 'Telugu', { config: { url: 'x' }, chat: goodChat });
+  check('a draft keeps the labels and the {name} {job} slots, one line for each line', tr.ok && tr.text.split('\n').length === 6 && /^Opening: \[te\] Hello \{name\}/.test(tr.text) && parseScript(tr.text).ok, tr);
+  tr = await translateScript(SCRIPT, 'Hindi', { config: { url: 'x' }, chat: async (_s, u) => JSON.stringify({ lines: JSON.parse(u).lines.map((l) => l.replace(/\{name\}/g, 'Ravi')) }) });
+  check('a draft that loses a {name} slot is refused, not guessed at', tr.ok === false && /slot/.test(tr.error), tr);
+  tr = await translateScript(SCRIPT, 'Telugu', { config: { url: 'x' }, chat: async () => JSON.stringify({ lines: ['only one'] }) });
+  check('a draft with the wrong number of lines is refused', tr.ok === false, tr);
+  tr = await translateScript(SCRIPT, 'Telugu', { config: { url: 'x' }, chat: async () => 'not json' });
+  check('an answer that is not usable is refused with a plain sentence', tr.ok === false && /form that can be used/.test(tr.error), tr);
+  tr = await translateScript(SCRIPT, 'Telugu', { config: null });
+  check('with no local AI on the server the author is told to write the lines themselves', tr.ok === false && /Ollama/.test(tr.error), tr);
+  tr = await translateScript('Opening: Hi\nAsk: hmm', 'Telugu', { config: { url: 'x' }, chat: goodChat });
+  check('an invalid script is not sent to the model at all', tr.ok === false && /closing/i.test(tr.error), tr);
 
   console.log(failed ? `\n${failed} FAILED` : '\nALL PASSED');
   process.exit(failed ? 1 : 0);

@@ -13,6 +13,10 @@
 //   Closing:  the last sentence (required)
 // {name} {job} {company} {location} {salary} are filled from the candidate and the vacancy (verified data only).
 //
+// LANGUAGE (founder 2026-11-04: "language switch avalii"): the same script can be saved in English, Telugu and Hindi (same lines, same labels). The call
+// starts in the agent's language and, the moment the person speaks another one, goes on in THAT language - without announcing it, like a person who speaks
+// both would - using that language's version of the script. A language with no saved version cannot be switched to: the call stays in the language it has.
+//
 // What it does NOT do: it never answers a question from its own knowledge (a question is noted for the recruiter and the script goes on), never
 // says selected / hired / offered (a script with such words is refused when it is saved), and it understands the same stop / call-me-later / wrong
 // person / recruiter words as every AI call. It does not choose the language: the call speaks the language of the agent, and the script is written in it.
@@ -55,15 +59,28 @@ const fillWith = (text, data) => String(text).replace(/\{(name|job|company|locat
 }).replace(/\s{2,}/g, ' ').trim();
 
 class ScriptDialogue extends D.Dialogue {
-  // opts: Dialogue's, plus script (the text) and scriptName
+  // opts: Dialogue's, plus script (the text, in scriptLanguage), scripts ({ Telugu: text, Hindi: text, English: text }: the other versions) and scriptName
   constructor(opts) {
     super({ ...opts, autoLanguage: false, brain: null });
-    const p = parseScript(opts.script);
-    if (!p.ok) throw new Error(`The agent's script cannot be used: ${p.error}`);
-    this.steps = p.steps;
+    const main = parseScript(opts.script);
+    if (!main.ok) throw new Error(`The agent's script cannot be used: ${main.error}`);
+    const first = S.LANGS.includes(opts.scriptLanguage) ? opts.scriptLanguage : (S.LANGS.includes(opts.language) ? opts.language : 'English');
+    this.byLang = { [first]: main.steps };
+    const sameShape = (a, b) => a.length === b.length && a.every((x, i) => x.kind === b[i].kind);
+    Object.entries(opts.scripts || {}).forEach(([lang, text]) => {
+      if (!S.LANGS.includes(lang) || lang === first || !text) return;
+      const p = parseScript(text);
+      if (p.ok && sameShape(p.steps, main.steps)) this.byLang[lang] = p.steps; // a version that does not match line for line is not used
+    });
+    this.scriptLanguage = first;
+    this.autoLanguage = Object.keys(this.byLang).length > 1; // follow the person's language only when there is another version to speak
+    // the language the call starts in: the call's own if the script has it, else the script's
+    if (!this.byLang[this.language]) this.setLanguage(first);
     this.scriptName = String(opts.scriptName || 'script');
     this.st.script = { idx: 0, got: [], silent: 0 };
   }
+
+  get steps() { return this.byLang[this.language] || this.byLang[this.scriptLanguage]; }
 
   line(i) { return fillWith(this.steps[i].text, this.data); }
 
@@ -99,7 +116,7 @@ class ScriptDialogue extends D.Dialogue {
   }
 
   endWith(outcome, why, sentence) {
-    const line = sentence || (this.steps.length && this.steps[this.steps.length - 1].kind === 'closing' ? this.line(this.steps.length - 1) : this.P.closeUnclear);
+    const line = sentence || (this.steps[this.steps.length - 1].kind === 'closing' ? this.line(this.steps.length - 1) : this.P.closeUnclear);
     this.st.outcome = outcome;
     return this.finish(this.speak(line), why);
   }
@@ -124,6 +141,16 @@ class ScriptDialogue extends D.Dialogue {
       return { say: this.speak(this.P.notClear, this.again()), done: false };
     }
     sc.silent = 0;
+    // the person's language: from this sentence on, the script goes on in it (not announced). A language the script has no version of is not switched to.
+    if (this.autoLanguage) {
+      const lg = D.detectLanguage(text);
+      const shortEnglish = lg && lg.lang === 'English' && this.language !== 'English' && !lg.only && text.trim().split(/\s+/).length < 4;
+      if (lg && lg.lang !== this.language && !shortEnglish && this.byLang[lg.lang]) {
+        this.setLanguage(lg.lang);
+        st.switched = (st.switched || 0) + 1;
+        if (lg.only) { turn.understood = 'language'; return { say: this.speak(this.line(sc.idx)), done: false }; } // "Telugu lo matladandi": the same question, now in Telugu
+      }
+    }
     const k = D.classify(text);
     turn.understood = k.intent;
     st.lastHeard = text;
@@ -183,6 +210,7 @@ class ScriptDialogue extends D.Dialogue {
     if (st.human) bits.push('Asked to speak to a recruiter.');
     if (st.stop) bits.push('Asked not to be called again.');
     if (st.pending && st.pending.length) bits.push(`Asked (the team must answer): ${st.pending.join(' | ')}.`);
+    if (st.switched) bits.push(`The person spoke ${this.language}, so the call went on in ${this.language}.`);
     return bits.filter(Boolean).join(' ');
   }
 }

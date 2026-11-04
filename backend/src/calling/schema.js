@@ -153,6 +153,7 @@ const DDL = [
     "includeResponsibilities" INTEGER NOT NULL DEFAULT 0,
     "active" INTEGER NOT NULL DEFAULT 1,
     "script" TEXT,
+    "scriptsJson" TEXT,
     "createdById" TEXT,
     "createdByName" TEXT,
     "createdAt" TEXT NOT NULL,
@@ -235,6 +236,7 @@ function ensure() {
     for (const sql of DDL) await prisma.$executeRawUnsafe(sql); // eslint-disable-line no-await-in-loop
     // AiVoiceAgent.script (2026-11-04, added after the table was first made): add the column when an older table has none
     try { await prisma.$executeRawUnsafe('ALTER TABLE "AiVoiceAgent" ADD COLUMN "script" TEXT'); } catch { /* it is there already */ }
+    try { await prisma.$executeRawUnsafe('ALTER TABLE "AiVoiceAgent" ADD COLUMN "scriptsJson" TEXT'); } catch { /* it is there already */ } // the Telugu / Hindi / English versions of the script
     return true;
   })().catch((err) => { done = null; console.error('[ai-calling] schema:', err.message); return false; }); // eslint-disable-line no-console
   return done;

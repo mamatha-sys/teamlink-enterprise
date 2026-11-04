@@ -355,17 +355,23 @@ function CampaignDetail({ id, onBack, onChanged, toast, canCall }) {
 
 // ---- agents ------------------------------------------------------------------------------------------------------------------------
 function Agents({ agents, canCall, onChanged, toast }) {
-  const BLANK = { name: '', purpose: 'Screening', language: '', instructions: '', script: '', includeSalary: true, includeResponsibilities: true };
+  const BLANK = { name: '', purpose: 'Screening', language: '', instructions: '', script: '', scripts: {}, includeSalary: true, includeResponsibilities: true };
   const EXAMPLE = 'Opening: Hello {name}, this is the TeamLink assistant. Am I speaking with {name}?\nSay: I am calling about the {job} job in {location}.\nAsk: How many years of experience do you have?\nAsk: Which city do you live in?\nInterest: Are you interested in this job?\nClosing: Thank you for your time. Our team will contact you. Bye.';
   const [f, setF] = useState(BLANK);
   const [edit, setEdit] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [draft, setDraft] = useState('');
   const purposes = ['Screening', 'Shortlist Notification', 'Interview Notification', 'Interview Reminder'];
   async function save() {
     setBusy(true); setMsg(null);
     try { await api.post('/ai-calling/voice/agents', { ...f, id: edit || undefined }); toast(edit ? 'Agent saved' : 'Agent added'); setF(BLANK); setEdit(null); onChanged(); } catch (e) { setMsg(errOf(e, 'The agent could not be saved.')); }
     setBusy(false);
+  }
+  async function makeDraft(lang) {
+    setDraft(lang); setMsg(null);
+    try { const { data } = await api.post('/ai-calling/voice/agents/draft', { script: f.script, to: lang }); setF({ ...f, scripts: { ...(f.scripts || {}), [lang]: data.text } }); toast(`${lang} draft ready: please read and correct it`); } catch (e) { setMsg(errOf(e, 'The draft could not be made.')); }
+    setDraft('');
   }
   async function remove(a) {
     if (!window.confirm(`Remove ${a.name}? Campaigns already made with it keep working.`)) return;
@@ -380,7 +386,7 @@ function Agents({ agents, canCall, onChanged, toast }) {
             <tbody>
               {agents.map((a) => (
                 <tr key={a.id}><td style={{ fontWeight: 800 }}>{a.name}{a.builtin && <span className="cmp-sub">built in</span>}</td><td>{a.purpose}</td><td>{a.language || 'Each candidate\'s own'}</td><td>{a.script ? <Pill tone="live">Its own script</Pill> : (a.instructions || 'The built-in questions')}</td>
-                  <td style={{ display: 'flex', gap: 6 }}>{!a.builtin && canCall && <><Btn small onClick={() => { setEdit(a.id); setF({ name: a.name, purpose: a.purpose, language: a.language || '', instructions: a.instructions || '', script: a.script || '', includeSalary: a.includeSalary, includeResponsibilities: a.includeResponsibilities }); }}>Edit</Btn><Btn small danger onClick={() => remove(a)}>Remove</Btn></>}</td></tr>
+                  <td style={{ display: 'flex', gap: 6 }}>{!a.builtin && canCall && <><Btn small onClick={() => { setEdit(a.id); setF({ name: a.name, purpose: a.purpose, language: a.language || '', instructions: a.instructions || '', script: a.script || '', scripts: a.scripts || {}, includeSalary: a.includeSalary, includeResponsibilities: a.includeResponsibilities }); }}>Edit</Btn><Btn small danger onClick={() => remove(a)}>Remove</Btn></>}</td></tr>
               ))}
             </tbody>
           </table>
@@ -399,6 +405,18 @@ function Agents({ agents, canCall, onChanged, toast }) {
             <textarea rows={8} value={f.script} onChange={(e) => setF({ ...f, script: e.target.value })} placeholder={EXAMPLE} style={{ width: '100%', fontFamily: 'inherit', fontSize: 12 }} />
           </Field>
           <div style={{ margin: '4px 0 8px' }}><Btn small onClick={() => setF({ ...f, script: EXAMPLE })}>Use the example script</Btn></div>
+          {f.script.trim() && (
+            <div style={{ margin: '6px 0' }}>
+              <div style={{ fontSize: 11, fontWeight: 800, marginBottom: 4 }}>The same script in the other languages: the call goes on in the language the candidate speaks</div>
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 6 }}>Same lines, same labels, same order. “Draft with the local AI” makes a first version; read it and correct it, it can be stiff. A language with no version cannot be switched to.</div>
+              {['English', 'Telugu', 'Hindi'].filter((l) => l !== (f.language || 'English')).map((l) => (
+                <Field key={l} label={`${l} version`} full>
+                  <textarea rows={6} value={(f.scripts || {})[l] || ''} onChange={(e) => setF({ ...f, scripts: { ...(f.scripts || {}), [l]: e.target.value } })} style={{ width: '100%', fontFamily: 'inherit', fontSize: 12 }} />
+                  <Btn small disabled={draft === l} onClick={() => makeDraft(l)}>{draft === l ? 'Making a draft…' : `Draft ${l} with the local AI`}</Btn>
+                </Field>
+              ))}
+            </div>
+          )}
           <label style={{ fontSize: 11, marginRight: 14 }}><input type="checkbox" checked={f.includeSalary} onChange={(e) => setF({ ...f, includeSalary: e.target.checked })} /> Mention the salary</label>
           <label style={{ fontSize: 11 }}><input type="checkbox" checked={f.includeResponsibilities} onChange={(e) => setF({ ...f, includeResponsibilities: e.target.checked })} /> Mention the responsibilities</label>
           <div style={{ marginTop: 12 }}><Btn primary disabled={busy} onClick={save}>{busy ? 'Saving…' : (edit ? 'Save agent' : 'Add agent')}</Btn></div>

@@ -332,6 +332,7 @@ staff.get('/voice/candidates', async (req, res) => {
   }
   res.json({ rows, purpose, path: eff.path, mode: eff.mode });
 });
+staff.post('/voice/agents/draft', async (req, res) => send(res, await VC.draftScript(req.user, { script: (req.body || {}).script, to: clip((req.body || {}).to, 20) })));
 staff.get('/voice/agents', async (req, res) => res.json({ ok: true, agents: await VC.listAgents() }));
 staff.post('/voice/agents', async (req, res) => send(res, await VC.saveAgent(req.user, req.body || {})));
 staff.delete('/voice/agents/:id', async (req, res) => send(res, await VC.removeAgent(req.user, clip(req.params.id, 60))));

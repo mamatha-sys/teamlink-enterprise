@@ -139,7 +139,7 @@ async function dialogueFor(row) {
   const agentScript = (webOf(row).json || {}).agentScript;
   if (agentScript && agentScript.text) {
     const SD = require('./scriptDialogue'); // eslint-disable-line global-require
-    const d0 = new SD.ScriptDialogue({ purpose: row.purpose, language: row.language || 'English', data: sc.data, fields: sc.fields, recordingNotice: s.recording || s.keepTranscripts, script: agentScript.text, scriptName: agentScript.name, seed: row.id });
+    const d0 = new SD.ScriptDialogue({ purpose: row.purpose, language: row.language || 'English', data: sc.data, fields: sc.fields, recordingNotice: s.recording || s.keepTranscripts, script: agentScript.text, scriptLanguage: agentScript.language, scripts: agentScript.texts, scriptName: agentScript.name, seed: row.id });
     const snap0 = svc.safeJson(row.botStateJson);
     if (snap0 && snap0.step) d0.restore(snap0);
     return d0;

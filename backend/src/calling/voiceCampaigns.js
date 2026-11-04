@@ -62,7 +62,7 @@ const builtin = () => ATS_PURPOSES.map((p) => ({
   id: `builtin:${p}`, builtin: true, name: AGENT_NAME[p] || `${p} agent`, purpose: p, language: null, instructions: '', script: '', includeSalary: true, includeResponsibilities: true, active: true,
 }));
 const shapeAgent = (r) => ({
-  id: r.id, builtin: false, name: r.name, purpose: r.purpose, language: r.language || null, instructions: r.instructions || '', script: r.script || '',
+  id: r.id, builtin: false, name: r.name, purpose: r.purpose, language: r.language || null, instructions: r.instructions || '', script: r.script || '', scripts: (() => { try { return JSON.parse(r.scriptsJson || '{}') || {}; } catch { return {}; } })(),
   includeSalary: !!r.includeSalary, includeResponsibilities: !!r.includeResponsibilities, active: !!r.active, createdByName: r.createdByName || null,
 });
 async function listAgents() {
@@ -90,21 +90,33 @@ async function saveAgent(user, body) {
   if (bad) return fail(400, 'script', bad);
   // the team's own script (optional): the AI then talks by it, line by line
   const script = String(b.script || '').trim();
+  let extra = {};
   if (script) {
     const p = SD.parseScript(script);
     if (!p.ok) return fail(400, 'script', p.error);
-  }
+    // the other versions (the call goes on in the language the person speaks): the same lines, the same labels, in the same order
+    const own = language || 'English';
+    for (const lang of S.LANGS) { // eslint-disable-line no-restricted-syntax
+      const t = String((b.scripts || {})[lang] || '').trim();
+      if (!t || lang === own) continue; // eslint-disable-line no-continue
+      const q = SD.parseScript(t);
+      if (!q.ok) return fail(400, 'script', `The ${lang} script: ${q.error}`);
+      if (q.steps.length !== p.steps.length || q.steps.some((x, i) => x.kind !== p.steps[i].kind)) return fail(400, 'script', `The ${lang} script must have the same lines (the same labels in the same order) as the main script.`);
+      extra[lang] = t;
+    }
+  } else extra = {};
+  const extraJson = Object.keys(extra).length ? JSON.stringify(extra) : null;
   const now = iso();
   if (b.id) {
     const had = await DB.one('SELECT "id" FROM "AiVoiceAgent" WHERE "id" = ? AND "active" = 1', b.id);
     if (!had) return fail(404, 'agent', 'That agent was not found.');
-    await DB.run('UPDATE "AiVoiceAgent" SET "name"=?, "purpose"=?, "language"=?, "instructions"=?, "script"=?, "includeSalary"=?, "includeResponsibilities"=?, "updatedAt"=? WHERE "id"=?',
-      name, b.purpose, language || null, fields.instructions || null, script || null, b.includeSalary === false ? 0 : 1, b.includeResponsibilities === false ? 0 : 1, now, b.id);
+    await DB.run('UPDATE "AiVoiceAgent" SET "name"=?, "purpose"=?, "language"=?, "instructions"=?, "script"=?, "scriptsJson"=?, "includeSalary"=?, "includeResponsibilities"=?, "updatedAt"=? WHERE "id"=?',
+      name, b.purpose, language || null, fields.instructions || null, script || null, extraJson, b.includeSalary === false ? 0 : 1, b.includeResponsibilities === false ? 0 : 1, now, b.id);
     return { ok: true, id: b.id };
   }
   const id = svc.newId('aiva');
-  await DB.run('INSERT INTO "AiVoiceAgent" ("id","name","purpose","language","instructions","script","includeSalary","includeResponsibilities","active","createdById","createdByName","createdAt","updatedAt") VALUES (?,?,?,?,?,?,?,?,1,?,?,?,?)',
-    id, name, b.purpose, language || null, fields.instructions || null, script || null, b.includeSalary === false ? 0 : 1, b.includeResponsibilities === false ? 0 : 1, user.id, user.name, now, now);
+  await DB.run('INSERT INTO "AiVoiceAgent" ("id","name","purpose","language","instructions","script","scriptsJson","includeSalary","includeResponsibilities","active","createdById","createdByName","createdAt","updatedAt") VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?,?)',
+    id, name, b.purpose, language || null, fields.instructions || null, script || null, extraJson, b.includeSalary === false ? 0 : 1, b.includeResponsibilities === false ? 0 : 1, user.id, user.name, now, now);
   await logAudit({ userId: user.id, action: 'AI Voice agent created', entity: 'AiVoiceAgent', entityId: id, toValue: `${name} (${b.purpose})`.slice(0, 200) });
   return { ok: true, id };
 }
@@ -240,7 +252,7 @@ async function create(user, body) {
       const row = await svc.getCall(x.callId);
       const json = svc.safeJson(row && row.scriptJson) || {};
       // eslint-disable-next-line no-await-in-loop
-      if (row) await svc.setRow(x.callId, { scriptJson: JSON.stringify({ ...json, agentScript: { name: agent.name, text: agent.script } }) });
+      if (row) await svc.setRow(x.callId, { scriptJson: JSON.stringify({ ...json, agentScript: { name: agent.name, text: agent.script, language: agent.language || 'English', texts: agent.scripts || {} } }) });
     }
   }
   await logAudit({ userId: user.id, action: 'AI Voice campaign created', entity: 'AiCallCampaign', entityId: id, toValue: `${name}: ${r.started} candidate(s), agent ${agent.name}, ${status}`.slice(0, 200) });
@@ -357,6 +369,15 @@ async function exportCsv(user, id) {
   return { ok: true, filename: `ai-voice-${String(c.name).replace(/[^a-z0-9]+/gi, '-').slice(0, 40).toLowerCase()}.csv`, csv: `${lines.join('\r\n')}\r\n` };
 }
 
+// a DRAFT of the script in another language, by the local model; only what the author saves is used
+async function draftScript(user, { script, to }) {
+  const s = await settingsStore.load({ fresh: true });
+  const acc = await svc.accessVerdict(user, null, s, { bulk: true });
+  if (!acc.ok) return acc;
+  const r = await require('./scriptTranslate').translateScript(String(script || ''), to); // eslint-disable-line global-require
+  return r.ok ? { ok: true, text: r.text } : fail(422, 'draft', r.error);
+}
+
 let timer = null;
 function startSchedule() {
   if (timer || process.env.NODE_ENV === 'test') return;
@@ -365,4 +386,4 @@ function startSchedule() {
   if (timer.unref) timer.unref();
 }
 
-module.exports = { effective, readiness, listAgents, getAgent, saveAgent, removeAgent, list, detail, create, control, tick, exportCsv, startSchedule, countersFor, ATS_PURPOSES, FAILED };
+module.exports = { draftScript, effective, readiness, listAgents, getAgent, saveAgent, removeAgent, list, detail, create, control, tick, exportCsv, startSchedule, countersFor, ATS_PURPOSES, FAILED };
