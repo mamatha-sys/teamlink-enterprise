@@ -16,6 +16,7 @@ import NotificationBell from './NotificationBell.jsx';
 import NudgePopup from './NudgePopup.jsx';
 import TaskPopup from './dashboard/TaskPopup.jsx';
 import JobRequestPopup from './JobRequestPopup.jsx';
+import InterviewPopup from './InterviewPopup.jsx'; // every-hour interview reminders on screen (2026-11-04)
 import HealthDot from './dashboard/HealthDot.jsx';
 import TodayTasks from './dashboard/TodayTasks.jsx';
 import GlobalSearch from './GlobalSearch.jsx';
@@ -286,6 +287,8 @@ export default function Shell() {
             {hasAtsWork(user) && <TaskPopup />}
             {/* A client's new job request: the client's BDE and the BDE TL see it on screen at once (2026-10-09). */}
             {hasAtsWork(user) && <JobRequestPopup />}
+            {/* From the day before an interview, every hour: the recruiter, TL and BDE see it on screen (2026-11-04). */}
+            {hasAtsWork(user) && <InterviewPopup />}
             {/* Admin health dot: system problems only (dashboard review #2). */}
             {hasAtsWork(user) && <HealthDot />}
             <div className="avatar">{initials(user?.name)}</div>

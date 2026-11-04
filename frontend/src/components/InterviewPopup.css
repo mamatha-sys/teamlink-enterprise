@@ -1,0 +1,23 @@
+/* The interview pop-up (components/InterviewPopup.jsx). Scoped under .ivp-*. */
+.ivp-overlay{z-index:1190}
+.ivp-box{width:480px;max-width:calc(100vw - 24px);border-top:5px solid #b45309}
+.ivp-head{display:flex;align-items:center;gap:10px;padding:16px 18px 4px}
+.ivp-head h3{margin:0;font-size:18px}
+.ivp-ico{font-size:24px}
+.ivp-body{padding:6px 18px 4px;max-height:55vh;overflow-y:auto}
+.ivp-row{position:relative;padding:10px 0;border-bottom:1px solid var(--line, #e5e7eb)}
+.ivp-row:last-child{border-bottom:0}
+.ivp-name{font-size:17px;font-weight:700;color:var(--navy, #1f3a8a);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ivp-left{font-size:12.5px;font-weight:600;color:#92400e;background:#fef3dc;border-radius:12px;padding:2px 9px}
+.ivp-job{font-size:14px;margin-top:2px}
+.ivp-when{font-size:13px;color:var(--ink-soft, #5b6577);margin-top:2px}
+.ivp-warn{margin-top:6px;font-size:13px;color:#b42318;background:#fdecea;border-radius:8px;padding:6px 10px}
+.ivp-join{margin-top:6px}
+.ivp-foot{display:flex;gap:10px;padding:14px 18px 18px}
+.ivp-ok{flex:1;font-size:15.5px;min-height:46px}
+.ivp-open{flex:1;font-size:14.5px;min-height:46px}
+@media (max-width:520px){
+  .ivp-box{width:calc(100vw - 20px)}
+  .ivp-foot{flex-direction:column}
+  .ivp-ok,.ivp-open{flex:none;width:100%}
+}

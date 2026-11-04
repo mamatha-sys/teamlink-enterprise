@@ -182,9 +182,10 @@ async function run(ctx) {
   const skipP = (s) => IN.skipPerson(s);
   Object.assign(summary, { candidateDay: 0, candidateHour: 0, candidateNow: 0, staffHour: 0, digests: 0, noShow: 0, netBooked: 0, plan: undefined });
 
-  // the next 24 hours' interviews, with how long ago each was booked / moved
+  // the next 24 hours' interviews (or as far as the every-hour reminders reach), with how long ago each was booked / moved
+  const reach = Math.max(DAY, ((plan.hourly && plan.hourly.on && plan.hourly.fromHours) || 0) * HOUR);
   const soon = await prisma.application.findMany({
-    where: { ...idFilter, interviewStatus: { in: LIVE }, interviewAt: { gt: now, lte: new Date(t + DAY) }, stage: { notIn: DECIDED } },
+    where: { ...idFilter, interviewStatus: { in: LIVE }, interviewAt: { gt: now, lte: new Date(t + reach) }, stage: { notIn: DECIDED } },
     include: APP_INCLUDE,
   });
   const evs = soon.length ? await prisma.interviewEvent.findMany({ where: { applicationId: { in: soon.map((a) => a.id) }, status: { in: ['SCHEDULED', 'RESCHEDULED'] } }, orderBy: { createdAt: 'desc' }, select: { applicationId: true, createdAt: true } }) : [];
@@ -243,6 +244,11 @@ async function run(ctx) {
       });
     }
   }
+
+  // --- every hour from the day before: candidate mail, team mail + pop-up (utils/interviewHourly.js)
+  await require('./interviewHourly').run({ // eslint-disable-line global-require
+    apps: soon, bookedAt, now, plan, summary, dryRun, force, candOn, staffOn, emailsOn, quietNow, skipP,
+  });
 
   // --- the morning list --------------------------------------------------------------------------------------------------
   if ((staffOn || force) && digestDue({ now, plan })) {

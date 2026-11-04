@@ -44,6 +44,9 @@ const DEFAULTS = {
   noShow: { on: true, afterMinutes: 30 },
   feedback: { on: true, afterHours: 2 },
   quiet: true,
+  // EVERY HOUR from the day before (founder 2026-11-04): a mail to the candidate, and a mail + an on-screen
+  // pop-up to the recruiter, TL and BDE, once in every hour before the slot (utils/interviewHourly.js).
+  hourly: { on: true, fromHours: 24, candidate: true, team: true },
   // OFF until an Admin / HR presses "Turn on automatic sending". While off, the reminder job sends NOTHING outside the app
   // (no mail, WhatsApp or SMS to anybody) and nothing to candidates; only the in-app bell goes. Prepared 2026-10-12 so that
   // loading this code on a live server can never message a real person by itself.
@@ -69,6 +72,7 @@ function clean(raw) {
   });
   const ns = v.noShow && typeof v.noShow === 'object' ? v.noShow : {};
   const fb = v.feedback && typeof v.feedback === 'object' ? v.feedback : {};
+  const hr = v.hourly && typeof v.hourly === 'object' ? v.hourly : {};
   return {
     candidate: {
       dayBefore: bool(c.dayBefore, d.dayBefore), hourBefore: bool(c.hourBefore, d.hourBefore), nowOnline: bool(c.nowOnline, d.nowOnline),
@@ -79,6 +83,9 @@ function clean(raw) {
     noShow: { on: bool(ns.on, true), afterMinutes: intIn(ns.afterMinutes, 10, 180, 30) },
     feedback: { on: bool(fb.on, true), afterHours: intIn(fb.afterHours, 1, 48, 2) },
     quiet: bool(v.quiet, true),
+    hourly: {
+      on: bool(hr.on, true), fromHours: intIn(hr.fromHours, 2, 48, 24), candidate: bool(hr.candidate, true), team: bool(hr.team, true),
+    },
     armed: v.armed === true,
   };
 }
@@ -100,6 +107,7 @@ async function save(patch, user) {
     noShow: { ...cur.noShow, ...(p.noShow || {}) },
     feedback: { ...cur.feedback, ...(p.feedback || {}) },
     quiet: p.quiet === undefined ? cur.quiet : p.quiet,
+    hourly: { ...cur.hourly, ...(p.hourly && typeof p.hourly === 'object' ? p.hourly : {}) },
     armed: p.armed === undefined ? cur.armed : p.armed === true,
   };
   if (p.digestAt !== undefined && !validHm(p.digestAt)) return { error: 'Write the time like 08:30.', status: 400 };

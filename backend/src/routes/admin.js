@@ -1193,6 +1193,15 @@ router.get('/notifications/popups', async (req, res) => {
   res.json(out);
 });
 
+// The interview pop-up (founder 2026-11-04): the caller's own interview reminders of the last hour, one per
+// interview, shown on screen wherever they are (components/InterviewPopup.jsx, utils/interviewHourly.js).
+router.get('/notifications/interview-popups', async (req, res, next) => {
+  try { res.json(await require('../utils/interviewHourly').popupsFor(req.user.id)); } catch (err) { next(err); } // eslint-disable-line global-require
+});
+router.post('/notifications/interview-popups/seen', async (req, res, next) => {
+  try { res.json({ ok: true, count: await require('../utils/interviewHourly').seen(req.user.id, (req.body || {}).ids) }); } catch (err) { next(err); } // eslint-disable-line global-require
+});
+
 router.patch('/notifications/:id/read', async (req, res) => {
   // Notifications are now pushed per-user from the ATS pipeline (see
   // utils/notify.js), so only their owner may mark one read. userId null is a

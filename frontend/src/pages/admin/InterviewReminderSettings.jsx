@@ -37,12 +37,14 @@ export default function InterviewReminderSettings() {
   async function save() {
     setBusy(true); setMsg(''); setErr('');
     try {
-      const r = await api.put('/ats/interview-reminder-plan', { candidate: form.candidate, parties: form.parties, digestAt: form.digestAt, noShow: form.noShow, feedback: form.feedback, quiet: form.quiet, armed: form.armed });
+      const r = await api.put('/ats/interview-reminder-plan', { candidate: form.candidate, parties: form.parties, digestAt: form.digestAt, noShow: form.noShow, feedback: form.feedback, quiet: form.quiet, hourly: form.hourly, armed: form.armed });
       setForm(JSON.parse(JSON.stringify(r.data.plan)));
       setMsg(r.data.message || 'Saved.');
     } catch (e) { setErr(e.response?.data?.error || 'Could not save. Try again.'); } finally { setBusy(false); }
   }
   const staffOn = data.staff && data.staff.enabled !== false;
+  const hr = form.hourly || { on: true, fromHours: 24, candidate: true, team: true };
+  const setH = (k, v) => setForm({ ...form, hourly: { ...hr, [k]: v } });
   const check = (checked, onChange, label) => (
     <input type="checkbox" checked={!!checked} disabled={!edit} aria-label={label} onChange={(e) => onChange(e.target.checked)} />
   );
@@ -118,6 +120,24 @@ export default function InterviewReminderSettings() {
           </div>
         </div>
 
+        <div>
+          <b>Every hour, from the day before</b>
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 6, alignItems: 'center' }}>
+            <label>
+              {check(hr.on, (v) => setH('on', v), 'Every hour reminders')}
+              {' '}Remind every hour, starting{' '}
+              <input type="number" min={2} max={48} value={hr.fromHours} disabled={!edit || !hr.on} style={{ width: 60 }} aria-label="Hours before the interview" onChange={(e) => setH('fromHours', Number(e.target.value))} />
+              {' '}hours before the interview
+            </label>
+            <label>{check(hr.candidate, (v) => setH('candidate', v), 'Mail the candidate every hour')} Mail to the candidate</label>
+            <label>{check(hr.team, (v) => setH('team', v), 'Recruiter, TL and BDE every hour')} Mail + pop-up on screen to the recruiter, TL and BDE</label>
+          </div>
+          <div className="small-muted" style={{ marginTop: 4 }}>
+            The last hour is the &quot;1 hour before&quot; reminder above. The pop-up shows on any page of TeamLink until they press OK.
+            Mails need &quot;Send the reminders by themselves&quot; and &quot;Candidate emails&quot; On, and wait out the quiet hours (no mail at night) while the quiet-hours box below is ticked.
+          </div>
+        </div>
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <label>
             {check(form.noShow.on, (v) => setForm({ ...form, noShow: { ...form.noShow, on: v } }), 'Did the candidate attend')}
@@ -133,7 +153,7 @@ export default function InterviewReminderSettings() {
           </label>
           <label>
             {check(form.quiet, (v) => setForm({ ...form, quiet: v }), 'Quiet hours')}
-            {' '}Keep the 1-day reminder for the morning when it would fall in quiet hours. The 1-hour and 15-minute reminders always go.
+            {' '}Keep the 1-day reminder for the morning when it would fall in quiet hours, and send no every-hour mails at night. The 1-hour and 15-minute reminders always go.
           </label>
         </div>
         {msg && <div className="notice green">{msg}</div>}
