@@ -541,6 +541,7 @@ const server = app.listen(PORT, () => {
   // Job Portal: a full sync 30s after boot, then hourly (JOB_PORTAL_SYNC_INTERVAL_MS).
   require('./utils/jobPortalBridge').startSchedule();
   require('./utils/candidateLogins').startSchedule();
+  require('./calling/voiceCampaigns').startSchedule(); // AI Voice campaigns: dispatch the waiting calls, at most `concurrency` lines at once
   require('./utils/portalIntegrations').startSchedule(); // the portal sends WhatsApp from TeamLink's own number
   // Codes sent but never entered for a day → HR is told (utils/employeeEmailVerification.js).
   require('./utils/employeeEmailVerification').startSweep();

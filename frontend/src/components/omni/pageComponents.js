@@ -34,6 +34,7 @@ export const PAGE_COMPONENTS = {
   review: lazy(() => import('./pages/ReviewPage.jsx')),
   tplshared: lazy(() => import('./pages/TemplateLibraryPage.jsx')),
   appcampaigns: lazy(() => import('./pages/AppCampaignsPage.jsx')),
+  aivoice: lazy(() => import('./pages/AiVoicePage.jsx')),
   connections: lazy(() => import('./pages/ConnectionsPage.jsx')),
   audit: lazy(() => import('./pages/AuditPage.jsx')),
 };

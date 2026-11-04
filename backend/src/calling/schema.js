@@ -12,6 +12,8 @@
 //   AiCallJobSetting   per-job automation switches (an Admin ticks them)
 //   AiCallSuppression  numbers never to be called by AI (opt-out / DND)
 //   AiCallCampaign     a bulk run (name, purpose, job, who)
+//   AiVoiceAgent       a saved AI Voice "agent": a purpose + language + extra wording picked in Omni-Channel > AI Voice (2026-11-04)
+//   AiVoiceCampaign    the running side of an AI Voice campaign (status, agent, how many lines at once), same id as its AiCallCampaign
 //   AiCallPref         the candidate's saved language for calls
 //   AiCallQuestion     a question the AI could not answer from verified facts (per requirement), and the answer a
 //                      recruiter gave - the AI uses answered ones on later calls (2026-10-30)
@@ -141,6 +143,36 @@ const DDL = [
     "total" INTEGER NOT NULL DEFAULT 0,
     "createdAt" TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS "AiVoiceAgent" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "name" TEXT NOT NULL,
+    "purpose" TEXT NOT NULL,
+    "language" TEXT,
+    "instructions" TEXT,
+    "includeSalary" INTEGER NOT NULL DEFAULT 0,
+    "includeResponsibilities" INTEGER NOT NULL DEFAULT 0,
+    "active" INTEGER NOT NULL DEFAULT 1,
+    "createdById" TEXT,
+    "createdByName" TEXT,
+    "createdAt" TEXT NOT NULL,
+    "updatedAt" TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS "AiVoiceCampaign" (
+    "campaignId" TEXT NOT NULL PRIMARY KEY,
+    "status" TEXT NOT NULL DEFAULT 'running',
+    "agentId" TEXT,
+    "agentName" TEXT,
+    "language" TEXT,
+    "concurrency" INTEGER NOT NULL DEFAULT 2,
+    "scheduledAt" TEXT,
+    "startedAt" TEXT,
+    "endedAt" TEXT,
+    "note" TEXT,
+    "createdAt" TEXT NOT NULL,
+    "updatedAt" TEXT NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS "AiVoiceCampaign_status" ON "AiVoiceCampaign"("status")',
+  'CREATE INDEX IF NOT EXISTS "AiCall_campaign" ON "AiCall"("campaignId", "status")',
   `CREATE TABLE IF NOT EXISTS "AiCallPref" (
     "candidateId" TEXT NOT NULL PRIMARY KEY,
     "language" TEXT NOT NULL,

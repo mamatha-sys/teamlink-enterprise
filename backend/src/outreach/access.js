@@ -228,6 +228,7 @@ function pagesFor(u) {
   add(h.inbox, 'inbox');
   add(h.inbox, 'review'); // Inbox & Replies > Needs review (replies that could not be matched with confidence)
   add(h.campaigns && maySendConsole(u), 'console');
+  add(h.campaigns, 'aivoice'); // AI Voice: campaigns of the existing AI Calling (the AI Calling roles decide who may start one)
   add(h.campaigns, 'campaigns', 'appcampaigns'); // appcampaigns = campaigns made from the ATS / Job Portal / HRMS / Accounts screens
   add(mayExternalShells(u), 'social');
   add(h.insights.length > 0 || h.myActivity, 'analytics');

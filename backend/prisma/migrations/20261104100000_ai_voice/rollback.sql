@@ -1,0 +1,3 @@
+DROP INDEX IF EXISTS "AiCall_campaign";
+DROP TABLE IF EXISTS "AiVoiceCampaign";
+DROP TABLE IF EXISTS "AiVoiceAgent";

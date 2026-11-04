@@ -300,6 +300,23 @@ staff.post('/questions/:id/answer', async (req, res) => {
   if (r.error) return res.status(400).json({ error: r.error });
   return res.json({ ok: true, row: r });
 });
+// AI VOICE (Omni-Channel > Campaigns > AI Voice, 2026-11-04): campaigns over the same engine - calling/voiceCampaigns.js. Roles / consent / hours / limits are
+// the AI Calling ones (calling/callService.accessVerdict + policy), checked inside.
+const VC = require('../calling/voiceCampaigns');
+staff.get('/voice/agents', async (req, res) => res.json({ ok: true, agents: await VC.listAgents() }));
+staff.post('/voice/agents', async (req, res) => send(res, await VC.saveAgent(req.user, req.body || {})));
+staff.delete('/voice/agents/:id', async (req, res) => send(res, await VC.removeAgent(req.user, clip(req.params.id, 60))));
+staff.get('/voice/campaigns', async (req, res) => send(res, await VC.list(req.user)));
+staff.post('/voice/campaigns', async (req, res) => send(res, await VC.create(req.user, req.body || {})));
+staff.get('/voice/campaigns/:id', async (req, res) => send(res, await VC.detail(req.user, clip(req.params.id, 60), { page: req.query.page, pageSize: req.query.pageSize, status: clip(req.query.status, 20) })));
+staff.get('/voice/campaigns/:id/export.csv', async (req, res) => {
+  const r = await VC.exportCsv(req.user, clip(req.params.id, 60));
+  if (r && r.ok === false) return send(res, r);
+  res.set('Content-Type', 'text/csv; charset=utf-8');
+  res.set('Content-Disposition', `attachment; filename="${r.filename}"`);
+  return res.send(r.csv);
+});
+staff.post('/voice/campaigns/:id/:action(pause|resume|stop|retry-failed)', async (req, res) => send(res, await VC.control(req.user, clip(req.params.id, 60), req.params.action)));
 staff.get('/campaigns', async (req, res) => {
   const rows = await DB.all('SELECT * FROM "AiCallCampaign" ORDER BY "createdAt" DESC LIMIT 100');
   res.json({ rows: rows.map((r) => ({ id: r.id, name: r.name, purpose: r.purpose, requirementId: r.requirementId, total: r.total, createdByName: r.createdByName, createdAt: r.createdAt })) });

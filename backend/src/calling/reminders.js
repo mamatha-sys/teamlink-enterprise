@@ -50,7 +50,8 @@ async function reminderCalls(s, t, summary) {
 
 async function dueCalls(t, summary) {
   const rows = await DB.all(`SELECT "id" FROM "AiCall" WHERE (("status" = 'queued') OR ("status" IN ('busy','no-answer','failed') AND "nextAttemptAt" IS NOT NULL))
-    AND "nextAttemptAt" <= ? ORDER BY "nextAttemptAt" ASC LIMIT 50`, t.toISOString());
+    AND "nextAttemptAt" <= ? AND ("campaignId" IS NULL OR "campaignId" NOT IN (SELECT "campaignId" FROM "AiVoiceCampaign"))
+    ORDER BY "nextAttemptAt" ASC LIMIT 50`, t.toISOString());
   for (const r of rows) { // eslint-disable-line no-restricted-syntax
     // eslint-disable-next-line no-await-in-loop
     const d = await svc.dispatch(r.id);
