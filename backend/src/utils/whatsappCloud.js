@@ -202,6 +202,11 @@ async function sendWhatsApp(opts = {}) {
     const bad = await templateAccountCheck(cfg, content.template.name);
     if (bad) { SD.release(dupKey); return { ok: false, blocked: true, invalid: true, transient: false, code: 'TEMPLATE_OTHER_ACCOUNT', httpStatus: 409, numberId: number.id, templateId: bad.templateId, accountState: bad.state, error: bad.reason }; }
   }
+  // the language version Meta approved in THIS account (2026-11-04: #132001 "does not exist in the translation" = right name, other language)
+  if (content.type === 'template' && content.template && content.template.language && !simulated(cfg)) {
+    const lang = await require('../outreach/tplWaba').metaLanguage(cfg, content.template.name, content.template.language.code); // eslint-disable-line global-require
+    if (lang) content.template.language.code = lang;
+  }
   const TYPE_OF = { candidates: 'CANDIDATE', clients: 'CLIENT', employees: 'EMPLOYEE' };
   const person = (opts.meta && opts.meta.personId && TYPE_OF[opts.meta.audience]) ? { type: TYPE_OF[opts.meta.audience], id: opts.meta.personId, name: opts.meta.personName || null } : null;
   const through = number ? { numberId: number.id, numberLabel: number.label, fromNumber: number.displayNumber } : {};

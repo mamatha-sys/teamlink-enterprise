@@ -329,10 +329,26 @@ async function lookupCached(cfg, name) {
 }
 async function lookup(cfg, name) {
   const core = require('../utils/messagingCore'); // eslint-disable-line global-require
-  const res = await core.httpJson(`${cfg.base}/${wa().VERSION}/${encodeURIComponent(cfg.wabaId)}/message_templates?name=${encodeURIComponent(name)}&fields=id,name,status,category,rejected_reason,quality_score`, { headers: { authorization: `Bearer ${cfg.token}` } });
+  const res = await core.httpJson(`${cfg.base}/${wa().VERSION}/${encodeURIComponent(cfg.wabaId)}/message_templates?name=${encodeURIComponent(name)}&fields=id,name,status,category,language,rejected_reason,quality_score`, { headers: { authorization: `Bearer ${cfg.token}` } });
   if (!res.ok) return { error: `Meta could not be asked: ${S.clip((res.json && res.json.error && res.json.error.message) || res.networkError || res.text || res.status, 200)}` };
-  const hit = res.json && Array.isArray(res.json.data) ? res.json.data.find((d) => d.name === name) : null;
-  return { hit: hit || null };
+  const all = res.json && Array.isArray(res.json.data) ? res.json.data.filter((d) => d.name === name) : [];
+  // an approved language version first (one template name can have several languages)
+  const hit = all.find((d) => String(d.status).toUpperCase() === 'APPROVED') || all[0] || null;
+  return { hit, hits: all };
+}
+// THE LANGUAGE META APPROVED (founder 2026-11-04: "Template name does not exist in the translation" (#132001) - the name was right but
+// TeamLink sent another language code, e.g. en_US for a template Meta has as en). -> the code to send instead, or null to keep `wanted`.
+// Same base language first (en <-> en_US), else the only approved version. Meta not reachable: null (send as before).
+async function metaLanguage(cfg, name, wanted) {
+  try {
+    if (!cfg || !cfg.wabaId || !name) return null;
+    const live = await lookupCached(cfg, name);
+    if (live.error || !live.hits) return null;
+    const ok = live.hits.filter((d) => String(d.status).toUpperCase() === 'APPROVED' && d.language).map((d) => String(d.language));
+    if (!ok.length || ok.includes(String(wanted || ''))) return null;
+    const base = (c) => String(c || '').toLowerCase().split(/[_-]/)[0];
+    return ok.find((c) => base(c) === base(wanted)) || (ok.length === 1 ? ok[0] : null);
+  } catch { return null; }
 }
 const fromHit = (hit) => ({
   status: META_STATUS[String(hit.status || '').toUpperCase()] || 'pending', metaId: hit.id ? String(hit.id) : null, metaStatus: String(hit.status || ''),
@@ -452,4 +468,4 @@ async function finish(user, id, acc) {
 }
 
 const bust = () => { readyAt = 0; };
-module.exports = { bust, ensure, ready, rowsFor, put, accounts, stateFor, chipsOf, accountsView, decorate, byNumber, guard, approvedNumbers, reasonText, aggregate, mirror, resetFor, backfill, submitAll, checkAll, DDL, FIX_SENTENCE };
+module.exports = { bust, ensure, ready, rowsFor, put, accounts, stateFor, chipsOf, accountsView, decorate, byNumber, guard, approvedNumbers, metaLanguage, reasonText, aggregate, mirror, resetFor, backfill, submitAll, checkAll, DDL, FIX_SENTENCE };
