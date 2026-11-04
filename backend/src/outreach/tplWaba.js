@@ -244,6 +244,19 @@ async function guard(cfg, name) {
     }
     const b = blocks.sort((x, y) => y.rank - x.rank)[0];
     if (!b) return null;
+    // ASK META BEFORE SAYING NO (founder 2026-11-04: "same templates approve templates use chestuna ina kuda endhuku ala vastundhi"):
+    // a template approved straight in Meta Business Manager for this number's account (not through TeamLink) left TeamLink's record
+    // saying "not sent to this account", and every send from the 66 number was stopped. Meta's own answer now decides: approved there
+    // = recorded and allowed; Meta cannot be asked = not stopped on our old record (Meta itself answers the send).
+    const live = await lookupCached(cfg, name);
+    if (live.error) return null;
+    if (live.hit) {
+      const f = fromHit(live.hit);
+      await Promise.all(tpls.map((t) => put(t.id, w, f).then(() => aggregate(t.id)).catch(() => {})));
+      if (f.status === 'approved') return null;
+      if (f.status === 'pending') b.state = 'pending';
+      if (f.status === 'rejected') { b.state = 'rejected'; b.why = f.reason; }
+    }
     let reason = reasonText(b.state, name, cfg.label || '');
     if (b.state === 'rejected' && b.why) reason = `${reason} Meta said: ${b.why}`;
     return { code: 'TEMPLATE_OTHER_ACCOUNT', state: b.state, reason, templateId: b.templateId };
@@ -304,6 +317,16 @@ async function backfill(row) {
 }
 
 // ---- asking Meta -------------------------------------------------------------------------------------------------------------------------
+// Meta's answer for one (account, template name), kept 5 minutes so a message box that previews again and again asks Meta once
+const lookups = new Map();
+async function lookupCached(cfg, name) {
+  const k = `${cfg.wabaId}|${name}`;
+  const c = lookups.get(k);
+  if (c && Date.now() - c.at < 5 * 60 * 1000) return c.v;
+  const v = await lookup(cfg, name);
+  lookups.set(k, { at: Date.now(), v });
+  return v;
+}
 async function lookup(cfg, name) {
   const core = require('../utils/messagingCore'); // eslint-disable-line global-require
   const res = await core.httpJson(`${cfg.base}/${wa().VERSION}/${encodeURIComponent(cfg.wabaId)}/message_templates?name=${encodeURIComponent(name)}&fields=id,name,status,category,rejected_reason,quality_score`, { headers: { authorization: `Bearer ${cfg.token}` } });
