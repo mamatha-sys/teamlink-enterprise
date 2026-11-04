@@ -66,7 +66,7 @@ async function pending() {
   const rows = await DB.all(`SELECT a."id", a."status", a."outcome", a."summary", a."durationSec", a."startedAt", a."endedAt", a."failReason", a."transcript", a."nextAttemptAt",
       cd."name" AS candidateName, cd."phone" AS candidatePhone, r."title" AS jobTitle, r."department" AS department, p."fp" AS pushedFp
     FROM "AiCall" a LEFT JOIN "Candidate" cd ON cd."id" = a."candidateId" LEFT JOIN "Requirement" r ON r."id" = a."requirementId" LEFT JOIN "AiCallOmniPush" p ON p."callId" = a."id"
-    WHERE a."status" IN ('completed','failed','busy','no-answer') AND a."nextAttemptAt" IS NULL AND a."attempts" > 0 AND a."updatedAt" >= ? ORDER BY a."updatedAt" ASC LIMIT 300`, since);
+    WHERE a."status" IN ('completed','failed','busy','no-answer') AND a."nextAttemptAt" IS NULL AND a."attempts" > 0 AND a."updatedAt" >= ? AND a."candidateId" NOT LIKE 'omni:%' ORDER BY a."updatedAt" ASC LIMIT 300`, since);
   return rows.map((r) => {
     const turns = turnsOf(r.transcript);
     const item = {

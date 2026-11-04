@@ -282,6 +282,77 @@ async function dialQueued(id, deps = {}) {
   return { status: 'calling', language: lang };
 }
 
+// --- an Omni-Channel (Green Start) contact: a call to ANY phone number by the team's own script (calling/omniCalls.js) -----------------------
+// Not an ATS candidate: no application, no job, no timeline. The same line, the same gateway and the same safety rules that do not need a
+// candidate (calling hours, the Off / Test numbers / Live switch, the test-number list, "do not call me" and Do Not Disturb, the daily limit).
+// The row is made already "calling": the caller (Green Start's campaign) only asks when it is time to dial, and does its own retries.
+async function dialOmni(input, deps = {}) {
+  const c = { ...(deps.config || config()) };
+  if (!c.ready) return { ok: false, code: 'not_ready', reason: `AI phone calls are not ready: ${c.problems[0]}` };
+  const base = await settingsStore.load({ fresh: true });
+  c.mode = lineMode(c, base); // the Test / Live switch of Integrations > AI Calling decides, like for every phone call
+  const s = { ...base, mode: c.mode, testNumbers: [...new Set([...(c.testNumbers || []), ...(base.testNumbers || [])])] };
+  const m = core.normalizeMobile(input.toNumber);
+  if (!m.ok) return { ok: false, code: 'no_phone', reason: `This number cannot be called (${m.reason}).` };
+  if (s.mode === 'Off') return { ok: false, code: 'off', reason: 'AI phone calls are switched off.' };
+  if (s.mode === 'Test' && !s.testNumbers.includes(m.e164)) return { ok: false, code: 'test_number', reason: 'Test mode is on, so only the saved test numbers can be called. An Admin switches AI Calling to Live.' };
+  const sup = await P.suppression(m.e164);
+  if (sup.some((x) => x.kind === 'optout' || x.kind === 'dnd') || await P.callOptOut(m.e164)) return { ok: false, code: 'opted_out', reason: 'This number asked not to be called, or is on the Do Not Disturb list.' };
+  const t = svc.now();
+  const win = P.windowVerdict(t, s);
+  if (!win.ok) return { ok: false, code: 'outside_hours', reason: `Calls are placed only between ${s.hoursFrom} and ${s.hoursTo} India time.` };
+  const lim = await P.limitVerdict(t, s, null);
+  if (!lim.ok) return { ok: false, code: 'limit', reason: lim.reason };
+  const busy = await DB.one(`SELECT "id" FROM "AiCall" WHERE "initiatedVia" = ? AND "toMask" = ? AND "status" = 'calling'`, gateway.VIA, core.maskMobile(m.e164));
+  if (busy) return { ok: false, code: 'busy_line', reason: 'A call to this number is going on right now.' };
+  const lang = S.LANGS.includes(input.language) ? input.language : (S.LANGS.includes(process.env.AI_VOICE_START_LANGUAGE) ? process.env.AI_VOICE_START_LANGUAGE : 'English');
+  const id = svc.newId('aic');
+  const uuid = crypto.randomUUID();
+  const stamp = t.toISOString();
+  await DB.run(
+    `INSERT INTO "AiCall" ("id","mode","purpose","status","applicationId","candidateId","requirementId","campaignId","dedupeKey","language","scriptJson","initiatedByName","initiatedVia","toMask",
+      "attempts","maxAttempts","callSid","providerStatus","lastAttemptAt","startedAt","createdAt","updatedAt")
+     VALUES (?,?,?,'calling',NULL,?,NULL,NULL,?,?,?,?,?,?,1,1,?,'dialing',?,?,?,?)`,
+    id, c.mode.toLowerCase(), 'Screening', `omni:${input.externalId}`, `omni:${input.externalId}`, lang, JSON.stringify(input.scriptJson), 'Omni-Channel', gateway.VIA, core.maskMobile(m.e164), uuid, stamp, stamp, stamp, stamp,
+  );
+  await DB.run('INSERT OR IGNORE INTO "AiCallEvent" ("id","callId","eventKey","kind","status","applied","receivedAt") VALUES (?,?,?,?,?,1,?)', svc.newId('aie'), id, `attempt:${id}:1`, 'attempt', 'attempt', stamp);
+  if (deps.prepare !== false) {
+    try {
+      const d = await require('../webTalk').dialogueFor(await svc.getCall(id)); // eslint-disable-line global-require
+      await Promise.race([gateway.prepare(gateway.engines(), [d.start().say], lang), new Promise((r) => { setTimeout(r, 8000); })]);
+      gateway.prepareCall(gateway.engines(), d);
+    } catch (e) { log('prepare failed:', e.message); }
+  }
+  const number = dialNumber(m.e164, c.format);
+  if (c.via === 'direct') {
+    const dial = deps.direct || require('./sipDirect').originate; // eslint-disable-line global-require
+    dial({ host: c.synway.host, port: c.synway.port, number, uuid, gatewayPort: c.port, localIp: c.localIp, ringSec: RING_SEC })
+      .then(async (r) => {
+        if (r.ok) return;
+        const cur = await svc.getCall(id);
+        if (cur && cur.status === 'calling') await svc.setRow(id, { status: r.status, failReason: String(r.reason).slice(0, 250), providerStatus: `sip:${r.code || r.status}`, endedAt: new Date().toISOString() });
+      })
+      .catch((e) => log('direct dial failed:', e.message));
+  } else {
+    const actionId = `tl-${id}-1`;
+    try {
+      const a = deps.ami || await ami(c);
+      WAIT.set(actionId, id);
+      const r = await a.action({
+        Action: 'Originate', ActionID: actionId, Channel: `PJSIP/${number}@${c.trunk}`, Application: 'AudioSocket', Data: `${uuid},127.0.0.1:${c.port}`,
+        Timeout: RING_SEC * 1000, CallerID: c.callerId || undefined, Async: 'true',
+      });
+      if (r.Response !== 'Success') throw new Error(r.Message || 'Asterisk refused the call');
+    } catch (e) {
+      WAIT.delete(actionId);
+      await svc.setRow(id, { status: 'failed', failReason: `Not dialled: ${e.message}`.slice(0, 250), providerStatus: 'sip:not-dialled', endedAt: new Date().toISOString() });
+      return { ok: false, code: 'not_dialled', reason: e.message, id };
+    }
+  }
+  setTimeout(() => sweep().catch(() => {}), STUCK_MS + 2000).unref();
+  return { ok: true, id, language: lang };
+}
+
 // Calls that were dialled but never answered or reported (Asterisk restarted, a lost event), and calls a restart cut off.
 async function sweep(now = Date.now()) {
   const rows = await DB.all(`SELECT * FROM "AiCall" WHERE "initiatedVia" = ? AND "status" = 'calling'`, gateway.VIA);
@@ -311,4 +382,4 @@ async function start() {
   return server;
 }
 
-module.exports = { config, readiness, lineMode, place, dialQueued, sweep, start, dialNumber, _originateResult: originateResult, _wait: WAIT };
+module.exports = { config, readiness, lineMode, place, dialQueued, dialOmni, sweep, start, dialNumber, _originateResult: originateResult, _wait: WAIT };

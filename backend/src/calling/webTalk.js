@@ -131,6 +131,8 @@ async function open(token) {
 
 async function dialogueFor(row) {
   const s = await settingsStore.load();
+  // a call to an Omni-Channel contact: the team's script, no candidate (calling/omniCalls.js)
+  if (!row.applicationId && String(row.candidateId || '').startsWith('omni:')) return require('./omniCalls').dialogueFor(row, s); // eslint-disable-line global-require
   const ctx = await svc.loadContext(row.applicationId);
   if (!ctx) return null;
   const { fields } = webOf(row);

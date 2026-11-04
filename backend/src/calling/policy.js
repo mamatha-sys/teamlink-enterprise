@@ -191,5 +191,5 @@ function scheduleVersionOf(app) {
 
 module.exports = {
   aiInterviewOwed, isPortalPerson,
-  LIVE_INTERVIEW, CLOSED_STAGES, istParts, startOfIstDay, inWindow, nextWindowStart, windowVerdict, roleOf, roleAllows, phoneKey, personVerdict, limitVerdict, attemptsToday, dedupeKey, scheduleVersionOf, refuse,
+  LIVE_INTERVIEW, CLOSED_STAGES, istParts, startOfIstDay, inWindow, nextWindowStart, windowVerdict, roleOf, roleAllows, phoneKey, suppression, callOptOut, personVerdict, limitVerdict, attemptsToday, dedupeKey, scheduleVersionOf, refuse,
 };

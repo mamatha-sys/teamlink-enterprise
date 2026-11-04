@@ -495,7 +495,7 @@ async function list(user, q = {}) {
   const s = await settingsStore.load();
   const acc = await accessVerdict(user, null, s);
   if (!acc.ok && !(await viewOnly(user))) return acc;
-  const where = ['1=1']; const args = [];
+  const where = ['1=1', `"candidateId" NOT LIKE 'omni:%'`]; const args = []; // (calls to Omni-Channel contacts are not ATS calls)
   const eq = (col, v) => { if (v) { where.push(`"${col}" = ?`); args.push(String(v)); } };
   eq('status', q.status); eq('purpose', q.purpose); eq('requirementId', q.requirementId); eq('campaignId', q.campaignId); eq('candidateId', q.candidateId); eq('applicationId', q.applicationId); eq('initiatedById', q.userId); eq('mode', q.mode);
   if (q.from) { where.push('"createdAt" >= ?'); args.push(new Date(`${String(q.from).slice(0, 10)}T00:00:00+05:30`).toISOString()); }

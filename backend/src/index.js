@@ -298,6 +298,7 @@ app.use('/api/accounts-import', require('./routes/accountsImport'));
 // The new Job Portal's door in: GET /config and the portal's application push.
 // Ahead of publicRoutes, which keeps the classic careers pages and feeds.
 app.use('/api/public/job-portal', require('./routes/jobPortalBridge'));
+app.use('/api/public/omni-voice', require('./routes/omniVoiceBridge')); // Omni-Channel Voice Calling -> the AI phone line (signed, server to server; calling/omniCalls.js)
 // Open the Job Portal already signed in with the TeamLink login (2026-10-29): launch / session / logout / signout (utils/jobPortalSso.js).
 app.use('/api/sso/job-portal', require('./routes/jobPortalSso'));
 // THE JOB PORTAL, BUILT IN (2026-10-05): the public /careers pages read and

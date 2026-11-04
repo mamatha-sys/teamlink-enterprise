@@ -314,6 +314,8 @@ async function finish(row, d, why) {
   const durationSec = row.startedAt ? Math.max(0, Math.round((t - new Date(row.startedAt)) / 1000)) : null;
   if (durationSec != null) result.summary = `${result.summary} Talked for ${talkTime(durationSec)} (AI phone call).`.slice(0, 600);
   await svc.setRow(row.id, { botStateJson: JSON.stringify({ ...d.snapshot(), done: true }), status: 'completed', language: d.language, endedAt: t.toISOString(), durationSec, providerStatus: 'audiosocket' });
+  // a call to an Omni-Channel contact: the result stays on the call row, there is no candidate to tell (calling/omniCalls.js)
+  if (String(row.candidateId || '').startsWith('omni:')) { await require('../omniCalls').applyResult(row.id, result, d.transcript()); return result; } // eslint-disable-line global-require
   await require('../outcomes').applyResult(row.id, result, d.transcript()); // eslint-disable-line global-require
   // the language they spoke is where the next call starts
   if (row.candidateId && d.language) await require('../schema').run('INSERT OR REPLACE INTO "AiCallPref" ("candidateId","language","source","updatedAt") VALUES (?,?,?,?)', row.candidateId, d.language, 'call', t.toISOString()).catch(() => {}); // eslint-disable-line global-require
