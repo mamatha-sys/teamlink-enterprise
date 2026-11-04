@@ -86,9 +86,15 @@ router.get('/', VIEW, async (req, res, next) => {
   try {
     const { mine, scope, people } = await reach(req.user);
     const date = isDay(req.query.date) ? String(req.query.date) : istToday();
+    // FILTERS (founder 2026-11-04: "paina filters add chey"): a day range (date .. to, at most 62 days), status, and words to find
+    const to = isDay(req.query.to) && String(req.query.to) >= date ? String(req.query.to) : date;
+    const status = STATUSES.includes(req.query.status) ? String(req.query.status) : null;
+    const q = String(req.query.q || '').trim().toLowerCase().slice(0, 100);
     const byUser = new Map(people.map((p) => [p.userId, p]));
     const rows = await prisma.timesheetChecklist.findMany({
-      where: { date, userId: { in: [...byUser.keys()] } }, orderBy: [{ fromTime: 'asc' }, { createdAt: 'asc' }],
+      where: { date: { gte: date, lte: to }, userId: { in: [...byUser.keys()] }, ...(status ? { status } : {}) },
+      orderBy: [{ date: 'desc' }, { fromTime: 'asc' }, { createdAt: 'asc' }],
+      take: 3000,
     });
     const decorate = (r) => {
       const p = byUser.get(r.userId) || {};
@@ -96,11 +102,11 @@ router.get('/', VIEW, async (req, res, next) => {
     };
     const all = rows.map(decorate);
     const departments = [...new Set(all.map((r) => r.department))].sort().map((d) => ({ department: d, count: all.filter((r) => r.department === d).length }));
-    let shown = all;
+    let shown = q ? all.filter((r) => `${r.description} ${r.name} ${r.employeeCode}`.toLowerCase().includes(q)) : all;
     if (scope !== 'self' && req.query.department) shown = shown.filter((r) => r.department === req.query.department);
     if (scope !== 'self' && req.query.userId) shown = shown.filter((r) => r.userId === String(req.query.userId));
     res.json({
-      date, today: istToday(), scope, statuses: STATUSES, canWrite: !!mine,
+      date, to, today: istToday(), scope, statuses: STATUSES, canWrite: !!mine,
       departments,
       people: scope === 'self' ? [] : people.map((p) => ({ userId: p.userId, name: p.name, employeeCode: p.employeeCode, department: p.department || 'No department' })).sort((a, b) => a.name.localeCompare(b.name)),
       rows: shown,

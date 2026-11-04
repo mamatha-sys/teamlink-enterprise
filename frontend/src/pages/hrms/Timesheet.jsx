@@ -8,7 +8,6 @@ import FilterChips from '../../components/FilterChips.jsx';
 import { ListEmpty } from '../../components/ui/ListFilters.jsx';
 import Pager, { usePaged } from '../../components/Pager.jsx';
 import '../../components/ui/ListFilters.css';
-import InsightsPanel from '../../components/charts/InsightsPanel.jsx';
 import DataIoBar from '../../components/dataio/DataIoBar.jsx';
 import { FacetSelect, useLocalFacets } from '../../components/ui/ListPageHeader.jsx';
 import './timesheet-priority.css';
@@ -446,8 +445,7 @@ export default function Timesheet({ standalone = false }) {
           this Timesheet may show; with the per-employee export. */}
       <FeedbackSent tasks={tasks} myId={myId} />
 
-      <div className="section-label" style={{ marginTop: 18 }}>Hours at work</div>
-      <InsightsPanel module="timesheet" storageKey="tl_range_timesheet" />
+      {/* "Hours at work" KPI cards removed (founder 2026-11-04: "checklist kindha unna kpi cards valla no uses") */}
 
       {/* ---- New task ----------------------------------------------------- */}
       {newOpen && options && (
