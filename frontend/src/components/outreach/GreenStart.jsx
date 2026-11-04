@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import api from '../../api';
 import './greenstart.css';
+import { Link } from 'react-router-dom';
 import { resolveGreenStartUrl, openGreenStart } from './greenStartLink.js';
+import { sectionPath } from '../omni/omniPages.js';
 
 // ---------------------------------------------------------------------------
 // OMNI-CHANNEL = the founder's own Green Start product, AS IT IS (green-start-app/, source unchanged), opened inside the TeamLink window.
@@ -244,6 +246,8 @@ function OpenGreenStart({ port, onNote }) {
       <b>Green Start opens as its own page</b>
       <p>It opens in a new tab, already signed in. Google, Facebook and the other sign-ins (Connect buttons) only work there, not inside this page.</p>
       <button type="button" className="gs-btn" onClick={open} disabled={busy}>{busy ? 'Opening…' : 'Open Green Start'}</button>
+      {/* founder 2026-11-04: credits used by each department / person against the joinings they gave (Campaigns > Credits & joinings) */}
+      <p><Link to={sectionPath('campaigns', 'credituse')}>Credits &amp; joinings: who used how many credits, and for how many joinings</Link></p>
     </div>
   );
 }

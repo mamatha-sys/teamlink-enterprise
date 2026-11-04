@@ -388,4 +388,83 @@ async function funnelFull(user, q = {}) {
   };
 }
 
-module.exports = { repliesByOwner, actOpts, scopeOf, performance, usage, addRecharge, roi, campaignRoi, funnel, rangeFrom, campaignDay, linkApplications, ledgerScope, callsLogged, commAnalytics, reportCsvFull, funnelFull, CH_WORDS, CH_COLORS };
+// ---- CREDITS & JOININGS (founder 2026-11-04: "aa department valluu antha tokens use chestunaru, aa recruiter antha, use chesina tokens ki enni joining
+// echaru, use undha ledha waste chesara, campaign center lo, recruiters ki kuda kanipinchali"). Campaigns > Credits & joinings, for EVERY Omni-Channel
+// login in its own scope (scopeOf: a Recruiter sees only their own row, a Team Lead their team, a Department Head their department, Admin everyone).
+// Credits = the live credits of the ledger (failed and Test-mode messages use none). Replies / interviews / joinings = the same month, as in ROI.
+// The verdict is a plain rule, the same for a person and a department:
+//   none    no credits used
+//   useful  credits used and at least one joining           (credits per joining shown; "costly" when it is over twice the company figure)
+//   some    credits used, no joining yet, but replies or interviews came back
+//   wasted  credits used and nothing came back: no reply, no interview, no joining
+const VERDICT_WORDS = { none: 'Not used', useful: 'Useful', some: 'Some use, no joining yet', wasted: 'Wasted' };
+function verdictOf(o, avg) {
+  const perJoining = o.credits > 0 && o.joinings > 0 ? Math.round((o.credits / o.joinings) * 10) / 10 : null;
+  let v = 'none';
+  if (o.credits > 0) v = o.joinings > 0 ? 'useful' : (o.replies > 0 || o.interviews > 0 ? 'some' : 'wasted');
+  const costly = v === 'useful' && avg > 0 && perJoining > avg * 2;
+  let why = 'No credits were used this month.';
+  if (v === 'useful') why = `${perJoining} credits for each joining${costly ? ` - more than twice the company figure (${avg})` : ''}.`;
+  if (v === 'some') why = `${o.credits} credits brought ${o.replies} replies and ${o.interviews} interviews, but no joining yet.`;
+  if (v === 'wasted') why = `${o.credits} credits used and nothing came back: no reply, no interview, no joining.`;
+  return { perJoining, verdict: v, verdictWords: VERDICT_WORDS[v], costly, why };
+}
+async function creditUse(user, month, dept) {
+  const sc = await scopeOf(user);
+  const m = Cr.isMonth(month) ? month : Cr.thisMonth();
+  const act = await Cr.activity(m, actOpts(sc));
+  const want = String(dept || '').trim().toLowerCase();
+  const rows = want ? act.rows.filter((r) => String(r.department || '').toLowerCase() === want) : act.rows;
+  const { from, to } = Cr.range(m);
+  const ids = rows.map((r) => r.userId);
+  const replyBy = await repliesByOwner(ids, from, to);
+  const intBy = new Map();
+  try {
+    const ev = await prisma.applicationStageEvent.groupBy({ by: ['actorUserId'], where: { toStage: 'INTERVIEW_SCHEDULED', actorUserId: { in: ids }, createdAt: { gte: new Date(from), lt: new Date(to) } }, _count: { _all: true } });
+    ev.forEach((x) => intBy.set(x.actorUserId, x._count._all));
+  } catch { /* none */ }
+  // the company figure (credits per joining across everybody) is the yardstick for "costly", whatever this login may see
+  let avg = 0;
+  try {
+    const all = sc.all && !want ? act : await Cr.activity(m, { all: true });
+    const c = all.rows.reduce((n, r) => n + (r.joinings > 0 ? r.used : 0), 0); const j = all.rows.reduce((n, r) => n + (r.used > 0 ? r.joinings : 0), 0);
+    avg = j > 0 ? Math.round((c / j) * 10) / 10 : 0;
+  } catch { avg = 0; }
+  const persons = rows.map((r) => {
+    const o = { userId: r.userId, name: r.name, code: r.code, department: r.department || 'No department', credits: r.used, given: r.given, left: r.left, sent: r.sent, email: r.email, whatsapp: r.whatsapp, sms: r.sms, testSent: r.testSent, replies: replyBy.get(r.userId) || 0, interviews: intBy.get(r.userId) || 0, joinings: r.joinings };
+    return { ...o, ...verdictOf(o, avg) };
+  }).sort((a, b) => b.credits - a.credits || a.name.localeCompare(b.name));
+  const dm = new Map();
+  persons.forEach((p) => {
+    const o = dm.get(p.department) || { name: p.department, people: 0, credits: 0, sent: 0, replies: 0, interviews: 0, joinings: 0, useful: 0, wasted: 0 };
+    o.people += 1; ['credits', 'sent', 'replies', 'interviews', 'joinings'].forEach((f) => { o[f] += p[f]; });
+    if (p.verdict === 'useful') o.useful += 1; if (p.verdict === 'wasted') o.wasted += 1;
+    dm.set(p.department, o);
+  });
+  const departments = [...dm.values()].map((d) => ({ ...d, ...verdictOf(d, avg) })).sort((a, b) => b.credits - a.credits || a.name.localeCompare(b.name));
+  const sum = (k) => persons.reduce((n, p) => n + (p[k] || 0), 0);
+  const credits = sum('credits'); const joinings = sum('joinings');
+  const wastedCredits = persons.filter((p) => p.verdict === 'wasted').reduce((n, p) => n + p.credits, 0);
+  return {
+    month: m, scope: sc.onlyUserId ? 'me' : 'team', scopeWords: sc.words, companyPerJoining: avg || null,
+    totals: { people: persons.length, credits, sent: sum('sent'), replies: sum('replies'), interviews: sum('interviews'), joinings, perJoining: credits > 0 && joinings > 0 ? Math.round((credits / joinings) * 10) / 10 : null, wastedCredits, usefulPeople: persons.filter((p) => p.verdict === 'useful').length, wastedPeople: persons.filter((p) => p.verdict === 'wasted').length },
+    departments, persons,
+    rules: { cost: act.rules.cost },
+    notes: [
+      'Credits = the messages that really went out this month (a failed message or a Test-mode message uses no credit).',
+      'Replies, interviews and joinings are of the same month: replies in the chats the person handles, interviews they booked in the ATS, joinings = the HRMS recruiter-joinings count.',
+      'Useful = at least one joining. Some use = replies or interviews but no joining yet. Wasted = credits used and nothing came back.',
+    ],
+  };
+}
+function creditUseCsv(d) {
+  const esc = (v) => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const lines = [['Name', 'Employee code', 'Department', 'Credits used', 'Messages sent', 'Replies', 'Interviews', 'Joinings', 'Credits per joining', 'Result', 'Why'].join(',')];
+  d.persons.forEach((p) => lines.push([p.name, p.code, p.department, p.credits, p.sent, p.replies, p.interviews, p.joinings, p.perJoining == null ? '' : p.perJoining, p.verdictWords, p.why].map(esc).join(',')));
+  lines.push('');
+  lines.push(['Department', 'People', 'Credits used', 'Messages sent', 'Replies', 'Interviews', 'Joinings', 'Credits per joining', 'Result'].join(','));
+  d.departments.forEach((x) => lines.push([x.name, x.people, x.credits, x.sent, x.replies, x.interviews, x.joinings, x.perJoining == null ? '' : x.perJoining, x.verdictWords].map(esc).join(',')));
+  return `﻿${lines.join('\r\n')}\r\n`;
+}
+
+module.exports = { creditUse, creditUseCsv, verdictOf, repliesByOwner, actOpts, scopeOf, performance, usage, addRecharge, roi, campaignRoi, funnel, rangeFrom, campaignDay, linkApplications, ledgerScope, callsLogged, commAnalytics, reportCsvFull, funnelFull, CH_WORDS, CH_COLORS };

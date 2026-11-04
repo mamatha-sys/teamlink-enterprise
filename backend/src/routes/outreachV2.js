@@ -108,6 +108,15 @@ const needInsight = (tab) => (req, res, next) => (A.hubsFor(req.user).insights.i
 const monthOf = (req) => (Cr.isMonth(req.query.month) ? req.query.month : Cr.thisMonth());
 router.get('/insights/performance', needInsight('performance'), wrap(async (req, res) => res.json(await Ins.performance(req.user, monthOf(req)))));
 router.get('/insights/roi', needInsight('roi'), wrap(async (req, res) => res.json(await Ins.roi(req.user, monthOf(req)))));
+// Campaigns > Credits & joinings: every Omni-Channel login, each in its own scope (a Recruiter = only their own row); ?dept= narrows to one department
+router.get('/insights/credit-use', wrap(async (req, res) => res.json(await Ins.creditUse(req.user, monthOf(req), req.query.dept))));
+router.get('/insights/credit-use.csv', wrap(async (req, res) => {
+  const d = await Ins.creditUse(req.user, monthOf(req), req.query.dept);
+  await logAudit({ userId: req.user.id, actorName: req.user.name, action: 'Omni-Channel credits & joinings downloaded', entity: 'OmniActivity', entityId: d.month, toValue: `${d.persons.length} people` });
+  res.set('Content-Disposition', `attachment; filename="omni-credits-joinings-${d.month}.csv"`);
+  res.type('text/csv');
+  return res.send(Ins.creditUseCsv(d));
+}));
 router.get('/insights/funnel', needInsight('reports'), wrap(async (req, res) => res.json(await Ins.funnel(req.user, req.query.days))));
 
 // automations (sequences)
