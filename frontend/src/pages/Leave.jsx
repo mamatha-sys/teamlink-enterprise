@@ -209,13 +209,14 @@ function WhoElseOnLeave({ from, to, employeeId }) {
 
 // The prototype's Apply Leave modal (openApplyLeaveModal, line 3908).
 function ApplyLeaveModal({ types, employees, isHR, canOverride, onClose, onSaved }) {
-  const [form, setForm] = useState({ employeeId: '', type: types[0]?.name || '', dayMode: 'full', halfDay: 'First Half', days: 1, fromDate: '', toDate: '', reason: '', handoverToId: '', handoverNotes: '' });
+  const [form, setForm] = useState({ employeeId: '', type: types[0]?.name || '', dayMode: 'full', halfDay: 'First Half', days: 1, fromDate: '', toDate: '', reason: '', handoverToIds: [], handoverNotes: '' });
   // WORK HANDOVER (founder 2026-11-04): who takes over, what to hand over, and documents - all right here in the apply form
   const [handPeople, setHandPeople] = useState([]);
   const [handFiles, setHandFiles] = useState([]);
   useEffect(() => {
     api.get('/leave/handover-people', { params: { employeeId: isHR && form.employeeId ? form.employeeId : undefined } })
-      .then((r) => setHandPeople(r.data.people || [])).catch(() => setHandPeople([]));
+      .then((r) => { const list = r.data.people || []; setHandPeople(list); setForm((f) => ({ ...f, handoverToIds: f.handoverToIds.filter((id) => list.some((p) => p.id === id)) })); })
+      .catch(() => setHandPeople([]));
   }, [isHR, form.employeeId]);
   const [error, setError] = useState('');
   const [avail, setAvail] = useState(null);
@@ -258,7 +259,7 @@ function ApplyLeaveModal({ types, employees, isHR, canOverride, onClose, onSaved
     if (over && !(canOverride && override)) { setError(`Not enough ${form.type} balance: ${a.available} day(s) available, ${days} requested.`); return; }
     try {
       const made = await api.post('/leave', {
-        handoverToId: form.handoverToId || undefined,
+        handoverToIds: form.handoverToIds.length ? form.handoverToIds : undefined,
         handoverNotes: form.handoverNotes || undefined,
         employeeId: isHR ? form.employeeId : undefined,
         type: form.type,
@@ -339,11 +340,22 @@ function ApplyLeaveModal({ types, employees, isHR, canOverride, onClose, onSaved
       )}
       <WhoElseOnLeave from={form.fromDate} to={half ? form.fromDate : form.toDate} employeeId={isHR ? form.employeeId : undefined} />
       <div className="field"><label>Reason</label><textarea rows="2" value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} /></div>
-      <div className="field"><label>Work handed over to</label>
-        <Combo value={form.handoverToId} onChange={(e) => setForm({ ...form, handoverToId: e.target.value })}>
-          <option value="">Nobody (no handover)</option>
-          {handPeople.map((p) => <option key={p.id} value={p.id}>{`${p.name}${p.employeeCode ? ` · ${p.employeeCode}` : ''}${p.department ? ` · ${p.department}` : ''}`}</option>)}
-        </Combo>
+      {/* several people can take over (a checkbox list); who is listed follows the rule on the server: a TL sees the TLs and their own
+          department, everybody else their own department (founder 2026-11-04) */}
+      <div className="field"><label>Work handed over to {form.handoverToIds.length > 0 && <span className="small-muted">({form.handoverToIds.length} picked)</span>}</label>
+        {handPeople.length === 0
+          ? <div className="small-muted">Nobody to pick (your department has no one else working).</div>
+          : (
+            <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--line, #e5e7eb)', borderRadius: 8, padding: '6px 10px' }}>
+              {handPeople.map((p) => (
+                <label key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '4px 0', fontWeight: 400, cursor: 'pointer' }}>
+                  <input type="checkbox" style={{ width: 'auto' }} checked={form.handoverToIds.includes(p.id)}
+                    onChange={(e) => setForm((f) => ({ ...f, handoverToIds: e.target.checked ? [...f.handoverToIds, p.id] : f.handoverToIds.filter((x) => x !== p.id) }))} />
+                  <span>{p.name}{p.employeeCode ? ` · ${p.employeeCode}` : ''}{p.department ? ` · ${p.department}` : ''}{p.lead ? ' · TL' : ''}</span>
+                </label>
+              ))}
+            </div>
+          )}
       </div>
       <div className="field"><label>What to hand over (reports, pending work)</label>
         <textarea rows="3" value={form.handoverNotes} maxLength={3000} placeholder="For example: send the daily candidate report to the TL at 6 PM; call back the 3 candidates in the sheet" onChange={(e) => setForm({ ...form, handoverNotes: e.target.value })} />

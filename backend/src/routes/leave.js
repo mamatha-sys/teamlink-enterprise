@@ -206,38 +206,62 @@ router.get('/', async (req, res, next) => {
 // ---- WORK HANDOVER (2026-11-04) ----------------------------------------------------------------------------------------------------------
 const HANDOVER_MAX_FILES = 10;
 const HANDOVER_LEFT = ['Relieved', 'Exited'];
+// WHO MAY TAKE OVER (founder 2026-11-04: "TLs leave apply chestey handover only TLs ki and valla department employees ki matrame cheyali,
+// employee handover chestey valla department vallu matram kanipinchali, multiple employees ki handover cheyochu"):
+//   the applicant is a TL / STL  -> the TLs (and STLs) of any department + the people of their own department
+//   anybody else                 -> the people of their own department
+// never the applicant, never people who left.
+const LEAD_ROLES = ['TL', 'STL'];
+async function handoverPool(applicant) {
+  if (!applicant) return [];
+  const u = applicant.userId ? await prisma.user.findUnique({ where: { id: applicant.userId }, select: { hrmsRole: true, role: true } }) : null;
+  const lead = !!u && (LEAD_ROLES.includes(u.hrmsRole) || LEAD_ROLES.includes(u.role));
+  const rows = await prisma.employee.findMany({
+    where: { employmentStatus: { notIn: HANDOVER_LEFT }, id: { not: applicant.id } },
+    select: { id: true, name: true, employeeCode: true, department: true, userId: true, user: { select: { hrmsRole: true, role: true } } },
+    orderBy: { name: 'asc' },
+  });
+  const sameDept = (e) => !!applicant.department && e.department === applicant.department;
+  const isLead = (e) => !!e.user && (LEAD_ROLES.includes(e.user.hrmsRole) || LEAD_ROLES.includes(e.user.role));
+  return rows.filter((e) => sameDept(e) || (lead && isLead(e)))
+    .map((e) => ({ id: e.id, name: e.name, employeeCode: e.employeeCode, department: e.department, userId: e.userId, lead: isLead(e) }))
+    .sort((a, b) => (sameDept(b) - sameDept(a)) || (b.lead - a.lead) || a.name.localeCompare(b.name));
+}
 async function saveHandover(leave, employee, b, user) {
-  const toId = String(b.handoverToId || '').trim();
+  const ids = [...new Set([...(Array.isArray(b.handoverToIds) ? b.handoverToIds : []), b.handoverToId].map((x) => String(x || '').trim()).filter(Boolean))].slice(0, 20);
   const notes = String(b.handoverNotes || '').trim().slice(0, 3000);
-  if (!toId && !notes) return null;
-  let to = null;
-  if (toId) {
-    to = await prisma.employee.findUnique({ where: { id: toId }, select: { id: true, name: true, employeeCode: true, department: true, userId: true, employmentStatus: true } });
-    if (!to || HANDOVER_LEFT.includes(to.employmentStatus) || (employee && to.id === employee.id)) to = null;
-  }
-  const h = { toId: to ? to.id : null, toName: to ? to.name : null, toCode: to ? to.employeeCode : null, toDepartment: to ? to.department : null, notes, files: [], at: new Date().toISOString(), by: user.name };
+  if (!ids.length && !notes) return null;
+  const pool = ids.length ? await handoverPool(employee) : [];
+  const to = pool.filter((p) => ids.includes(p.id));
+  const first = to[0] || null;
+  const h = {
+    to: to.map((t) => ({ id: t.id, name: t.name, code: t.employeeCode, department: t.department })),
+    toId: first ? first.id : null, toName: first ? to.map((t) => t.name).join(', ') : null, toCode: first && to.length === 1 ? first.employeeCode : null,
+    notes, files: [], at: new Date().toISOString(), by: user.name,
+  };
   await leaveMeta.setMeta(leave.id, { handover: h });
-  if (to && to.userId) {
-    const who = employee ? employee.name : 'A colleague';
+  const who = employee ? employee.name : 'A colleague';
+  for (const t of to) { // eslint-disable-line no-restricted-syntax
+    if (!t.userId) continue; // eslint-disable-line no-continue
+    // eslint-disable-next-line no-await-in-loop
     await prisma.notification.create({ data: {
-      userId: to.userId, channel: 'In-App', status: 'Delivered', recipient: to.name,
+      userId: t.userId, channel: 'In-App', status: 'Delivered', recipient: t.name,
       title: `${who} handed over work to you (leave ${leave.fromDate}${leave.toDate !== leave.fromDate ? ` to ${leave.toDate}` : ''})`.slice(0, 190),
-      message: `${notes ? `What to take over: ${notes}\n` : ''}Open: /leave?tab=requests&open=${leave.id}`,
+      message: `${notes ? `What to take over: ${notes}\n` : ''}${to.length > 1 ? `Also given to: ${to.filter((x) => x.id !== t.id).map((x) => x.name).join(', ')}\n` : ''}Open: /leave?tab=requests&open=${leave.id}`,
     } }).catch(() => {});
   }
   return h;
 }
 const publicHandover = (h, id) => (h ? { ...h, files: (h.files || []).map((f, i) => ({ n: i, name: f.name, size: f.size, type: f.type, at: f.at, url: `/leave/${id}/handover-files/${i}` })) } : null);
 
-// the people work can be handed over to: everybody working here except the applicant, the applicant's department first
+// the people this applicant may hand work over to (handoverPool above)
 router.get('/handover-people', async (req, res, next) => {
   try {
-    const me = await prisma.employee.findUnique({ where: { userId: req.user.id }, select: { id: true, department: true } });
+    const me = await prisma.employee.findUnique({ where: { userId: req.user.id }, select: { id: true, department: true, userId: true } });
     const forId = String(req.query.employeeId || '') || (me && me.id) || '';
-    const of = forId ? await prisma.employee.findUnique({ where: { id: forId }, select: { id: true, department: true } }) : me;
-    const rows = await prisma.employee.findMany({ where: { employmentStatus: { notIn: HANDOVER_LEFT }, ...(of ? { id: { not: of.id } } : {}) }, select: { id: true, name: true, employeeCode: true, department: true }, orderBy: { name: 'asc' } });
-    const dep = of && of.department;
-    res.json({ people: rows.sort((a, b) => (b.department === dep) - (a.department === dep) || a.name.localeCompare(b.name)) });
+    const of = forId ? await prisma.employee.findUnique({ where: { id: forId }, select: { id: true, department: true, userId: true } }) : me;
+    const people = (await handoverPool(of)).map(({ userId, ...rest }) => rest); // eslint-disable-line no-unused-vars
+    res.json({ people });
   } catch (err) { next(err); }
 });
 
@@ -275,7 +299,8 @@ router.get('/:id/handover-files/:n', async (req, res, next) => {
     const f = h && (h.files || [])[Number(req.params.n)];
     if (!f) return res.status(404).json({ error: 'Document not found' });
     let taker = false;
-    if (h.toId) { const t = await prisma.employee.findUnique({ where: { id: h.toId }, select: { userId: true } }); taker = !!(t && t.userId === req.user.id); }
+    const takerIds = (h.to && h.to.length ? h.to.map((t) => t.id) : [h.toId]).filter(Boolean);
+    if (takerIds.length) { const me = await prisma.employee.findUnique({ where: { userId: req.user.id }, select: { id: true } }); taker = !!(me && takerIds.includes(me.id)); }
     if (!taker && !await workflow.canSee(WF, request.id, req.user, request.employee)) return res.status(403).json(OUT_OF_SCOPE);
     const full = attachments.resolveStored(f.stored);
     if (!full) return res.status(404).json({ error: 'The file is no longer on the server' });

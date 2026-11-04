@@ -170,7 +170,7 @@ export function LeaveFacts({ leave, handoffs, early = null, source = null, pulse
       ))}
       {handover && (handover.toName || handover.notes || (handover.files || []).length > 0) && (
         <div style={{ margin: '8px 0', padding: '8px 10px', border: '1px solid var(--line, #e5e7eb)', borderRadius: 8 }}>
-          <div><span className="cell-muted">Work handed over to:</span> <b>{handover.toName ? `${handover.toName}${handover.toCode ? ` (${handover.toCode})` : ''}` : 'nobody named'}</b></div>
+          <div><span className="cell-muted">Work handed over to:</span> <b>{(handover.to && handover.to.length) ? handover.to.map((t) => `${t.name}${t.code ? ` (${t.code})` : ''}`).join(', ') : (handover.toName ? `${handover.toName}${handover.toCode ? ` (${handover.toCode})` : ''}` : 'nobody named')}</b></div>
           {handover.notes && <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}><span className="cell-muted">What to hand over:</span> {handover.notes}</div>}
           {(handover.files || []).length > 0 && (
             <div style={{ marginTop: 4 }}><span className="cell-muted">Documents:</span>{' '}
