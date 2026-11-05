@@ -8,6 +8,8 @@
 .flog-filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .flog-filters select { width: auto; flex: 0 1 260px; min-width: 0; }
 .flog-filters input[type="search"] { flex: 1 1 200px; min-width: 0; width: auto; }
+.flog-found { font-size: 13px; font-weight: 700; color: var(--navy); white-space: nowrap; }
+.flog-found-go { margin-left: 8px; border: 0; background: none; padding: 0; font: inherit; color: #1d4ed8; text-decoration: underline; cursor: pointer; }
 .flog-list { display: flex; flex-direction: column; gap: 10px; }
 .flog-day { border-left: 3px solid var(--brand-tint-2, var(--line)); padding-left: 10px; }
 .flog-dayhead { font-size: 12px; font-weight: 700; color: var(--ink-soft); margin-bottom: 4px; }

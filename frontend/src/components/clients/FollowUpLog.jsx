@@ -72,18 +72,28 @@ export default function FollowUpLog({ clientId, requirementId, candidateId, appl
     try { await api.put('/client-followlog/status', { clientId, status }); setData((d) => ({ ...d, workStatus: status || null })); } catch (e) { setError(e.response?.data?.error || 'That did not save. Please try again.'); }
   }
 
-  const groups = useMemo(() => {
-    if (!data) return [];
-    const needle = q.trim().toLowerCase();
-    const rows = data.entries.filter((e) => (!data.tabs || e.tab === subTab) && (!reqFilter || e.requirementId === reqFilter)
+  // THE SEARCH (founder 2026-11-05: "yedhaina oka keyword or anything type chesethey ... ahh count kanipincheyla pettu"): every word typed must
+  // be on the line. perTab = the matches in each sub tab, so a word that is under another sub tab is not "0"; people = different candidates found.
+  const { groups, perTab, people } = useMemo(() => {
+    if (!data) return { groups: [], perTab: {}, people: 0 };
+    const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const said = (e) => {
+      const text = `${e.note} ${e.topic || ''} ${e.byName || ''} ${e.candidate || ''} ${e.recruiter || ''} ${e.requirementLabel || ''}`.toLowerCase();
+      return words.every((w) => text.includes(w));
+    };
+    const all = data.entries.filter((e) => (!reqFilter || e.requirementId === reqFilter)
       && (!who || e.byName === who || (who === '__sheet' && e.source === 'sheet'))
-      && (!needle || `${e.note} ${e.topic || ''} ${e.byName || ''} ${e.candidate || ''}`.toLowerCase().includes(needle)));
+      && said(e));
+    const counts = {};
+    all.forEach((e) => { counts[e.tab] = (counts[e.tab] || 0) + 1; });
+    const rows = all.filter((e) => !data.tabs || e.tab === subTab);
+    const names = new Set(rows.map((e) => String(e.candidate || '').trim().toLowerCase()).filter(Boolean));
     const out = [];
     rows.forEach((e) => {
       const last = out[out.length - 1];
       if (last && last.day === e.onDate) last.rows.push(e); else out.push({ day: e.onDate, rows: [e] });
     });
-    return out;
+    return { groups: out, perTab: counts, people: names.size };
   }, [data, who, q, subTab, reqFilter]);
 
   if (!data) return <div className="card section">{error ? <div className="error-text">{error}</div> : <div className="small-muted">Loading the follow-ups…</div>}</div>;
@@ -91,6 +101,9 @@ export default function FollowUpLog({ clientId, requirementId, candidateId, appl
   const shownRows = groups.slice(0, days).reduce((n, g) => n + g.rows.length, 0);
   const totalRows = groups.reduce((n, g) => n + g.rows.length, 0);
   const tabCount = data.tabs ? (data.tabs.find((t) => t.key === subTab) || {}).count || 0 : data.entries.length;
+  const searching = q.trim() !== '';
+  const elsewhere = searching && !totalRows && data.tabs ? data.tabs.find((t) => perTab[t.key]) : null;
+  const pickTab = (key) => { setSubTab(key); setDays(PAGE); setEditing(null); };
   const reqPick = (value, onChange, label) => (
     <Combo value={value} onChange={(e) => onChange(e.target.value)} aria-label={label}>
       <option value="">No particular requirement</option>
@@ -125,7 +138,7 @@ export default function FollowUpLog({ clientId, requirementId, candidateId, appl
 
       {data.tabs && (
         <div className="flog-tabs" role="tablist" aria-label="Follow-up sub tabs">
-          {data.tabs.map((t) => <button key={t.key} type="button" role="tab" aria-selected={subTab === t.key} className={`flog-tab${subTab === t.key ? ' on' : ''}`} onClick={() => { setSubTab(t.key); setDays(PAGE); setEditing(null); }}>{t.label}<span>{t.count.toLocaleString('en-IN')}</span></button>)}
+          {data.tabs.map((t) => <button key={t.key} type="button" role="tab" aria-selected={subTab === t.key} className={`flog-tab${subTab === t.key ? ' on' : ''}`} onClick={() => pickTab(t.key)}>{t.label}<span>{(searching ? perTab[t.key] || 0 : t.count).toLocaleString('en-IN')}</span></button>)}
         </div>
       )}
 
@@ -169,7 +182,13 @@ export default function FollowUpLog({ clientId, requirementId, candidateId, appl
             {sheetRows > 0 && <option value="__sheet">Only the lines from the sheet</option>}
           </select>
           <input type="search" value={q} placeholder="Search the follow-ups…" onChange={(e) => { setQ(e.target.value); setDays(PAGE); }} />
-          <span className="small-muted">{totalRows === tabCount ? '' : `${totalRows} of ${tabCount}`}</span>
+          {searching ? (
+            <span className="flog-found" role="status">
+              {people > 0 ? `${people.toLocaleString('en-IN')} ${people === 1 ? 'person' : 'people'} found · ` : ''}
+              {`${totalRows.toLocaleString('en-IN')} of ${tabCount.toLocaleString('en-IN')} lines`}
+              {elsewhere && <button type="button" className="flog-found-go" onClick={() => pickTab(elsewhere.key)}>{`${perTab[elsewhere.key].toLocaleString('en-IN')} in ${elsewhere.label} →`}</button>}
+            </span>
+          ) : <span className="small-muted">{totalRows === tabCount ? '' : `${totalRows} of ${tabCount}`}</span>}
         </div>
       )}
 
@@ -210,7 +229,7 @@ export default function FollowUpLog({ clientId, requirementId, candidateId, appl
             )))}
           </div>
         ))}
-        {groups.length === 0 && <div className="small-muted">{tabCount ? 'No follow-up matches.' : 'Nothing here yet.'}</div>}
+        {groups.length === 0 && <div className="small-muted">{elsewhere ? `Nothing in this sub tab. It is under ${elsewhere.label}.` : (tabCount ? 'No follow-up matches.' : 'Nothing here yet.')}</div>}
       </div>
       {groups.length > days && (
         <button type="button" className="btn btn-sm" onClick={() => setDays((d) => d + PAGE)}>{`Show more (${totalRows - shownRows} older)`}</button>
