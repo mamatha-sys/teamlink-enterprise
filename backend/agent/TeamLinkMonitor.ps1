@@ -11,7 +11,7 @@
   in with their own TeamLink email and password. While it runs, a TeamLink icon sits next to the clock ("Recording PC use
   in work hours"); its menu shows what is recorded and lets the employee stop it.
 
-  Run: right-click -> Run with PowerShell   (or: powershell -ExecutionPolicy Bypass -File TeamLinkMonitor.ps1)
+  Run: double-click TeamLinkMonitorSetup.cmd, downloaded from TeamLink (it holds this script and runs it).
   After set-up it starts with Windows by itself (the icon menu has "Do not start with Windows").
   Settings: %APPDATA%\TeamLinkMonitor\config.json (the device token is encrypted for this Windows user, DPAPI).
 #>
@@ -19,7 +19,7 @@ param(
   [string]$Server = 'https://teamlink.teamlinks.in'
 )
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '1.1'
+$AgentVersion = '1.2'
 # older Windows would otherwise try an old, refused kind of secure connection
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, System.Security
@@ -42,6 +42,13 @@ public static class TLWin {
   }
 }
 '@
+
+# one agent per PC login: running the setup file again must not start a second copy (two icons, every minute counted twice)
+$script:OneCopy = New-Object Threading.Mutex($false, 'Local\TeamLinkMonitor')
+if (-not $script:OneCopy.WaitOne(0)) {
+  [Windows.Forms.MessageBox]::Show('TeamLink Monitor is already running on this PC. Look for its icon next to the clock.', 'TeamLink') | Out-Null
+  exit 0
+}
 
 $Dir = Join-Path $env:APPDATA 'TeamLinkMonitor'
 $ConfigFile = Join-Path $Dir 'config.json'

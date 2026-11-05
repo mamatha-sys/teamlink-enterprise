@@ -447,6 +447,38 @@ async function pcActivity(employeeIds, from, to) {
   return out;
 }
 
+// --- the download: one file that runs on a double-click ---------------------------------------------------------------------
+// Windows opens a .ps1 in Notepad on a double-click (founder 2026-11-05: "download chesaka, ilaa vachindhi"). So the download is a
+// .cmd holding the agent: it writes the agent to %APPDATA%\TeamLinkMonitor and runs it. It installs nothing else, and the notice
+// and sign-in still come first. payload: the agent's text (tests pass a small script).
+function agentSetupFile(payload) {
+  const text = payload === undefined
+    ? require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'agent', 'TeamLinkMonitor.ps1'), 'utf8') // eslint-disable-line global-require
+    : payload;
+  return [
+    '@echo off',
+    'title TeamLink Monitor',
+    'setlocal',
+    'set "TLDIR=%APPDATA%\\TeamLinkMonitor"',
+    'if not exist "%TLDIR%" mkdir "%TLDIR%"',
+    'set "TLSELF=%~f0"',
+    'echo Starting TeamLink Monitor...',
+    // the marker is built in two parts here, so the only whole one in this file is the line above the agent
+    'powershell -NoProfile -ExecutionPolicy Bypass -Command "$t=[IO.File]::ReadAllText($env:TLSELF); $m=\':\'+\'::TEAMLINK-AGENT\'; $i=$t.IndexOf($m); [IO.File]::WriteAllText((Join-Path $env:TLDIR \'TeamLinkMonitor.ps1\'), $t.Substring($i+$m.Length).TrimStart())"',
+    'if not "%errorlevel%"=="0" goto failed',
+    'powershell -NoProfile -ExecutionPolicy Bypass -File "%TLDIR%\\TeamLinkMonitor.ps1"',
+    'if not "%errorlevel%"=="0" goto failed',
+    'exit /b 0',
+    ':failed',
+    'echo.',
+    'echo TeamLink Monitor could not start. Please show this window to HR or IT.',
+    'pause',
+    'exit /b 1',
+    ':::TEAMLINK-AGENT',
+    String(text).replace(/\r\n/g, '\n'),
+  ].join('\n').replace(/\n/g, '\r\n');
+}
+
 // --- retention ------------------------------------------------------------------------------------------------------------------
 async function purge() {
   const s = await settings();
@@ -464,6 +496,6 @@ function startSweep() {
 }
 
 module.exports = {
-  CATEGORIES, DEFAULT_POLICY, AUDIT_ENTITIES, isMonitorAdmin, accessOf, heartbeat, usage, auditRows, settings, saveSettings, hasConsent, recordConsent, hashToken, deviceOf, registerDevice,
+  agentSetupFile, CATEGORIES, DEFAULT_POLICY, AUDIT_ENTITIES, isMonitorAdmin, accessOf, heartbeat, usage, auditRows, settings, saveSettings, hasConsent, recordConsent, hashToken, deviceOf, registerDevice,
   ingest, categoryIndex, overview, employeeDetail, reportRows, uncategorised, pcActivity, purge, startSweep, todayIst, istDay, cleanTitle,
 };

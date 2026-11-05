@@ -516,15 +516,15 @@ function SetUpPc() {
       const r = await api.get('/monitoring/agent', { responseType: 'blob' });
       const href = URL.createObjectURL(r.data);
       const a = document.createElement('a');
-      a.href = href; a.download = 'TeamLinkMonitor.ps1'; document.body.appendChild(a); a.click();
+      a.href = href; a.download = 'TeamLinkMonitorSetup.cmd'; document.body.appendChild(a); a.click();
       a.remove(); setTimeout(() => URL.revokeObjectURL(href), 2000);
     } catch { setErr('Could not download the file. Please try again.'); } finally { setBusy(false); }
   }
   return (
     <Panel title="Setting up an office PC" sub="Windows only. Takes about a minute on each PC.">
       <ol className="mon-steps">
-        <li>On the office PC, sign in to TeamLink and press <b>Download the PC agent</b>.</li>
-        <li>Right-click the downloaded file <b>TeamLinkMonitor.ps1</b> → <b>Run with PowerShell</b>. If Windows asks, choose <b>Run anyway</b>.</li>
+        <li>On the office PC, sign in to TeamLink and press <b>Download the PC agent</b>. If the browser warns about the file, choose <b>Keep</b>.</li>
+        <li>Double-click the downloaded file <b>TeamLinkMonitorSetup.cmd</b>. If Windows shows a blue box, press <b>More info</b> → <b>Run anyway</b>.</li>
         <li>The employee signs in with their own TeamLink email and password, reads the notice and accepts it.</li>
         <li>Done. A TeamLink icon stays next to the clock, it starts with Windows, and the PC appears under <b>Devices</b>.</li>
       </ol>
