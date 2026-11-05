@@ -293,7 +293,11 @@ async function askModel(conv, cfg, input) {
   // first live test 2026-11-05: the model called itself by the candidate's name
   const name = conv.name ? `You are talking TO ${conv.name}. That is the candidate, not you. You are the assistant of the company.` : '';
   // WHICH JOBS ARE OPEN is never the model's to say: it invented jobs in the first live chats. The list, the "nothing found" and the choice of a job are done here, from the database.
-  const offered = (JSON.parse(conv.collected || '{}').jobChoices || []).length > 0;
+  // founder 2026-11-05: "ekkada promotion chesamo dhanikii related answers mathramey": a chat from a promotion of one job stays on that job; no other job is offered
+  const mem = JSON.parse(conv.collected || '{}');
+  const campaignJob = conv.campaignId && conv.requirementId && String(conv.campaignId).startsWith('gs:') ? null : (await S.q('SELECT requirementId FROM "OmniWaCampaign" WHERE id = ?', conv.campaignId || '').catch(() => []))[0];
+  const promoJob = job.available && conv.requirementId && (mem.promoJob === conv.requirementId || (campaignJob && campaignJob.requirementId === conv.requirementId));
+  const offered = !promoJob && (mem.jobChoices || []).length > 0;
   const picked = offered ? T.pickedNumber(input) : null;
   const remember = async (patch) => {
     conv.collected = JSON.stringify({ ...JSON.parse(conv.collected || '{}'), ...patch });
@@ -307,6 +311,11 @@ async function askModel(conv, cfg, input) {
     }
   }
   const asksOther = job.available && !picked && T.askedAboutJob(input) && !T.titleHas(job.title, input);
+  if (promoJob && !mem.promoCardSent) {
+    await remember({ promoCardSent: true, cardShown: true });
+    return { ctx, calls, reply: T.jobCardText(job), written: true };
+  }
+  if (promoJob && asksOther) return { ctx, calls, reply: T.onlyThisJobText(job), written: true };
   if ((!job.available && !picked) || asksOther) {
     const found = await T.offerJobs(conv, input).catch(() => ({ searched: false, jobs: [] }));
     if (found.jobs.length) return { ctx, calls, reply: T.jobListText(found.jobs, found.total), written: true };
@@ -378,13 +387,17 @@ async function runTurn(row, defaults, now = Date.now()) {
   if (human) { await pause(conv, human.senderName, now); await stamp('paused', { output: `${human.senderName || 'A recruiter'} is answering this chat.` }); return { skipped: 'human' }; }
   const ongoing = !!conv.aiStartedAt;
   let promoted = conv.promoAt && Number(conv.promoAt) >= now - cfg.promoDays * 86400000;
-  if (!ongoing && !promoted) {
-    // a campaign sent inside Omni-Channel (Green Start) is not in TeamLink's log: ask there before treating this as a stranger
+  // a campaign sent inside Omni-Channel (Green Start) is not in TeamLink's log: ask there, also in a running chat, because a NEW campaign changes what the chat is about
+  const fromTeamLink = promoted && conv.campaignId && !String(conv.campaignId).startsWith('gs:');
+  if (!fromTeamLink) {
     const gs = await require('./gsCampaign').recentSend(conv.e164, cfg.promoDays); // eslint-disable-line global-require
-    if (gs) {
-      promoted = true;
-      Object.assign(conv, { promoAt: gs.at, campaignId: gs.campaignId, campaignName: gs.campaignName });
-      await S.run('UPDATE "OmniWaConv" SET promoAt = ?, campaignId = ?, campaignName = ?, updatedAt = ? WHERE id = ?', gs.at, gs.campaignId, gs.campaignName, now, conv.id);
+    if (gs) promoted = true;
+    if (gs && gs.campaignId !== conv.campaignId) {
+      const promoJob = await T.jobOfCampaign(gs.campaignName);
+      Object.assign(conv, { promoAt: gs.at, campaignId: gs.campaignId, campaignName: gs.campaignName, requirementId: promoJob || conv.requirementId });
+      const { promoCardSent, cardShown, ...keep } = JSON.parse(conv.collected || '{}');
+      conv.collected = JSON.stringify({ ...keep, promoJob: promoJob || null });
+      await S.run('UPDATE "OmniWaConv" SET promoAt = ?, campaignId = ?, campaignName = ?, requirementId = ?, collected = ?, updatedAt = ? WHERE id = ?', gs.at, gs.campaignId, gs.campaignName, conv.requirementId, conv.collected, now, conv.id);
     }
   }
   if (!ongoing && !promoted) {

@@ -76,8 +76,8 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
       await prisma.application.create({ data: { candidateId: c.id, requirementId: job.id, ownerRecruiterId: other ? other.id : null } });
       return c;
     };
-    const promote = (c, n, campaign = `zzjob${n}${SUFFIX}`) => Promo.logBulk({
-      id: campaign, kind: 'bulk', audience: 'candidates', purpose: 'ZZTEST job promotion', requirementId: job.id, templates: { WhatsApp: { name: 'job_update' } }, sender: { senderUserId: other ? other.id : admin.id, senderName: 'ZZTEST Recruiter' },
+    const promote = (c, n, campaign = `zzjob${n}${SUFFIX}`, withJob = false) => Promo.logBulk({
+      id: campaign, kind: 'bulk', audience: 'candidates', purpose: 'ZZTEST job promotion', requirementId: withJob ? job.id : null, templates: { WhatsApp: { name: 'job_update' } }, sender: { senderUserId: other ? other.id : admin.id, senderName: 'ZZTEST Recruiter' },
     }, [{ channel: 'WhatsApp', status: 'sent', address: `+${phoneOf(n)}`, text: 'ZZTEST We have a job', entityId: c.id, providerRef: `zzout${n}${SUFFIX}`, sentAt: new Date() }]);
 
     // ---- 1. off by default
@@ -129,7 +129,7 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     // ---- 3. debounce + idempotent
     console.log('\n-- quick messages and repeats');
     const b = await mkCandidate(2, 'Bala');
-    await promote(b, 2);
+    await promote(b, 2, undefined, true);
     await inbound(phoneOf(2), 'Hello');
     await inbound(phoneOf(2), 'is the job open?');
     const waiting = await Agent.tick(Date.now());
@@ -408,7 +408,7 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     await inbound(phoneOf(10), 'one more');
     stub.script = [{ reply: 'Okay.' }];
     await run();
-    check('a running AI chat does not ask Green Start again', gsSeen.length === 0 && (await aiMsgs(i.id)).length === 2);
+    check('a running chat on the same campaign carries on (a new campaign would change it)', (await aiMsgs(i.id)).length === 2 && (await convAt(phoneOf(10))).campaignId === 'gs:c9');
     const leadNo = phoneOf(78);
     await inbound(leadNo, 'Tell me more', 'ZZTEST Campaign Lead');
     stub.script = [{ reply: 'Sure, what would you like to know?' }];
@@ -423,6 +423,27 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     await run();
     check('Green Start not answering: nothing breaks, nobody gets a wrong AI reply', stub.calls.length === 0 && (await aiMsgs(j.id)).length === 0);
     gsServer.close();
+
+    // ---- 8b2. only what was promoted
+    console.log('\n-- only what was promoted');
+    const pr = await mkCandidate(40, 'Pavan');
+    await promote(pr, 40, undefined, true);
+    await inbound(phoneOf(40), 'Yes');
+    stub.calls.length = 0;
+    await run();
+    const prSent = await aiMsgs(pr.id);
+    check('a reply to a promotion of one job gets THAT job\'s details first, from the ATS', stub.calls.length === 0 && prSent.length === 1 && /Physics Lecturer/.test(prSent[0].body) && /Do you want to apply/.test(prSent[0].body), prSent.map((x) => x.body));
+    await inbound(phoneOf(40), 'is there any job for nurse');
+    await run();
+    let prNow = (await aiMsgs(pr.id)).pop().body;
+    check('another job is not offered: it says what it can help with', /the job in our message/.test(prNow) && !/These jobs are open/.test(prNow), prNow);
+    await inbound(phoneOf(40), 'salary entha');
+    await run();
+    prNow = (await aiMsgs(pr.id)).pop().body;
+    check('a question about the promoted job is answered', /8 LPA/.test(prNow), prNow);
+    const T4 = require(path.join(BACK, 'src/omniwa/tools'));
+    await prisma.requirement.update({ where: { id: job.id }, data: { reqCode: `REQ-${SUFFIX.slice(-6)}` } });
+    check('a Green Start campaign names its job with the code in its name', await T4.jobOfCampaign(`Nurses ${`req ${SUFFIX.slice(-6)}`}`) === job.id && await T4.jobOfCampaign('Summer promo') === null);
 
     // ---- 8c. each WhatsApp number its own instructions and knowledge
     console.log('\n-- each number its own instructions');

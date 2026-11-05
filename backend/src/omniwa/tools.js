@@ -112,6 +112,15 @@ const askedAboutJob = (text) => wordsOf(text).length > 0 && JOB_ASK.test(String(
 const pickedNumber = (text) => { const m = /^\D*([1-5])\D*$/.exec(String(text || '').trim()); return m ? Number(m[1]) : null; };
 const titleHas = (title, text) => wordsOf(text).some((w) => wordStarts(title, stemOf(w)));
 
+// a Green Start campaign has no job field: "Nurses REQ-0620" in its name says which job it promotes
+async function jobOfCampaign(name) {
+  const m = /\bREQ[-\s]?(\d{1,6})\b/i.exec(String(name || ''));
+  if (!m) return null;
+  const r = await prisma.requirement.findFirst({ where: { reqCode: `REQ-${m[1].padStart(4, '0')}` }, select: { id: true } }).catch(() => null);
+  return r ? r.id : null;
+}
+const onlyThisJobText = (job) => `I can help you with *${job.title}*, the job in our message. For any other job, write "recruiter" and someone from our team will help you.`;
+
 // a job's details and the common questions about it are answered HERE from the ATS requirement: the model could not be trusted with them in the live tests
 function jobCardText(job) {
   const line = (label, v) => (v ? `${label}: ${Array.isArray(v) ? v.join(', ') : v}` : null);
@@ -151,7 +160,7 @@ function quickAnswer(job, text, { justShown = false } = {}) {
 
 // what the model may read of the chat's memory
 function collectedView(conv) {
-  const { jobChoices, applyLinkSentAt, ...rest } = JSON.parse(conv.collected || '{}');
+  const { jobChoices, applyLinkSentAt, cardShown, promoJob, promoCardSent, ...rest } = JSON.parse(conv.collected || '{}');
   return rest;
 }
 
@@ -233,4 +242,4 @@ async function run(name, args, conv, ctx) {
 }
 
 const NAMES = ['get_candidate_profile', 'get_job_details', 'search_knowledge_base', 'save_candidate_data', 'send_apply_link', 'send_interview_link', 'handoff_to_recruiter'];
-module.exports = { jobCardText, quickAnswer, run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };
+module.exports = { jobOfCampaign, onlyThisJobText, jobCardText, quickAnswer, run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };
