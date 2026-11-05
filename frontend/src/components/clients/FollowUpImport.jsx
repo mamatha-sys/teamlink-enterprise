@@ -76,11 +76,11 @@ export default function FollowUpImport({ onClose, onDone }) {
           <div className="flog-flash" role="status">{result.message}</div>
           {result.skipped > 0 && <div className="small-muted">{`${result.skipped} lines were skipped (colleges set to "Skip").`}</div>}
           {result.refused?.length > 0 && <div className="error-text">{`Not yours, so not imported: ${result.refused.join(', ')}`}</div>}
-          <div className="small-muted">Open a client (or one of its requirements) and press the Follow-ups tab to see them.</div>
+          <div className="small-muted">Open a client and press the Follow-ups tab to see them, under their sub tabs.</div>
         </div>
       ) : !prev ? (
         <div className="flog">
-          <div>One college or company per row. Every line that starts with a date, like <b>02-11-2022 - interviews 4</b>, becomes one follow-up of that client on that day. Contact, phone, location and mail columns are left as they are.</div>
+          <div>Every tab of the file is read: client rows go to Client follow-up, Schedule and Interview tabs to theirs, and a client's Running / Stopped status is picked up. Every line that starts with a date, like <b>02-11-2022 - interviews 4</b>, becomes one follow-up of that client on that day. Contact, phone, location and mail columns are left as they are.</div>
           <input type="file" accept=".xlsx,.xls" onChange={(e) => { setFile(e.target.files?.[0] || null); setError(''); }} />
           <div className="small-muted">Nothing is saved until you check the clients and press Import. Importing the same sheet again adds only the new lines.</div>
           {error && <div className="error-text">{error}</div>}
@@ -89,7 +89,11 @@ export default function FollowUpImport({ onClose, onDone }) {
         <div className="flog">
           <div>
             <b>{prev.fileName}</b>
-            {`: ${prev.totalLines.toLocaleString('en-IN')} dated lines in ${prev.colleges.length} colleges. Check the TeamLink client of each one, then press Import.`}
+            {`: ${prev.totalLines.toLocaleString('en-IN')} lines for ${prev.colleges.length} clients. Check the TeamLink client of each one, then press Import.`}
+          </div>
+          <div className="flog-imp-tabs">
+            {prev.tabs.map((t) => <div key={t.name}><b>{t.name}</b>{t.kind ? ` → ${t.kind}: ${t.lines.toLocaleString('en-IN')} lines` : ' → left out: no client in this tab'}</div>)}
+            <div className="small-muted">Candidates' CTC and phone numbers are not imported.</div>
           </div>
           {prev.futureCount > 0 && (
             <div className="flog-check">{`${prev.futureCount} line(s) have a date after today (a typo in the sheet) and are not imported: ${prev.futureSamples.slice(0, 3).join(' | ')}`}</div>
@@ -104,7 +108,7 @@ export default function FollowUpImport({ onClose, onDone }) {
                   const sure = v && v === c.pick && c.score >= 100;
                   return (
                     <tr key={c.index}>
-                      <td>{c.name}<div className="small-muted">{`${c.from} → ${c.to}`}</div></td>
+                      <td>{c.name}<div className="small-muted">{[c.from ? `${c.from} → ${c.to}` : 'No dates', c.status].filter(Boolean).join(' · ')}</div></td>
                       <td>{c.lines}</td>
                       <td>
                         {other[c.index] ? (

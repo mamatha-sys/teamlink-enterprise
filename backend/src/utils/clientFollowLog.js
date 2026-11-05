@@ -5,8 +5,11 @@
 // One dated line per follow-up with a client - "02-11-2022 - interviews 4" - the way the BDE desk's Excel sheets keep it:
 //   * anyone who works the client (BDE, BDE TL, TL, STL, recruiter, Admin) adds a comment for a day (default today);
 //   * the client page and every requirement page of that client show the same log, newest day first, with who wrote it;
-//   * an Excel sheet like "Edu - 1 Requirement Sheet" is imported line by line (preview -> pick the client -> import);
-//     the same line is never imported twice.
+//   * an Excel workbook of the BDE desk is imported tab by tab (preview -> pick the client -> import); the same line is never imported twice.
+//   * SUB TABS (founder 2026-11-05: "followup tab lo, sub tabs vundela pettu"): Client follow-up · Schedule · Interviews · Notes, as the sheets have them.
+//   * ONE PLACE (same day): "clients lo ney followups cheskuntaru": the requirement page has no Follow-ups; a line on the client names the requirement.
+//   * EDIT: who wrote a line edits it, a BDE also the lines from a sheet; the BDE TL and Admin edit and delete any line.
+//   * STATUS: Running / On hold / Stopped / No requirement, one per client (AppSetting clientwork.<clientId>).
 // Rows live in appSetting ('clientlog.<clientId>.<id>'), like the client desk's follow-ups (utils/clientBusiness.js).
 const crypto = require('crypto');
 const prisma = require('../db');
@@ -34,6 +37,25 @@ function roleOf(user) {
 // Managers / Asst Managers look only (they are view-only everywhere); clients, candidates and accounts never write here.
 const mayWrite = (user) => ['admin', 'bdetl', 'bde', 'tl', 'stl', 'recruiter'].includes(roleOf(user).key);
 const mayImport = (user) => ['admin', 'bdetl', 'bde'].includes(roleOf(user).key);
+const mayManage = (user) => ['admin', 'bdetl'].includes(roleOf(user).key);
+const mayEditLine = (user, e) => mayManage(user) || e.byId === user.id || (roleOf(user).key === 'bde' && e.source === 'sheet');
+const FOLLOW_TABS = [['client', 'Client follow-up'], ['schedule', 'Schedule'], ['interview', 'Interviews'], ['notes', 'Notes']];
+const cleanTab = (v) => (FOLLOW_TABS.some(([k]) => k === v) ? v : 'client');
+const STATUS_PREFIX = 'clientwork.';
+async function statusOfClient(clientId) {
+  const row = await prisma.appSetting.findUnique({ where: { key: STATUS_PREFIX + clientId } });
+  return row ? parse(row) : null;
+}
+async function writeStatus(user, clientId, status) {
+  const value = JSON.stringify({ status, by: user.name || null, at: new Date().toISOString() });
+  await prisma.appSetting.upsert({ where: { key: STATUS_PREFIX + clientId }, create: { key: STATUS_PREFIX + clientId, value, updatedById: user.id, updatedByName: user.name || null }, update: { value, updatedById: user.id, updatedByName: user.name || null } });
+}
+// the client's requirements, for the line's "which requirement"
+async function requirementsOf(user, clientId) {
+  const rows = await prisma.requirement.findMany({ where: { AND: [{ clientId }, S.requirementWhere(user)] }, select: { id: true, title: true, reqCode: true, status: true }, orderBy: { createdAt: 'desc' }, take: 300 });
+  const closed = (r) => /^(CLOSED|CANCELLED)/.test(r.status || '');
+  return [...rows.filter((r) => !closed(r)), ...rows.filter(closed)].map((r) => ({ id: r.id, label: [r.reqCode, r.title].filter(Boolean).join(' · '), closed: closed(r) }));
+}
 
 // The client this login may see the log of: one of their clients, or the client of a requirement they work on.
 async function clientFor(user, { clientId, requirementId }) {
@@ -60,7 +82,7 @@ async function entriesOf(clientId) {
 const publicEntry = (e, reqNames) => ({
   id: e.id, onDate: e.onDate, note: e.note, topic: e.topic || null,
   byName: e.byName || null, byRole: e.byRole || null, createdAt: e.createdAt,
-  source: e.source || 'manual', sheet: e.sheet || null,
+  source: e.source || 'manual', sheet: e.sheet || null, tab: cleanTab(e.tab), candidate: e.candidate || null, recruiter: e.recruiter || null, editedBy: e.editedBy || null,
   requirementId: e.requirementId || null, requirementLabel: e.requirementId ? (reqNames[e.requirementId] || null) : null,
 });
 const dmyShort = (d) => { const [y, m, dd] = String(d).split('-'); return `${Number(dd)} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][Number(m) - 1]} ${y}`; };
@@ -82,12 +104,16 @@ async function list(user, q) {
   const reqs = reqIds.length ? await prisma.requirement.findMany({ where: { id: { in: reqIds } }, select: { id: true, title: true, reqCode: true } }) : [];
   const reqNames = Object.fromEntries(reqs.map((r) => [r.id, [r.reqCode, r.title].filter(Boolean).join(' · ')]));
   const people = [...new Set(all.map((e) => e.byName).filter(Boolean))].sort();
+  const [requirements, work] = await Promise.all([requirementsOf(user, found.client.id), statusOfClient(found.client.id)]);
+  const entries = (await withCallBacks(all.map((e) => publicEntry(e, reqNames)))).map((e, i) => ({ ...e, canEdit: mayEditLine(user, all[i]), canDelete: mayManage(user) }));
   return {
     status: 200,
     body: {
+      tabs: FOLLOW_TABS.map(([key, label]) => ({ key, label, count: entries.filter((e) => e.tab === key).length })),
+      requirements, workStatus: work ? work.status : null, workStatusBy: work ? work.by : null, workStatuses: WORK_STATUSES, canSetStatus: mayImport(user),
       client: found.client,
       requirement: found.requirement ? { id: found.requirement.id, label: [found.requirement.reqCode, found.requirement.title].filter(Boolean).join(' · ') } : null,
-      entries: await withCallBacks(all.map((e) => publicEntry(e, reqNames))),
+      entries,
       people,
       lastOn: all.length ? all[0].onDate : null,
       canAdd: mayWrite(user),
@@ -107,8 +133,11 @@ async function add(user, body) {
   if (onDate > istToday()) return { status: 400, body: { error: 'The date cannot be in the future.' } };
   const role = roleOf(user);
   const id = crypto.randomBytes(6).toString('hex');
+  const reqs = body.lineRequirementId ? await requirementsOf(user, found.client.id) : [];
+  const lineReq = reqs.some((r) => r.id === String(body.lineRequirementId)) ? String(body.lineRequirementId) : null;
+  if (body.lineRequirementId && !lineReq) return { status: 400, body: { error: 'Pick a requirement of this client.' } };
   const e = {
-    id, clientId: found.client.id, requirementId: found.requirement ? found.requirement.id : null, onDate, note, topic: null,
+    id, clientId: found.client.id, requirementId: lineReq || (found.requirement ? found.requirement.id : null), tab: cleanTab(body.tab), onDate, note, topic: null,
     byId: user.id, byName: user.name || null, byRole: role.label || null, createdAt: new Date().toISOString(), source: 'manual',
     hash: hashOf(found.client.id, onDate, note),
   };
@@ -117,6 +146,58 @@ async function add(user, body) {
   const cb = await require('./followUpReminders').fromEntry(e, { remindOn: body.remindOn }).catch(() => null); // eslint-disable-line global-require
   await logAudit({ userId: user.id, actorName: user.name || null, action: 'Client follow-up comment added', entity: 'Client', entityId: e.clientId, fieldLabel: 'Follow-up', toValue: onDate, reason: note.slice(0, 500) });
   return { status: 201, body: { ok: true, message: `Saved for ${onDate}.${cb ? ` A reminder pops up on ${dmyShort(cb.remindOn)}.` : ''}`, entry: { ...publicEntry(e, {}), callBackOn: cb ? cb.remindOn : null } } };
+}
+
+// Change a line: the text, the day, the sub tab, the requirement.
+async function loadLine(user, q) {
+  const found = await clientFor(user, { clientId: q.clientId });
+  if (!found) return { error: { status: 404, body: { error: 'This client is outside your area.' } } };
+  const key = keyOf(found.client.id, String(q.id));
+  const row = await prisma.appSetting.findUnique({ where: { key } });
+  const e = row ? parse(row) : null;
+  if (!e) return { error: { status: 404, body: { error: 'This follow-up was not found.' } } };
+  return { found, key, e };
+}
+async function update(user, id, body) {
+  const line = await loadLine(user, { clientId: body.clientId, id });
+  if (line.error) return line.error;
+  const { found, key, e } = line;
+  if (!mayEditLine(user, e)) return { status: 403, body: { error: 'Only the person who wrote it, or the BDE TL, can change this follow-up.' } };
+  const note = String(body.note || '').trim().slice(0, 2000);
+  if (note.length < 3) return { status: 400, body: { error: 'Write what happened in the follow-up (at least 3 letters).' } };
+  const onDate = String(body.onDate === undefined ? e.onDate : body.onDate).trim();
+  if (onDate && !YMD.test(onDate)) return { status: 400, body: { error: 'Pick the date of the follow-up.' } };
+  if (onDate > istToday()) return { status: 400, body: { error: 'The date cannot be in the future.' } };
+  let { requirementId } = e;
+  if (body.lineRequirementId !== undefined) {
+    requirementId = null;
+    if (body.lineRequirementId) {
+      if (!(await requirementsOf(user, found.client.id)).some((r) => r.id === String(body.lineRequirementId))) return { status: 400, body: { error: 'Pick a requirement of this client.' } };
+      requirementId = String(body.lineRequirementId);
+    }
+  }
+  const next = { ...e, note, onDate, requirementId, tab: body.tab ? cleanTab(body.tab) : cleanTab(e.tab), hash: hashOf(found.client.id, onDate, note), editedBy: user.name || null, editedAt: new Date().toISOString() };
+  await prisma.appSetting.update({ where: { key }, data: { value: JSON.stringify(next), updatedByName: user.name || null } });
+  await logAudit({ userId: user.id, actorName: user.name || null, action: 'Client follow-up changed', entity: 'Client', entityId: found.client.id, fieldLabel: 'Follow-up', fromValue: String(e.note).slice(0, 300), toValue: note.slice(0, 300) });
+  return { status: 200, body: { ok: true, message: 'Saved.' } };
+}
+async function remove(user, id, q) {
+  if (!mayManage(user)) return { status: 403, body: { error: 'Only the BDE TL or an Admin can delete a follow-up.' } };
+  const line = await loadLine(user, { clientId: q.clientId, id });
+  if (line.error) return line.error;
+  await prisma.appSetting.delete({ where: { key: line.key } });
+  await logAudit({ userId: user.id, actorName: user.name || null, action: 'Client follow-up deleted', entity: 'Client', entityId: line.found.client.id, fieldLabel: 'Follow-up', fromValue: String(line.e.note).slice(0, 500), toValue: line.e.onDate || null });
+  return { status: 200, body: { ok: true, message: 'Deleted.' } };
+}
+async function setStatus(user, body) {
+  if (!mayImport(user)) return { status: 403, body: { error: 'The BDE team sets this status.' } };
+  const found = await clientFor(user, { clientId: body.clientId });
+  if (!found) return { status: 404, body: { error: 'This client is outside your area.' } };
+  if (body.status && !WORK_STATUSES.includes(body.status)) return { status: 400, body: { error: 'Pick a status from the list.' } };
+  if (body.status) await writeStatus(user, found.client.id, body.status);
+  else await prisma.appSetting.deleteMany({ where: { key: STATUS_PREFIX + found.client.id } });
+  await logAudit({ userId: user.id, actorName: user.name || null, action: 'Client status changed', entity: 'Client', entityId: found.client.id, fieldLabel: 'Status', toValue: body.status || 'Not set' });
+  return { status: 200, body: { ok: true, message: 'Saved.' } };
 }
 
 // ---- the Excel sheet ------------------------------------------------------------------------------------
@@ -144,57 +225,153 @@ function leadingDate(line) {
   return { on, rest };
 }
 
-// Every cell that holds a follow-up log, by its header. Profile columns (contact, phone, location, link, mail) are not follow-ups.
-const PROFILE_HEAD = /contact|number|phone|mobile|location|link|mail|college name|client name|company/i;
+// Every cell that holds a follow-up log, by its header. Profile columns (contact, phone, location, link, mail, terms) are not follow-ups.
+const PROFILE_HEAD = /contact|number|phone|mobile|location|link|mail|college name|client name|company|charges|agre+ment|designation|bed cap/i;
+// never imported from a candidate row: the client's follow-ups are read by people who may not see pay or phone numbers
+const PRIVATE_HEAD = /ctc|salary|package|phone|contact|mobile|mail/i;
+// THE CLIENT'S STATUS in the sheets: Running, Stopped, On hold, No requirement (and how people wrote them)
+const WORK_STATUSES = ['Running', 'On hold', 'Stopped', 'No requirement'];
+function statusWord(v) {
+  const t = String(v || '').replace(/\s+/g, ' ').trim();
+  if (!t || t.length > 26 || /\d{2}/.test(t)) return null;
+  if (/^running/i.test(t)) return 'Running';
+  if (/^(on )?hold/i.test(t)) return 'On hold';
+  if (/^stop/i.test(t)) return 'Stopped';
+  if (/^no req/i.test(t)) return 'No requirement';
+  return null;
+}
+const cellText = (v) => String(v == null ? '' : v).trim();
+
+// EVERY TAB OF THE WORKBOOK (founder 2026-11-05: "ahh sheets lo, sub tabs vunnai, mottham annitini import chesko"). What a tab is, from its headers:
+//   client rows     one client per row, dated lines in the cells         -> Client follow-up (lines with no date -> Notes)
+//   candidate rows  Date, Name ... Client Name ...                       -> Schedule, or Interviews when the tab's name says so
+//   a tab named after a client (a calling list: Candidate Name, Status)  -> Schedule of that client
+//   a note tab      one column, the first line names the client          -> Notes
+//   anything else (Promotion Data: no client in it)                      -> left out, and named in the preview
 function parseSheet(buf, fileName) {
   const XLSX = require('xlsx'); // eslint-disable-line global-require
   const wb = XLSX.read(buf, { type: 'buffer', cellDates: false });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
-  const head = (rows[0] || []).map((h) => String(h || '').trim());
-  const nameCol = Math.max(0, head.findIndex((h) => /college|client|company/i.test(h)));
-  // Columns with no header after the named ones (N, O in the Edu sheet) are more status columns.
-  const logCols = head.map((h, i) => i).filter((i) => i !== nameCol && !PROFILE_HEAD.test(head[i] || ''));
-  const width = Math.max(...rows.map((r) => r.length), head.length);
-  for (let i = head.length; i < width; i++) logCols.push(i);
-  const label = (i) => head[i] || `Status (column ${XLSX.utils.encode_col(i)})`;
   const today = istToday();
   const future = [];
-  const colleges = [];
-  let cur = null;
-  let undated = 0;
-  const samples = [];
-  rows.slice(1).forEach((r) => {
-    if (!r.some((c) => String(c).trim())) return;
-    const name = String(r[nameCol] || '').trim().replace(/\s+/g, ' ');
-    if (name) { cur = { index: colleges.length, name, entries: [] }; colleges.push(cur); }
-    if (!cur) return;
-    logCols.forEach((ci) => {
-      const cell = String(r[ci] || '');
-      if (!cell.trim()) return;
-      let open = null;
-      const flush = () => {
-        if (open && open.note.trim().length >= 2) {
-          // a date after today is a typo in the sheet ("29-08-28"): listed in the preview, never imported on a wrong day
-          if (open.on > today) { if (future.length < 20) future.push(`${cur.name.slice(0, 40)} · ${open.on}: ${open.note.trim().slice(0, 70)}`); else future.push(null); } else cur.entries.push({ onDate: open.on, note: open.note.trim().slice(0, 2000), topic: label(ci) });
-        }
-        open = null;
-      };
-      cell.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).forEach((line) => {
-        const d = leadingDate(line);
-        if (d) { flush(); open = { on: d.on, note: d.rest || line }; return; }
-        if (open) { open.note += `\n${line}`; return; }
-        // "signed on 14th-Jan-2022": a date inside the first line still dates it.
-        const m = line.match(ANY_DATE);
-        const on = m ? ymd(m[1], m[2], m[3]) : null;
-        if (on) { open = { on, note: line }; return; }
-        undated += 1;
-        if (samples.length < 8) samples.push(`${cur.name.slice(0, 40)} · ${label(ci)}: ${line.slice(0, 80)}`);
+  const clients = new Map();
+  const tabs = [];
+  const clientOf = (name) => {
+    const clean = String(name).trim().replace(/\s+/g, ' ');
+    const k = norm(clean);
+    if (!clients.has(k)) clients.set(k, { index: clients.size, name: clean, entries: [], status: null });
+    return clients.get(k);
+  };
+  const put = (c, e) => {
+    if (e.onDate && e.onDate > today) { // a date after today is a typo in the sheet ("29-08-28"): listed in the preview, never imported on a wrong day
+      if (future.length < 20) future.push(`${c.name.slice(0, 40)} · ${e.onDate}: ${e.note.trim().slice(0, 70)}`); else future.push(null);
+      return 0;
+    }
+    c.entries.push({ ...e, note: e.note.trim().slice(0, 2000) });
+    return 1;
+  };
+
+  // one client per row
+  function clientRows(rows, head) {
+    const nameCol = Math.max(0, head.findIndex((h) => /college|client|company/i.test(h)));
+    const logCols = head.map((h, i) => i).filter((i) => i !== nameCol && !PROFILE_HEAD.test(head[i] || ''));
+    const width = Math.max(...rows.map((r) => r.length), head.length);
+    for (let i = head.length; i < width; i += 1) logCols.push(i);
+    const label = (i) => head[i] || `Status (column ${XLSX.utils.encode_col(i)})`;
+    let cur = null; let n = 0;
+    rows.slice(1).forEach((r) => {
+      const name = cellText(r[nameCol]);
+      if (name) cur = clientOf(name);
+      if (!cur) return;
+      logCols.forEach((ci) => {
+        const cell = String(r[ci] || '');
+        if (!cell.trim()) return;
+        const word = statusWord(cell);
+        if (word) { cur.status = cur.status || word; return; }
+        let open = null; const loose = [];
+        const flush = () => { if (open && open.note.trim().length >= 2) n += put(cur, { onDate: open.on, note: open.note, topic: label(ci), tab: 'client' }); open = null; };
+        cell.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).forEach((line) => {
+          const d = leadingDate(line);
+          if (d) { flush(); open = { on: d.on, note: d.rest || line }; return; }
+          if (open) { open.note += `\n${line}`; return; }
+          // "signed on 14th-Jan-2022": a date inside the first line still dates it.
+          const m = line.match(ANY_DATE);
+          const on = m ? ymd(m[1], m[2], m[3]) : null;
+          if (on) { open = { on, note: line }; return; }
+          if (!/^https?:\/\//i.test(line)) loose.push(line); // a map link is not a follow-up
+        });
+        flush();
+        // no date anywhere: kept under Notes, with no day of its own
+        if (loose.join(' ').length >= 2) n += put(cur, { onDate: '', note: loose.join('\n'), topic: label(ci), tab: 'notes' });
       });
-      flush();
     });
+    return n;
+  }
+
+  // one candidate per row: never their pay or phone (PRIVATE_HEAD)
+  function candidateRows(rows, head, tab, fixedClient = null) {
+    const col = (re) => head.findIndex((h) => re.test(h));
+    const clientCol = col(/^client\s*name$/i);
+    const nameCol = col(/^(candidate\s*)?name$/i);
+    const dateCol = col(/^date$/i) >= 0 ? col(/^date$/i) : (!head[0] ? 0 : -1);
+    const facts = [/^requirement$/i, /qualification/i, /branch|speciali[sz]ation/i, /designation/i, /experience/i, /current\s*location/i].map(col);
+    const interviewDay = col(/interview\s*date/i);
+    const interviewState = col(/interviews?\s*status/i);
+    const recruiter = col(/recruiter/i);
+    const used = new Set([clientCol, nameCol, dateCol, ...facts, interviewDay, interviewState, recruiter]);
+    // the status columns: named Status..., and the unnamed ones after the headers
+    const width = Math.max(...rows.map((r) => r.length), head.length);
+    const statusCols = [];
+    for (let i = 0; i < width; i += 1) if (!used.has(i) && !PRIVATE_HEAD.test(head[i] || '') && (/^status|^remarks/i.test(head[i] || '') || !head[i])) statusCols.push(i);
+    let n = 0;
+    rows.slice(1).forEach((r) => {
+      const who = cellText(r[nameCol]);
+      const clientName = fixedClient || cellText(r[clientCol]);
+      if (!who || !clientName) return;
+      const notes = statusCols.map((i) => cellText(r[i])).filter(Boolean);
+      let on = dateCol >= 0 ? (leadingDate(cellText(r[dateCol])) || {}).on : null;
+      if (!on) { const first = notes.map((t) => leadingDate(t)).find(Boolean); on = first ? first.on : ''; }
+      const shortest = [...notes].reverse().find((t) => t.length <= 30 && !leadingDate(t));
+      const line1 = [who, facts.map((i) => (i >= 0 ? cellText(r[i]) : '')).filter(Boolean).join(' · ')].filter(Boolean).join(' — ');
+      const line2 = [interviewDay >= 0 && cellText(r[interviewDay]) ? `Interview ${cellText(r[interviewDay])}` : '', interviewState >= 0 ? cellText(r[interviewState]) : ''].filter(Boolean).join(' · ');
+      n += put(clientOf(clientName), {
+        onDate: on, note: [line1, line2, ...notes.filter((t) => t !== shortest)].filter(Boolean).join('\n'),
+        topic: shortest || (interviewState >= 0 ? cellText(r[interviewState]) : '') || null, tab, candidate: who.slice(0, 80), recruiter: recruiter >= 0 ? cellText(r[recruiter]).slice(0, 60) || null : null,
+      });
+    });
+    return n;
+  }
+
+  wb.SheetNames.forEach((tabName) => {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[tabName], { header: 1, defval: '', raw: false }).filter((r) => r.some((c) => cellText(c)));
+    if (!rows.length) return;
+    const head = (rows[0] || []).map(cellText);
+    const has = (re) => head.some((h) => re.test(h));
+    const named = head.filter(Boolean).length;
+    let kind; let n = 0;
+    if (has(/^client\s*name$/i) && has(/^(candidate\s*)?name$/i)) {
+      const tab = /interview/i.test(tabName) ? 'interview' : 'schedule';
+      kind = tab === 'interview' ? 'Interviews' : 'Schedule';
+      n = candidateRows(rows, head, tab);
+    } else if (has(/^candidate\s*name$/i)) {
+      kind = `Schedule of ${tabName.trim()}`;
+      n = candidateRows(rows, head, 'schedule', tabName);
+    } else if (has(/portal\s*name|data\s*count/i)) {
+      kind = '';
+    } else if (has(/college|client|company|contact|no\.?\s*of\s*profiles/i) || !head[0]) {
+      kind = 'Client follow-up';
+      n = clientRows(rows, head);
+    } else if (named <= 2) {
+      const first = rows[0].map(cellText).find(Boolean);
+      kind = 'Notes';
+      n = put(clientOf(first.replace(/\s*process\s*$/i, '')), { onDate: '', note: rows.slice(1).map((r) => r.map(cellText).filter(Boolean).join(' ')).join('\n'), topic: first, tab: 'notes' });
+    } else kind = '';
+    tabs.push({ name: tabName.trim(), kind, lines: n, rows: rows.length - 1 });
   });
-  return { fileName: String(fileName || 'sheet.xlsx').slice(0, 120), colleges: colleges.filter((c) => c.entries.length), emptyColleges: colleges.filter((c) => !c.entries.length).map((c) => c.name), undated, undatedSamples: samples, futureCount: future.length, futureSamples: future.filter(Boolean) };
+  const colleges = [...clients.values()].filter((c) => c.entries.length || c.status).map((c, i) => ({ ...c, index: i }));
+  return {
+    fileName: String(fileName || 'sheet.xlsx').slice(0, 120), colleges, tabs,
+    emptyColleges: [], undated: 0, undatedSamples: [], futureCount: future.length, futureSamples: future.filter(Boolean),
+  };
 }
 
 // The client a college name in the sheet is, with up to 3 suggestions.
@@ -235,7 +412,7 @@ async function importPreview(user, buf, fileName) {
   if (!buf || !buf.length) return { status: 400, body: { error: 'Choose the Excel file (.xlsx).' } };
   let parsed;
   try { parsed = parseSheet(buf, fileName); } catch { return { status: 400, body: { error: 'This file could not be read. Save it as .xlsx and try again.' } }; }
-  if (!parsed.colleges.length) return { status: 400, body: { error: 'No dated follow-up lines were found (a line should start with a date like 02-11-2022).' } };
+  if (!parsed.colleges.length) return { status: 400, body: { error: 'No follow-up lines were found in any tab of this file.' } };
   const clients = await prisma.client.findMany({ where: { AND: [S.clientWhere(user), { OR: [{ clientType: null }, { clientType: { not: 'Internal' } }] }] }, select: { id: true, name: true, ownerDepartment: true }, orderBy: { name: 'asc' } });
   const aliases = await prisma.clientAlias.findMany({ select: { clientId: true, aliasKey: true } }).catch(() => []);
   const match = matcher(clients, aliases);
@@ -245,11 +422,11 @@ async function importPreview(user, buf, fileName) {
   return {
     status: 200,
     body: {
-      token, fileName: parsed.fileName,
+      token, fileName: parsed.fileName, tabs: parsed.tabs,
       colleges: parsed.colleges.map((c) => {
         const m = match(c.name);
-        const dates = c.entries.map((e) => e.onDate).sort();
-        return { index: c.index, name: c.name, lines: c.entries.length, from: dates[0], to: dates[dates.length - 1], pick: m.pick, score: m.score, suggestions: m.suggestions };
+        const dates = c.entries.map((e) => e.onDate).filter(Boolean).sort();
+        return { index: c.index, name: c.name, lines: c.entries.length, status: c.status, from: dates[0] || null, to: dates[dates.length - 1] || null, pick: m.pick, score: m.score, suggestions: m.suggestions };
       }),
       clients: clients.map((c) => ({ id: c.id, name: c.name })),
       totalLines: parsed.colleges.reduce((n, c) => n + c.entries.length, 0),
@@ -283,7 +460,7 @@ async function importCommit(user, { token, mapping }) {
       if (seen.has(hash)) { repeats += 1; return; } // the same day and words twice in the sheet
       seen.add(hash);
       const id = crypto.randomBytes(6).toString('hex');
-      const row = { id, clientId: client.id, requirementId: null, onDate: e.onDate, note: e.note, topic: e.topic, byId: user.id, byName: user.name || null, byRole: role.label || null, createdAt: new Date().toISOString(), source: 'sheet', sheet: p.parsed.fileName, hash };
+      const row = { id, clientId: client.id, requirementId: null, tab: e.tab || 'client', candidate: e.candidate || null, recruiter: e.recruiter || null, onDate: e.onDate, note: e.note, topic: e.topic, byId: user.id, byName: user.name || null, byRole: role.label || null, createdAt: new Date().toISOString(), source: 'sheet', sheet: p.parsed.fileName, hash };
       data.push({ key: keyOf(client.id, id), value: JSON.stringify(row), updatedById: user.id, updatedByName: user.name || null });
     });
     for (let i = 0; i < data.length; i += 200) {
@@ -291,6 +468,9 @@ async function importCommit(user, { token, mapping }) {
       await prisma.appSetting.createMany({ data: data.slice(i, i + 200) });
     }
     added += data.length;
+    // the status in the sheet, when TeamLink has none yet
+    // eslint-disable-next-line no-await-in-loop
+    if (c.status && !(await statusOfClient(client.id))) await writeStatus(user, client.id, c.status);
     if (data.length) {
       perClient[client.name] = (perClient[client.name] || 0) + data.length;
       // eslint-disable-next-line no-await-in-loop
@@ -608,4 +788,4 @@ async function teamExportRows(user, q) {
 }
 
 module.exports = {
-  teamExportRows, exportRows, simplePreview, simpleCommit, parseSimpleSheet, candidateList, candidateAdd, teamHistory, list, add, importPreview, importCommit, parseSheet, leadingDate, matcher, mayWrite, mayImport, PREFIX };
+  update, remove, setStatus, WORK_STATUSES, teamExportRows, exportRows, simplePreview, simpleCommit, parseSimpleSheet, candidateList, candidateAdd, teamHistory, list, add, importPreview, importCommit, parseSheet, leadingDate, matcher, mayWrite, mayImport, PREFIX };

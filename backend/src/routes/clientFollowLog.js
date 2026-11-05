@@ -2,7 +2,9 @@
 //   GET  /?clientId= | ?requirementId=     the log, newest day first (anyone who sees the client or one of its requirements)
 //   GET  /?candidateId=                     the candidate's log (+ quick-logged calls and follow-up tasks done)
 //   GET  /team?from=&to=&personId=          the team's follow-ups day by day (TL: their team; recruiter: their own)
-//   POST /                                  { clientId | requirementId, onDate, note }: a follow-up comment (BDE, TL, recruiter, Admin)
+//   POST /                                  { clientId, tab, lineRequirementId, onDate, note }: a follow-up comment (BDE, TL, recruiter, Admin)
+//   PUT  /:id, DELETE /:id?clientId=        change a line (who wrote it, a BDE for sheet lines, the BDE TL, Admin); delete (BDE TL, Admin)
+//   PUT  /status                            { clientId, status }: Running / On hold / Stopped / No requirement
 //   POST /import/preview                    the Excel file as the raw body (X-File-Name): colleges, lines, the client each one is
 //   POST /import/commit                     { token, mapping: { collegeIndex: clientId } }: imports the lines (BDE team, Admin)
 //   GET  /export?candidateId= | clientId= | requirementId= &format=xlsx|csv|pdf   the Follow-ups tab as a file
@@ -58,6 +60,16 @@ router.get('/team/export', async (req, res, next) => {
 });
 router.get('/team', async (req, res, next) => {
   try { return send(res, await FL.teamHistory(req.user, req.query || {})); } catch (e) { return next(e); }
+});
+// Change or delete a line, and the client's status (Running / On hold / Stopped / No requirement)
+router.put('/status', async (req, res, next) => {
+  try { return send(res, await FL.setStatus(req.user, req.body || {})); } catch (e) { return next(e); }
+});
+router.put('/:id', async (req, res, next) => {
+  try { return send(res, await FL.update(req.user, req.params.id, req.body || {})); } catch (e) { return next(e); }
+});
+router.delete('/:id', async (req, res, next) => {
+  try { return send(res, await FL.remove(req.user, req.params.id, req.query || {})); } catch (e) { return next(e); }
 });
 // The file comes as raw bytes (not JSON), so the site-wide 100 kB JSON limit does not apply.
 router.post('/import/preview', express.raw({ type: () => true, limit: '20mb' }), async (req, res, next) => {
