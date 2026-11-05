@@ -301,7 +301,7 @@ async function askModel(conv, cfg, input) {
   const asksOther = job.available && !picked && T.askedAboutJob(input) && !T.titleHas(job.title, input);
   if ((!job.available && !picked) || asksOther) {
     const found = await T.offerJobs(conv, input).catch(() => ({ searched: false, jobs: [] }));
-    if (found.jobs.length) return { ctx, calls, reply: T.jobListText(found.jobs), written: true };
+    if (found.jobs.length) return { ctx, calls, reply: T.jobListText(found.jobs, found.total), written: true };
     if (found.searched) return { ctx, calls, reply: T.NO_MATCH_TEXT, written: true };
   }
   ctx.jobTitle = job.available ? job.title : null;

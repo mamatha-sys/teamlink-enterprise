@@ -275,6 +275,15 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     check('the guard stops a job the model made up, and lets it speak of its own job', !!G.jobClaim('We have a vacancy for a Senior HR Recruiter.', 'Physics Lecturer') && G.jobClaim('The Physics Lecturer position is open.', 'Physics Lecturer') === null);
     const T2 = require(path.join(BACK, 'src/omniwa/tools'));
     check('"nurseing" finds "Nursing"', T2.titleHas('Nursing', 'staff nurseing job'));
+    const eduJob = await prisma.requirement.create({ data: { title: 'ZZTEST Faculty requirement', clientId: client.id, status: 'OPEN', department: 'ZZEducation', location: 'Warangal', experience: '1-3 years', description: 'ZZTEST faculty for an engineering college in Warangal, teaching degree students, full time.' } });
+    const T3 = require(path.join(BACK, 'src/omniwa/tools'));
+    const byDept = await T3.searchJobs('is there any job vaccncies rewlated to zzeducation');
+    check('the founder words find the department jobs, though the title says Faculty', byDept.jobs.some((j) => /Faculty requirement/.test(j.title)), byDept);
+    const byCity = await T3.searchJobs('faculty job in warangal');
+    check('a place counts too, and the best fit comes first', /ZZTEST Faculty/.test((byCity.jobs[0] || {}).title || ''), byCity);
+    const anyJob = await T3.searchJobs('any jobs?', { department: 'ZZEducation' });
+    check('"any jobs?" on a number of one department lists that department; "Yes" lists nothing', anyJob.jobs.length === 1 && (await T3.searchJobs('Yes', { department: 'ZZEducation' })).searched === false, anyJob);
+    await prisma.requirement.delete({ where: { id: eduJob.id } });
     const none = await require(path.join(BACK, 'src/omniwa/tools')).searchJobs('zzqqxx astronaut');
     const empty = await require(path.join(BACK, 'src/omniwa/tools')).searchJobs('I am looking for a job');
     check('nothing matches: an honest empty list; only "a job" with no kind: no search', none.searched === true && none.jobs.length === 0 && empty.searched === false);

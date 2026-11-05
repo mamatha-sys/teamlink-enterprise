@@ -36,31 +36,45 @@ async function jobFacts(requirementId) {
 }
 
 // ---- open jobs -------------------------------------------------------------------------------------------------------------------------------------
-const NOISE = new Set('i am im looking for a an the new job jobs position positions vacancy vacancies vaccancy vacancey opening openings role roles interested intrested also want need any please hi hello yes no ok okay is are there do you have in at of to and or my me work this that one tell about know field details more give show list available'.split(' '));
-const wordsOf = (t) => [...new Set(String(t || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2 && !NOISE.has(w)))].slice(0, 6);
+const NOISE = new Set('i am im looking for a an the new job jobs position positions vacancy vacancies vaccancy vacancey opening openings role roles interested intrested also want need any please hi hello yes no ok okay is are there do you have in at of to and or my me work this that one tell about know field details more give show list available related regarding relevant sector department dept area kind type'.split(' '));
+const wordsOf = (t) => [...new Set(String(t || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2 && !NOISE.has(w) && !/^vac/.test(w) && !/^r[a-z]?e?w?lat/.test(w)))].slice(0, 6);
+const JOB_ASK = /\b(jobs?|positions?|posts?|vacanc\w*|vaccan?c\w*|vacnc\w*|openings?|hiring|work)\b/i;
 // "nurseing" must find "Nursing": the start of a word is enough
 const stemOf = (w) => (w.length > 5 ? w.slice(0, Math.max(4, w.length - 4)) : w);
 // at the START of a word in the title: "astronaut" must not find "Gastroenterologist"
 const wordStarts = (title, stem) => String(title || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).some((t) => t.startsWith(stem));
 
-// the open client jobs whose title carries the words: the same safe facts as get_job_details, the client's name never. id stays on this side.
-async function searchJobs(text, limit = 5) {
+// the open client jobs that fit the words: the title counts most, then the specialisation and department ("education" must find the Education jobs, whose titles say "Faculty"),
+// then skills and place. Only "any jobs?" on a number given to one department lists that department. The same safe facts as get_job_details, the client's name never. id stays on this side.
+const FIELDS = [['title', 3], ['specialisation', 2], ['department', 2], ['skills', 1], ['location', 1]];
+async function searchJobs(text, { limit = 5, department = null } = {}) {
   const words = wordsOf(text);
-  if (!words.length) return { searched: false, jobs: [] };
+  const generic = !words.length && department && JOB_ASK.test(String(text || ''));
+  if (!words.length && !generic) return { searched: false, jobs: [], total: 0 };
   const stems = words.map(stemOf);
-  const rows = await prisma.requirement.findMany({ where: { status: 'OPEN', internal: false, OR: stems.map((w) => ({ title: { contains: w } })) }, orderBy: { createdAt: 'desc' }, take: 60, select: { id: true, title: true } });
-  const scored = rows.map((r) => ({ id: r.id, n: stems.filter((w) => wordStarts(r.title, w)).length })).filter((r) => r.n > 0).sort((a, b) => b.n - a.n);
+  const where = generic ? { department } : { OR: stems.flatMap((w) => FIELDS.map(([f]) => ({ [f]: { contains: w } }))) };
+  const rows = await prisma.requirement.findMany({ where: { status: 'OPEN', internal: false, ...where }, orderBy: { createdAt: 'desc' }, take: 200, select: { id: true, title: true, specialisation: true, department: true, skills: true, location: true } });
+  const scoreOf = (r) => (generic ? 1 : stems.reduce((n, w) => n + FIELDS.reduce((m, [f, pts]) => m + (wordStarts(r[f], w) ? pts : 0), 0), 0));
+  const scored = rows.map((r) => ({ id: r.id, n: scoreOf(r) })).filter((r) => r.n > 0).sort((a, b) => b.n - a.n);
   const jobs = [];
-  for (const r of scored) {
+  const seen = new Set();
+  for (const r of scored.slice(0, 30)) {
     if (jobs.length >= limit) break;
     const f = await jobFacts(r.id); // eslint-disable-line no-await-in-loop
-    if (f.available) jobs.push({ id: r.id, title: f.title, location: f.location, experience: f.experience, salary: f.salary });
+    const key = `${f.title}|${f.location}`.toLowerCase(); // many Education jobs read the same: one line each
+    if (f.available && !seen.has(key)) { seen.add(key); jobs.push({ id: r.id, title: f.title, location: f.location, experience: f.experience, salary: f.salary }); }
   }
-  return { searched: true, jobs };
+  return { searched: true, jobs, total: scored.length };
+}
+// the department of a WhatsApp number, when it was given to exactly one
+async function departmentOf(numberId) {
+  if (!numberId) return null;
+  const rows = await S.q('SELECT "refId", "refLabel" FROM "WaNumberAccess" WHERE "numberId" = ? AND "kind" = \'DEPARTMENT\'', String(numberId)).catch(() => []);
+  return rows.length === 1 ? (rows[0].refLabel || rows[0].refId) : null;
 }
 // what the model sees, numbered; the ids are kept on the chat for select_job
 async function offerJobs(conv, text) {
-  const out = await searchJobs(text);
+  const out = await searchJobs(text, { department: await departmentOf(conv.numberId) });
   const collected = JSON.parse(conv.collected || '{}');
   // nothing found: the jobs offered before keep their numbers
   if (out.jobs.length) {
@@ -68,7 +82,7 @@ async function offerJobs(conv, text) {
     conv.collected = JSON.stringify(collected);
     await S.run('UPDATE "OmniWaConv" SET collected = ? WHERE id = ?', conv.collected, conv.id);
   }
-  return { searched: out.searched, jobs: out.jobs.map(({ id, ...j }, i) => ({ number: i + 1, ...j })) };
+  return { searched: out.searched, total: out.total, jobs: out.jobs.map(({ id, ...j }, i) => ({ number: i + 1, ...j })) };
 }
 async function selectJob(conv, args, ctx) {
   const id = (JSON.parse(conv.collected || '{}').jobChoices || [])[Number(args.number) - 1];
@@ -81,12 +95,13 @@ async function selectJob(conv, args, ctx) {
   return { selected: true, job };
 }
 // the list a person gets. Written HERE, from the database: the first live chats showed the local model inventing jobs it was never given
-function jobListText(jobs) {
+function jobListText(jobs, total = jobs.length) {
   const lines = jobs.map((j) => `${j.number}. ${j.title}${j.location ? ` - ${j.location}` : ''}${j.experience ? ` - ${j.experience}` : ''}${j.salary ? ` - ${j.salary}` : ''}`);
-  return `These jobs are open now:\n${lines.join('\n')}\nReply with the number of the job you want.`;
+  const more = total > jobs.length ? ' Or tell me the subject, role or city to see others.' : '';
+  return `These jobs are open now:\n${lines.join('\n')}\nReply with the number of the job you want.${more}`;
 }
 const NO_MATCH_TEXT = 'I could not find an open job for that right now. Tell me another kind of work you want, or write "recruiter" and someone from our team will help you.';
-const askedAboutJob = (text) => wordsOf(text).length > 0 && /\b(jobs?|positions?|posts?|vacanc\w*|vaccanc\w*|openings?|hiring|work)\b/i.test(String(text || ''));
+const askedAboutJob = (text) => wordsOf(text).length > 0 && JOB_ASK.test(String(text || ''));
 const pickedNumber = (text) => { const m = /^\D*([1-5])\D*$/.exec(String(text || '').trim()); return m ? Number(m[1]) : null; };
 const titleHas = (title, text) => wordsOf(text).some((w) => wordStarts(title, stemOf(w)));
 
