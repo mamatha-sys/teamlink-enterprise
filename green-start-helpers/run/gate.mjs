@@ -47,6 +47,7 @@ const blockedApi = (method, pathname) => BLOCK_API.some((b) => (b.method === '*'
 const FRAME = `frame-ancestors 'self' ${process.env.GATE_FRAME_ANCESTORS || 'http://localhost:5183 http://127.0.0.1:5183 http://localhost:4010 http://127.0.0.1:4010'}`;
 // one stored media file (see PUBLIC MEDIA in the request handler): /media/<scope>/<workspace uuid>/<random uuid>.<ext>
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const REVIEW_PAGE = /^\/review\/[A-Za-z0-9_-]{43}$/;
 const MEDIA_FILE = new RegExp(`^/media/[a-z0-9_-]{1,40}/${UUID}/${UUID}\\.[a-z0-9]{2,5}$`, 'i');
 const HOP = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade']);
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.txt': 'text/plain; charset=utf-8', '.map': 'application/json', '.webmanifest': 'application/manifest+json', '.xml': 'application/xml' };
@@ -161,6 +162,9 @@ const server = http.createServer(async (req, res) => {
   // Only a plain read of ONE stored media file passes without the pass: GET / HEAD of /media/<scope>/<workspace uuid>/<random uuid>.<ext>
   // (unguessable names, gs-api storage newKey; no folder listing). Every other address still needs the pass.
   if ((req.method === 'GET' || req.method === 'HEAD') && MEDIA_FILE.test(pathname)) return forwardApi(req, res);
+  // AI MARKETING (founder 2026-11-05): a client approves a post on a link with no login and no TeamLink pass. Only the page of one link
+  // passes: /review/<43 random characters>. It is the empty app shell; what it shows comes from the API, which checks the link itself.
+  if ((req.method === 'GET' || req.method === 'HEAD') && REVIEW_PAGE.test(pathname)) return serveStatic(req, res);
   const ok = await verify(cookieOf(req, COOKIE), req);
   if (ok === 'down') return isApi ? json(res, 503, 'TeamLink is not answering, so the entrance cannot check your pass.') : page(res, 503, 'TeamLink is not answering', 'The entrance could not check your pass. Open Omni-Channel again in a minute.');
   if (ok !== 'yes') {
