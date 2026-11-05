@@ -174,7 +174,7 @@ async function processInbound(info, { channel, e164, at, providerId, R, ev }) {
   if (stop) await putSetting(`${OPTOUT_PREFIX}${channel}.${e164}`, { at: at.toISOString(), text: String(info.text).slice(0, 40) });
   // who is it? (no router = the old rule: the first matching candidate, else a client contact or employee)
   const verdict = R ? await R.decide({ phone: e164, channel, at }) : null;
-  if (verdict && verdict.status !== 'confident') { await R.park(ev, verdict, { channel }); return { stored: false, review: true, reason: verdict.status, stop, candidateId: null }; }
+  if (verdict && verdict.status !== 'confident') { await R.park(ev, verdict, { channel }); return { stored: false, review: true, reason: verdict.status, possible: verdict.possible, stop, candidateId: null }; }
   const who = verdict ? verdict.person : null;
   const cand = who ? (who.type === 'CANDIDATE' ? who : null) : await findCandidateByPhone(e164);
   const convo = require('./conversations'); // eslint-disable-line global-require

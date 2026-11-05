@@ -226,6 +226,19 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     const leadMsgs = await Inbox.leadMessages(conv.id);
     check('a person can answer a lead inside 24 hours and the chat keeps both messages', leadSend.ok && leadMsgs.length === 2 && leadMsgs[1].by === admin.name, leadSend);
 
+    // ---- 6b. one number on a candidate and an employee
+    console.log('\n-- a number shared with an employee');
+    const s1 = await mkCandidate(20, 'Sravya');
+    await promote(s1, 20);
+    await Agent.onInbound({ channel: 'WhatsApp', from: phoneOf(20), text: 'Yes I am interested', id: `wamid.ZZs${SUFFIX}`, at: new Date() }, { review: true, reason: 'ambiguous', possible: [{ type: 'CANDIDATE', id: s1.id }, { type: 'EMPLOYEE', id: 'e1' }] });
+    stub.script = [{ reply: 'Glad to hear it.' }];
+    stub.calls.length = 0;
+    await run();
+    const sentS = stub.calls[0] ? JSON.stringify(stub.calls[0].messages.slice(1)) : '';
+    check('one candidate + an employee on a number: the AI answers as that candidate and sees the message', (await aiMsgs(s1.id)).length === 1 && sentS.includes('Yes I am interested'), sentS.slice(0, 200));
+    await Agent.onInbound({ channel: 'WhatsApp', from: phoneOf(21), text: 'Yes', id: `wamid.ZZt${SUFFIX}`, at: new Date() }, { review: true, reason: 'ambiguous', possible: [{ type: 'CANDIDATE', id: 'a' }, { type: 'CANDIDATE', id: 'b' }] });
+    check('two candidates on a number: it stays in Needs review, the AI does not guess', !(await convAt(phoneOf(21))));
+
     // ---- 7. human takeover
     console.log('\n-- a person takes over');
     const f = await mkCandidate(6, 'Farah');

@@ -89,8 +89,12 @@ async function onInbound(info, result) {
   try {
     if ((info.channel || 'WhatsApp') !== 'WhatsApp' || !result || result.duplicate) return null;
     if (result.personType) return null; // a client's contact, an employee or a vendor: their chat stays a person's
-    const isCandidate = !!result.candidateId;
-    if (!isCandidate && !(result.review && result.reason === 'none')) return null; // two people share this number: it waits in Needs review
+    // a number shared by ONE candidate and an employee or a client contact: the WhatsApp chat is about a job, so it is the candidate's (founder's test 2026-11-05).
+    // Two candidates on one number stay in Needs review: the AI must not guess whose record it reads.
+    const shared = result.review && result.reason === 'ambiguous' ? (result.possible || []).filter((p) => p.type === 'CANDIDATE') : [];
+    const candidateId = result.candidateId || (shared.length === 1 ? shared[0].id : null);
+    const isCandidate = !!candidateId;
+    if (!isCandidate && !(result.review && result.reason === 'none')) return null;
     await ensure();
     const e164 = delivery.digitsOf(info.from);
     const now = Date.now();
@@ -100,24 +104,24 @@ async function onInbound(info, result) {
     if (!conv) {
       const id = S.newId('wac');
       const leadContactId = isCandidate ? null : await leadFor(e164, info.name);
-      await S.run('INSERT OR IGNORE INTO "OmniWaConv" (id, e164, personType, candidateId, leadContactId, name, numberId, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?,?,?)', id, e164, isCandidate ? 'CANDIDATE' : 'LEAD', result.candidateId || null, leadContactId, clip(info.name, 120) || null, info.numberId || null, now, now);
+      await S.run('INSERT OR IGNORE INTO "OmniWaConv" (id, e164, personType, candidateId, leadContactId, name, numberId, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?,?,?)', id, e164, isCandidate ? 'CANDIDATE' : 'LEAD', candidateId, leadContactId, clip(info.name, 120) || null, info.numberId || null, now, now);
       conv = await convOf(e164);
-    } else if (isCandidate && conv.candidateId !== result.candidateId) {
-      await S.run('UPDATE "OmniWaConv" SET personType = \'CANDIDATE\', candidateId = ?, updatedAt = ? WHERE id = ?', result.candidateId, now, conv.id); // a lead who is now a candidate
+    } else if (isCandidate && conv.candidateId !== candidateId) {
+      await S.run('UPDATE "OmniWaConv" SET personType = \'CANDIDATE\', candidateId = ?, updatedAt = ? WHERE id = ?', candidateId, now, conv.id); // a lead who is now a candidate
       conv = await convOf(e164);
     }
     if (isCandidate && !conv.name) {
-      const c = await prisma.candidate.findUnique({ where: { id: result.candidateId }, select: { name: true } }).catch(() => null);
+      const c = await prisma.candidate.findUnique({ where: { id: candidateId }, select: { name: true } }).catch(() => null);
       if (c) conv.name = c.name;
     }
     const provider = info.id ? clip(info.id, 200) : null;
-    const fresh = await S.run('INSERT OR IGNORE INTO "OmniWaMessage" (id, e164, convId, direction, body, status, providerMessageId, candidateId, numberId, at, createdAt) VALUES (?,?,?,\'IN\',?,\'received\',?,?,?,?,?)', S.newId('wam'), e164, conv.id, clip(info.text, 4000), provider, result.candidateId || null, info.numberId || null, at, now);
+    const fresh = await S.run('INSERT OR IGNORE INTO "OmniWaMessage" (id, e164, convId, direction, body, status, providerMessageId, candidateId, numberId, at, createdAt) VALUES (?,?,?,\'IN\',?,\'received\',?,?,?,?,?)', S.newId('wam'), e164, conv.id, clip(info.text, 4000), provider, candidateId, info.numberId || null, at, now);
     if (!fresh) return null;
     const link = await linkContext(conv, cfg, now);
     await S.run(`UPDATE "OmniWaConv" SET name = ?, numberId = COALESCE(?, numberId), requirementId = COALESCE(?, requirementId), campaignId = COALESCE(?, campaignId), campaignName = COALESCE(?, campaignName),
       ownerUserId = COALESCE(?, ownerUserId), ownerName = COALESCE(?, ownerName), promoAt = COALESCE(?, promoAt), lastInboundAt = ?, lastText = ?, unread = unread + 1, pendingAt = ?, updatedAt = ? WHERE id = ?`,
     conv.name, info.numberId || null, link.requirementId || null, link.campaignId || null, link.campaignName || null, link.ownerUserId || null, link.ownerName || null, link.promoAt || null, at, clip(info.text, 200), now, now, conv.id);
-    if (result.stop || G.isStop(info.text)) await optOut({ ...conv, candidateId: result.candidateId || conv.candidateId }, info.text, now);
+    if (result.stop || G.isStop(info.text)) await optOut({ ...conv, candidateId: candidateId || conv.candidateId }, info.text, now);
     Live.changed();
     return { conv: conv.id };
   } catch (err) {
@@ -178,8 +182,12 @@ async function unblock(e164, user, reason) {
 // ---- memory ----------------------------------------------------------------------------------------------------------------------------------------
 async function memory(conv, n) {
   if (conv.candidateId) {
-    const rows = await prisma.candidateMessage.findMany({ where: { candidateId: conv.candidateId, channel: 'WhatsApp', status: { in: ['RECEIVED', 'SENT', 'DELIVERED', 'READ'] } }, orderBy: { createdAt: 'desc' }, take: n, select: { status: true, body: true } });
-    return rows.reverse().filter((r) => r.body).map((r) => ({ role: r.status === 'RECEIVED' ? 'user' : 'assistant', content: clip(r.body, 800) }));
+    const rows = await prisma.candidateMessage.findMany({ where: { candidateId: conv.candidateId, channel: 'WhatsApp', status: { in: ['RECEIVED', 'SENT', 'DELIVERED', 'READ'] } }, orderBy: { createdAt: 'desc' }, take: n, select: { status: true, body: true, providerRef: true, createdAt: true } });
+    const known = new Set(rows.map((r) => r.providerRef).filter(Boolean));
+    // a number shared with an employee: its messages wait in Needs review, so they are only in OmniWaMessage
+    const only = (await S.q('SELECT body, providerMessageId, at FROM "OmniWaMessage" WHERE e164 = ? AND direction = \'IN\' ORDER BY at DESC LIMIT ?', conv.e164, n)).filter((m) => !known.has(m.providerMessageId));
+    const all = [...rows.map((r) => ({ at: r.createdAt.getTime(), role: r.status === 'RECEIVED' ? 'user' : 'assistant', body: r.body })), ...only.map((m) => ({ at: Number(m.at), role: 'user', body: m.body }))];
+    return all.sort((a, b) => a.at - b.at).slice(-n).filter((r) => r.body).map((r) => ({ role: r.role, content: clip(r.body, 800) }));
   }
   const rows = await S.q('SELECT direction, body FROM "OmniWaMessage" WHERE e164 = ? ORDER BY at DESC LIMIT ?', conv.e164, n);
   return rows.reverse().filter((r) => r.body).map((r) => ({ role: r.direction === 'IN' ? 'user' : 'assistant', content: clip(r.body, 800) }));
