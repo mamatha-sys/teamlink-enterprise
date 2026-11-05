@@ -67,16 +67,19 @@ function parseScript(raw, lim = {}) {
 const HUMAN = {
   English: {
     ack: ['Okay.', 'Alright.', 'Sure.', 'Okay, thanks.', 'Right.'], no: ['Alright, no problem.', 'Okay, understood.', 'Sure, that is fine.'],
+    noted: 'I will note that for our team.',
     reason: 'I understand. May I ask why? If something about the role is the concern, I will note it for our team.',
     sorry: ['Sorry, could you say that once more?', 'Sorry, I missed that. Could you repeat?', 'Sorry, the line is not clear. One more time please?'], hear: 'Hello? Can you hear me okay?',
   },
   Telugu: {
     ack: ['సరే.', 'సరే అండి.', 'బాగుంది.', 'ఓకే అండి.'], no: ['సరే, పర్వాలేదు అండి.', 'సరే అండి, అర్థమైంది.'],
+    noted: 'ఆ విషయం మా టీమ్‌కి తెలియజేస్తాను.',
     reason: 'అర్థమైంది అండి. కారణం చెప్పగలరా? ఏదైనా సమస్య ఉంటే మా టీమ్ కి తెలియజేస్తాను.',
     sorry: ['క్షమించండి, ఇంకోసారి చెప్తారా?', 'సారీ అండి, సరిగ్గా వినపడలేదు. మళ్ళీ చెప్తారా?', 'క్షమించండి, లైన్ సరిగా లేదు. ఇంకోసారి చెప్పండి.'], hear: 'హలో? నేను చెప్పేది వినపడుతోందా?',
   },
   Hindi: {
     ack: ['ठीक है।', 'जी, ठीक है।', 'अच्छा।', 'जी।'], no: ['ठीक है, कोई बात नहीं।', 'जी, समझ गया।'],
+    noted: 'यह बात मैं अपनी टीम को बता दूँगा।',
     reason: 'समझ गया। क्या मैं कारण जान सकता हूँ? अगर भूमिका में कोई समस्या है तो मैं अपनी टीम को बता दूँगा।',
     sorry: ['माफ़ कीजिए, एक बार फिर से बोलेंगे?', 'सॉरी, ठीक से सुनाई नहीं दिया। दोबारा बोलिए।', 'माफ़ कीजिए, आवाज़ साफ़ नहीं आ रही। एक बार और बोलिए।'], hear: 'हैलो? आपको मेरी आवाज़ आ रही है?',
   },
@@ -245,7 +248,8 @@ class ScriptDialogue extends D.Dialogue {
         const q = S.clean(text, 200);
         if (q && !st.pending.includes(q) && st.pending.length < 5) st.pending.push(q);
         turn.understood = 'question_noted';
-        return { say: this.speak(this.again()), done: false }; // the question again; the person's own question is for the team
+        const h = HUMAN[this.language] || HUMAN.English;
+        return { say: this.speak(this.facts ? h.noted : '', cur.kind === 'ask' || cur.kind === 'interest' ? this.line(sc.idx) : this.again()), done: false }; // the question again; the person's own question is for the team
       }
       // "do you have a minute / can we talk?" answered with a no: one try to convince, then a kind close
       const permissionAsk = cur.kind === 'ask' && sc.idx === this.steps.findIndex((x) => x.kind === 'ask' || x.kind === 'interest') && /minute|moment|spare|convenient|talk|time/i.test(cur.text);

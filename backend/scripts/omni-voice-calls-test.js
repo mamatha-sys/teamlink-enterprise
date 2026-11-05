@@ -213,14 +213,14 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const vd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(vr.id));
     const fv0 = vd.start().say; const fv1 = (await vd.hear('hello')).say; const fv2 = (await vd.hear('yes tell me')).say;
     const fv3 = (await vd.hear('what is the salary?')).say; const fv4 = (await vd.hear('yes interested')).say; const fv5 = await vd.hear('tomorrow at five');
-    check('the call is built from the facts: greeting, one minute?, the vacancy, interested?', /^Hello Sravanthi, good morning\. This is an automated AI assistant calling from Teamlink Consultants on behalf of Anil Ravali/.test(fv0) && /one minute/.test(fv1) && /We have an opening for HR Recruiter\. The location is Kukatpally\. The salary is 10K per month/.test(fv2) && /Are you interested in this opportunity\?$/.test(fv2), { fv0, fv1, fv2 });
-    check('a question about the salary is answered from the facts, then the question is asked again', /^The salary is 10K per month\. Are you interested/.test(fv3), fv3);
+    check('the call is built from the facts: greeting, one minute?, the vacancy, interested?', /^Hello Sravanthi, good morning\. This is an automated AI assistant calling from Teamlink Consultants on behalf of Anil Ravali/.test(fv0) && /one minute/.test(fv1) && /We have an opening for HR Recruiter\. The location is Kukatpally\. The salary is 10 thousand per month/.test(fv2) && /Are you interested in this opportunity\?$/.test(fv2), { fv0, fv1, fv2 });
+    check('a question about the salary is answered from the facts, then the question is asked again', /^The salary is 10 thousand per month\. Are you interested/.test(fv3), fv3);
     check('interested: the next step, then the closing with the contact', /call you to explain the next steps/.test(fv4) && fv5.done === true && /Thank you, Sravanthi\. For any queries, please contact Anil Ravali/.test(fv5.say), { fv4, fv5 });
     const vr2 = await omni.create({ externalId: 'vac2', toNumber: '9222333302', name: 'Ravi Kumar', script: FACTS }, { ...deps, ami: AMI });
     const vd2 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(vr2.id)); vd2.start();
     const t1 = await vd2.hear('అవును చెప్పండి', { heard: 'clear', lang: 'Telugu' });
     const t2 = await vd2.hear('అవును చెప్పండి', { heard: 'clear', lang: 'Telugu' });
-    check('a person who speaks Telugu gets the rest of the call in Telugu, built from the same facts (no translation needed)', vd2.language === 'Telugu' && /ఒక నిమిషం/.test(t1.say) && /HR Recruiter/.test(t2.say) && /Kukatpally/.test(t2.say) && /10K per month/.test(t2.say) && /జీతం/.test(t2.say), { lang: vd2.language, t1: t1.say, t2: t2.say });
+    check('a person who speaks Telugu gets the rest of the call in Telugu, built from the same facts (no translation needed)', vd2.language === 'Telugu' && /ఒక నిమిషం/.test(t1.say) && /HR Recruiter/.test(t2.say) && /Kukatpally/.test(t2.say) && /10 వేలు/.test(t2.say) && /జీతం/.test(t2.say), { lang: vd2.language, t1: t1.say, t2: t2.say });
     const vr3 = await omni.create({ externalId: 'vac3', toNumber: '9222333303', name: 'Asha', script: FACTS.replace('Contact:', 'Language: Hindi; Contact:') }, { ...deps, ami: AMI });
     const vd3 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(vr3.id));
     check('"Language: Hindi" starts the call in Hindi', /नमस्ते Asha जी/.test(vd3.start().say), vd3.language);

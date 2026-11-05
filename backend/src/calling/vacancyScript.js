@@ -25,8 +25,11 @@ function parseFacts(raw) {
   let m = re.exec(text);
   while (m) {
     const key = (KEY_OF.find(([, r]) => r.test(m[1].trim())) || [])[0];
-    const value = m[2].replace(/\s+/g, ' ').replace(/[“”"]+/g, '').replace(/[.\s]+$/, '').trim();
-    if (key && value && !facts[key]) facts[key] = value.slice(0, 400);
+    // a pasted paragraph ends where its next heading begins ("... hiring process Interest check Are you interested ...")
+    let value = m[2].split(/[“”"]|\b(?:interest check|if interested|if not interested|if yes|closing)\b/i)[0].replace(/\s+/g, ' ').replace(/[.\s]+$/, '').trim();
+    const max = key === 'details' || key === 'benefits' || key === 'next' ? 300 : 70;
+    if (value.length > max) value = value.slice(0, max).replace(/[,;\s][^,;\s]*$/, '').trim();
+    if (key && value && !facts[key]) facts[key] = value;
     m = re.exec(text);
   }
   const n = Object.keys(facts).length;
@@ -70,10 +73,15 @@ const L = {
 };
 function cap(s) { const t = String(s).trim(); return t ? t[0].toUpperCase() + t.slice(1) : t; }
 
+// "10K" is said "10 thousand" (a voice reads the letter K otherwise)
+const THOUSAND = { English: 'thousand', Telugu: 'వేలు', Hindi: 'हज़ार' };
+const sayable = (facts, lang) => Object.fromEntries(Object.entries(facts).map(([k, v]) => [k, String(v).replace(/(\d+(?:\.\d+)?)\s*k\b/gi, `$1 ${THOUSAND[lang]}`)]));
+
 /** The call, as script text, in each language. */
-function build(facts) {
+function build(factsIn) {
   const out = {};
   Object.entries(L).forEach(([lang, t]) => {
+    const facts = sayable(factsIn, lang);
     out[lang] = [
       `Opening: ${t.open(facts)}`, `Ask: ${t.perm(facts)}`, `Say: ${t.say(facts)}`, `Interest: ${t.interest(facts)}`, `Ask: ${t.next(facts)}`,
       `Convince: ${t.c1(facts)}`, `Convince: ${t.c2(facts)}`, `Decline: ${t.decline(facts)}`, `Closing: ${t.close(facts)}`,
@@ -86,10 +94,10 @@ const startLanguage = (facts) => { const l = String(facts.language || '').toLowe
 
 // a person's question, answered from the facts only (nothing is invented): null when the facts do not answer it
 const Q = {
-  salary: /salary|pay\b|package|ctc|money|how much|జీతం|ఎంత|वेतन|सैलरी|कितना/i,
-  location: /where|location|place|city|area|office|ఎక్కడ|స్థలం|कहाँ|कहां|स्थान/i,
-  qualification: /qualification|degree|graduate|education|eligib|అర్హత|योग्यता|पात्र/i,
-  role: /what (is|kind|work)|role|work|job|duties|responsibilit|ఏ ఉద్యోగం|పని|क्या काम|काम/i,
+  salary: /salary|pay\b|package|ctc|money|how much|జీతం|శాలరి|సాలరి|సాలరీ|శాలరీ|జీతమెంత|ఎంత|वेतन|सैलरी|तनख्वाह|कितना/i,
+  location: /where|location|place|city|area|office|ఎక్కడ|స్థలం|లొకేషన్|లోకేషన్|లొకేషనా|कहाँ|कहां|स्थान|लोकेशन|जगह/i,
+  qualification: /qualification|degree|graduate|education|eligib|అర్హత|క్వాలిఫికేషన్|योग्यता|क्वालिफिकेशन|पात्र/i,
+  role: /what (is|kind|work)|role|work|job|duties|responsibilit|ఏ ఉద్యోగం|పని|రోల్|జాబ్|क्या काम|काम|रोल|जॉब/i,
   experience: /experience|fresher|అనుభవం|अनुभव/i,
 };
 const A = {
@@ -97,10 +105,11 @@ const A = {
   Telugu: { salary: (f) => `జీతం ${f.salary}.`, location: (f) => `స్థలం ${f.location}.`, qualification: (f) => `అర్హత ${f.qualification}.`, role: (f) => `పోస్టు ${f.role}${f.details ? `: ${f.details}` : ''}.`, experience: (f) => `అనుభవం ${f.experience}.` },
   Hindi: { salary: (f) => `वेतन ${f.salary}।`, location: (f) => `स्थान ${f.location}।`, qualification: (f) => `योग्यता ${f.qualification}।`, role: (f) => `पद ${f.role}${f.details ? `: ${f.details}` : ''}।`, experience: (f) => `अनुभव ${f.experience}।` },
 };
-function answer(facts, text, lang) {
-  if (!facts) return null;
+function answer(factsIn, text, lang) {
+  if (!factsIn) return null;
+  const facts = sayable(factsIn, lang);
   const a = A[lang] || A.English;
-  const hit = ['salary', 'location', 'qualification', 'experience', 'role'].find((k) => Q[k].test(String(text || '')) && facts[k === 'role' ? 'role' : k]);
+  const hit = ['salary', 'location', 'qualification', 'experience', 'role'].find((k) => Q[k].test(String(text || '')) && facts[k]);
   return hit ? a[hit](facts) : null;
 }
 
