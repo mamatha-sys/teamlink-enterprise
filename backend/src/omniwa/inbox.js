@@ -121,6 +121,7 @@ async function detail(user, key) {
   let collected = {};
   try { collected = c ? JSON.parse(c.collected || '{}') : {}; } catch { collected = {}; }
   delete collected.applyLinkSentAt;
+  delete collected.jobChoices;
   return { conv: c, view: { key, ai: aiOf(c), window: { open: !!closesAt && closesAt > Date.now(), closesAt }, alreadyContacted: seen, stopped: blocked, collected, ownerName: c ? c.ownerName : null, leadName: type === 'LEAD' && c ? c.name : null } };
 }
 

@@ -70,7 +70,7 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     const admin = await prisma.user.findFirst({ where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] } } });
     const other = await prisma.user.findFirst({ where: { role: { notIn: ['ADMIN', 'SUPER_ADMIN', 'CLIENT', 'CANDIDATE'] } } }).catch(() => null);
     const client = await prisma.client.findFirst();
-    const job = await prisma.requirement.create({ data: { title: 'ZZTEST Physics Lecturer', clientId: client.id, status: 'OPEN', location: 'Hyderabad', experience: '2-6 years', salary: '8 LPA', skills: 'Physics', description: 'ZZTEST We need a physics lecturer who can teach degree students in Hyderabad, full time.' } });
+    const job = await prisma.requirement.create({ data: { title: 'ZZTEST Physics Lecturer', clientId: client.id, status: 'OPEN', portalPublished: true, location: 'Hyderabad', experience: '2-6 years', salary: '8 LPA', skills: 'Physics', description: 'ZZTEST We need a physics lecturer who can teach degree students in Hyderabad, full time.' } });
     const mkCandidate = async (n, name) => {
       const c = await prisma.candidate.create({ data: { name: `ZZTEST ${name}`, phone: `+${phoneOf(n)}` } });
       await prisma.application.create({ data: { candidateId: c.id, requirementId: job.id, ownerRecruiterId: other ? other.id : null } });
@@ -241,6 +241,31 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     const leadOut = await Inbox.leadMessages(conv.id);
     check('the model is told there is no job and who it talks to; the invented line never leaves, a recruiter takes over', /NO JOB is linked/.test(sysNoJob) && /not you/.test(sysNoJob) && conv.state === 'needs_human' && !leadOut.some((m) => /filled/.test(m.text)), [conv.state, leadOut]);
 
+    // ---- 6a2. open job search
+    console.log('\n-- open jobs');
+    await prisma.requirement.update({ where: { id: job.id }, data: { portalPublished: true } });
+    await S.run('UPDATE "OmniWaConv" SET aiStartedAt = ? WHERE e164 = ?', Date.now(), phoneOf(80)).catch(() => {});
+    const seekNo = phoneOf(80);
+    await inbound(seekNo, 'hi', 'ZZTEST Job Seeker');
+    await S.run('UPDATE "OmniWaConv" SET aiStartedAt = ?, state = \'active\', handoffReason = NULL WHERE e164 = ?', Date.now(), seekNo);
+    await inbound(seekNo, 'I am looking for physics lecturer position');
+    stub.script = [{ reply: 'We have ZZTEST Physics Lecturer in Hyderabad. Do you want this one?' }];
+    stub.calls.length = 0;
+    await run();
+    const seekSys = stub.calls[0] ? stub.calls[0].messages[0].content : '';
+    conv = await convAt(seekNo);
+    let seekMsgs = await Inbox.leadMessages(conv.id);
+    check('they ask for a job: TeamLink searches the open jobs itself, the model gets the match without the client or any id, and may say it', /Physics Lecturer/.test(seekSys) && /"number":1/.test(seekSys) && !seekSys.includes(client.name) && !seekSys.includes(job.id) && seekMsgs.some((m) => /Physics Lecturer in Hyderabad/.test(m.text)) && conv.state === 'active', [conv.state, seekMsgs.slice(-1)]);
+    await inbound(seekNo, 'yes this one');
+    stub.script = [{ tool: 'select_job', args: { number: 1 } }, { tool: 'send_apply_link', args: {} }, { reply: 'Please apply here.' }];
+    await run();
+    conv = await convAt(seekNo);
+    seekMsgs = await Inbox.leadMessages(conv.id);
+    check('they pick it: the chat is tied to that job and the real apply link goes', conv.requirementId === job.id && LINK.test(seekMsgs[seekMsgs.length - 1].text), [conv.requirementId, seekMsgs.slice(-1)]);
+    const none = await require(path.join(BACK, 'src/omniwa/tools')).searchJobs('zzqqxx astronaut');
+    const empty = await require(path.join(BACK, 'src/omniwa/tools')).searchJobs('I am looking for a job');
+    check('nothing matches: an honest empty list; only "a job" with no kind: no search', none.searched === true && none.jobs.length === 0 && empty.searched === false);
+
     // ---- 6b. one number on a candidate and an employee
     console.log('\n-- a number shared with an employee');
     const s1 = await mkCandidate(20, 'Sravya');
@@ -302,7 +327,19 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     console.log('\n-- a campaign sent from Green Start');
     const gsSeen = [];
     const gs = { found: null, broken: false };
+    const gsThread = [];
     const gsServer = http.createServer((req, res) => {
+      if (req.method === 'POST') {
+        let raw = '';
+        req.on('data', (c) => { raw += c; });
+        req.on('end', () => {
+          const has = req.headers['x-workspace-id'] === 'ws2';
+          if (has) gsThread.push({ url: req.url, body: JSON.parse(raw) });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, data: { stored: has } }));
+        });
+        return undefined;
+      }
       gsSeen.push({ url: req.url, ws: req.headers['x-workspace-id'], auth: req.headers.authorization });
       res.writeHead(gs.broken ? 500 : 200, { 'Content-Type': 'application/json' });
       if (gs.broken) return res.end('{"message":"down"}');
@@ -327,6 +364,8 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     await run();
     conv = await convAt(phoneOf(10));
     check('reply to a Green Start campaign: the AI answers, and the chat shows that campaign', (await aiMsgs(i.id)).length === 1 && conv.campaignName === 'ZZTEST Nurses' && conv.campaignId === 'gs:c9' && !!conv.aiStartedAt, conv);
+    await new Promise((r) => { setTimeout(r, 400); });
+    check('the AI reply is shown in the Green Start thread too: same words and Meta id, in the workspace that has the thread, nothing sent again', gsThread.length >= 1 && gsThread[0].url === '/api/v1/conversations/import-outbound' && gsThread[0].body.text === 'Thank you, let me help.' && gsThread[0].body.phone === phoneOf(10) && !!gsThread[0].body.providerMessageId, gsThread);
     gsSeen.length = 0;
     await inbound(phoneOf(10), 'one more');
     stub.script = [{ reply: 'Okay.' }];

@@ -227,6 +227,7 @@ async function sendText(conv, text, { user = null, ai: byAi = true } = {}) {
     } catch { /* the message went; the timeline line is a courtesy */ }
   }
   await S.run('UPDATE "OmniWaConv" SET lastText = ?, updatedAt = ? WHERE id = ?', clip(body, 200), now, conv.id);
+  require('./gsCampaign').mirror(conv.e164, body, res.providerRef || null); // eslint-disable-line global-require -- Channels > WhatsApp in Green Start shows it too
   Live.changed();
   return { ok: true, providerRef: res.providerRef || null };
 }
@@ -287,9 +288,17 @@ async function askModel(conv, cfg, input) {
   ctx.facts.push(JSON.stringify(job));
   // first live test 2026-11-05: the model called itself by the candidate's name, and with no job it said positions were "filled"
   const name = conv.name ? `You are talking TO ${conv.name}. That is the candidate, not you. You are the assistant of the company.` : '';
-  ctx.noJob = !job.available;
-  const noJob = ctx.noJob ? 'NO JOB is linked to this chat: you do not know which jobs are open. Never say a job or position is available, open, filled or closed, and never say you could not find one. Collect what they want, then use handoff_to_recruiter so a recruiter can check.' : `The job they replied to: ${JSON.stringify(job)}`;
-  const system = `${cfg.systemPrompt}\n\n${RULES}\n\n${T.TOOL_HELP}\n\n${name}\n${noJob}\nWhat you already collected: ${conv.collected}`;
+  let jobLine = `The job they replied to: ${JSON.stringify(job)}`;
+  if (!job.available) {
+    // the search runs here, not only as a tool: a small local model does not always ask for it
+    const found = await T.offerJobs(conv, input).catch(() => ({ searched: false, jobs: [] }));
+    ctx.noJob = !found.searched;
+    ctx.facts.push(JSON.stringify(found));
+    if (found.jobs.length) jobLine = `No job is linked to this chat yet. Open jobs that match what they asked: ${JSON.stringify(found.jobs)}. Tell them only about these, never another job. When they pick one, use select_job with its number, then collect what is missing and use send_apply_link.`;
+    else if (found.searched) jobLine = 'No open job matches what they asked. Say so kindly, ask what other work they want, and offer a recruiter.';
+    else jobLine = 'NO JOB is linked to this chat: you do not know which jobs are open. Never say a job or position is available, open, filled or closed. Ask what job they want, or use search_open_jobs.';
+  }
+  const system = `${cfg.systemPrompt}\n\n${RULES}\n\n${T.TOOL_HELP}\n\n${name}\n${jobLine}\nWhat you already collected: ${JSON.stringify(T.collectedView(conv))}`;
   const history = await memory(conv, cfg.memoryCount);
   if (!history.length) history.push({ role: 'user', content: clip(input, 1500) });
   for (let step = 0; step < MAX_STEPS; step += 1) {

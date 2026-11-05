@@ -13,6 +13,8 @@ const TOOL_HELP = `Tools (each is {"tool":"name","args":{...}}):
 - get_job_details {}: the job they replied to.
 - search_knowledge_base {"query":"..."}: company and process FAQs.
 - save_candidate_data {"availability":"","expected_salary":"","notice_period":"","location":"","interested":true|false}: send only what the person told you.
+- search_open_jobs {"query":"staff nurse"}: open jobs by what they want. Numbers in the answer are for select_job.
+- select_job {"number":1}: this chat is now about that job.
 - send_apply_link {}: adds the job's apply and registration link to your reply.
 - send_interview_link {}: adds the AI interview link to your reply.
 - handoff_to_recruiter {"reason":"..."}: a recruiter takes over.`;
@@ -33,6 +35,57 @@ async function jobFacts(requirementId) {
     available: true, title: p.title, location: (p.location && p.location.text) || null, experience: (p.experience && p.experience.text) || null,
     salary: (p.salary && p.salary.text) || null, skills: Array.isArray(p.skills) ? p.skills.slice(0, 15) : null, description: clean(p.description, 900),
   };
+}
+
+// ---- open jobs -------------------------------------------------------------------------------------------------------------------------------------
+const NOISE = new Set('i am im looking for a an the new job jobs position positions vacancy vacancies opening openings role roles interested intrested also want need any please hi hello yes no ok okay is are there do you have in at of to and or my me work this that one'.split(' '));
+const wordsOf = (t) => [...new Set(String(t || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2 && !NOISE.has(w)))].slice(0, 6);
+
+// the open client jobs whose title carries the words: the same safe facts as get_job_details, the client's name never. id stays on this side.
+async function searchJobs(text, limit = 5) {
+  const words = wordsOf(text);
+  if (!words.length) return { searched: false, jobs: [] };
+  const rows = await prisma.requirement.findMany({ where: { status: 'OPEN', internal: false, OR: words.map((w) => ({ title: { contains: w } })) }, orderBy: { createdAt: 'desc' }, take: 60, select: { id: true, title: true } });
+  const scored = rows.map((r) => ({ id: r.id, n: words.filter((w) => String(r.title).toLowerCase().includes(w)).length })).sort((a, b) => b.n - a.n);
+  const jobs = [];
+  for (const r of scored) {
+    if (jobs.length >= limit) break;
+    const f = await jobFacts(r.id); // eslint-disable-line no-await-in-loop
+    if (f.available) jobs.push({ id: r.id, title: f.title, location: f.location, experience: f.experience, salary: f.salary });
+  }
+  return { searched: true, jobs };
+}
+// what the model sees, numbered; the ids are kept on the chat for select_job
+async function offerJobs(conv, text) {
+  const out = await searchJobs(text);
+  const collected = JSON.parse(conv.collected || '{}');
+  // "yes this one" finds nothing new: the jobs just offered stay on the table, so their numbers still mean the same
+  if (!out.jobs.length && (collected.jobChoices || []).length) {
+    for (const id of collected.jobChoices) {
+      const f = await jobFacts(id); // eslint-disable-line no-await-in-loop
+      out.jobs.push({ id, title: f.title, location: f.location, experience: f.experience, salary: f.salary });
+    }
+    out.searched = true;
+  }
+  collected.jobChoices = out.jobs.map((j) => j.id);
+  conv.collected = JSON.stringify(collected);
+  await S.run('UPDATE "OmniWaConv" SET collected = ? WHERE id = ?', conv.collected, conv.id);
+  return { searched: out.searched, jobs: out.jobs.map(({ id, ...j }, i) => ({ number: i + 1, ...j })) };
+}
+async function selectJob(conv, args, ctx) {
+  const id = (JSON.parse(conv.collected || '{}').jobChoices || [])[Number(args.number) - 1];
+  if (!id) return { selected: false, note: 'There is no such number: use search_open_jobs first.' };
+  const job = await jobFacts(id);
+  if (!job.available) return { selected: false, note: job.note };
+  conv.requirementId = id;
+  await S.run('UPDATE "OmniWaConv" SET requirementId = ?, updatedAt = ? WHERE id = ?', id, Date.now(), conv.id);
+  ctx.noJob = false;
+  return { selected: true, job };
+}
+// what the model may read of the chat's memory
+function collectedView(conv) {
+  const { jobChoices, applyLinkSentAt, ...rest } = JSON.parse(conv.collected || '{}');
+  return rest;
 }
 
 async function profileFacts(conv) {
@@ -77,6 +130,8 @@ async function applyLink(conv, ctx) {
   if (collected.applyLinkSentAt) return { sent: false, note: 'The apply link was already sent in this chat.' };
   const job = await jobFacts(conv.requirementId);
   if (!job.available) return { sent: false, note: job.note };
+  const live = await prisma.requirement.findUnique({ where: { id: conv.requirementId }, select: { portalPublished: true } }).catch(() => null);
+  if (!live || !live.portalPublished) return { sent: false, note: 'This job is not on the Job Portal yet, so there is no link: use handoff_to_recruiter.' };
   const link = Portal.jobUrl(conv.requirementId, 'whatsapp', { utm_source: 'whatsapp', utm_medium: 'ai', utm_campaign: conv.campaignId || undefined });
   ctx.links.push(link);
   collected.applyLinkSentAt = Date.now();
@@ -102,6 +157,8 @@ async function run(name, args, conv, ctx) {
     case 'get_candidate_profile': return profileFacts(conv);
     case 'get_job_details': return jobFacts(conv.requirementId);
     case 'search_knowledge_base': { const hits = await Cfg.kbSearch(a.query); return hits.length ? { found: hits } : { found: [], note: 'Nothing in the knowledge base: hand off to a recruiter.' }; }
+    case 'search_open_jobs': ctx.noJob = false; return offerJobs(conv, a.query);
+    case 'select_job': return selectJob(conv, a, ctx);
     case 'save_candidate_data': return saveData(conv, a, ctx);
     case 'send_apply_link': return applyLink(conv, ctx);
     case 'send_interview_link': return interviewLink(conv, ctx);
@@ -110,5 +167,5 @@ async function run(name, args, conv, ctx) {
   }
 }
 
-const NAMES = ['get_candidate_profile', 'get_job_details', 'search_knowledge_base', 'save_candidate_data', 'send_apply_link', 'send_interview_link', 'handoff_to_recruiter'];
-module.exports = { run, jobFacts, NAMES, TOOL_HELP };
+const NAMES = ['get_candidate_profile', 'get_job_details', 'search_open_jobs', 'select_job', 'search_knowledge_base', 'save_candidate_data', 'send_apply_link', 'send_interview_link', 'handoff_to_recruiter'];
+module.exports = { run, jobFacts, searchJobs, offerJobs, collectedView, NAMES, TOOL_HELP };
