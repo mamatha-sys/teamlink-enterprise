@@ -5274,6 +5274,8 @@ model MonitoringSetting {
   id                   String   @id @default("default")
   workStart            String   @default("09:30") @map("work_start") // HH:MM India time
   workEnd              String   @default("18:30") @map("work_end")
+  breakStart           String   @default("12:30") @map("break_start") // the daily lunch break, HH:MM India time ("" = none)
+  breakEnd             String   @default("13:15") @map("break_end")
   idleThresholdMinutes Int      @default(5) @map("idle_threshold_minutes")
   retentionDays        Int      @default(90) @map("retention_days")
   screenshotsEnabled   Boolean  @default(false) @map("screenshots_enabled") // stays off: TeamLink takes no screenshots

@@ -600,7 +600,7 @@ function Settings() {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (data) setForm({ workStart: data.workStart, workEnd: data.workEnd, idleThresholdMinutes: data.idleThresholdMinutes, retentionDays: data.retentionDays, policyText: data.policyText }); }, [data]);
+  useEffect(() => { if (data) setForm({ workStart: data.workStart, workEnd: data.workEnd, breakStart: data.breakStart || '', breakEnd: data.breakEnd || '', idleThresholdMinutes: data.idleThresholdMinutes, retentionDays: data.retentionDays, policyText: data.policyText }); }, [data]);
   if (error) return <div className="notice red">{error}</div>;
   if (!form) return <div className="small-muted">Loading…</div>;
   async function save() {
@@ -613,10 +613,12 @@ function Settings() {
         <div className="mon-grid">
           <label>Work starts <input type="time" value={form.workStart} onChange={(e) => setForm({ ...form, workStart: e.target.value })} /></label>
           <label>Work ends <input type="time" value={form.workEnd} onChange={(e) => setForm({ ...form, workEnd: e.target.value })} /></label>
+          <label>Lunch break starts <input type="time" value={form.breakStart} onChange={(e) => setForm({ ...form, breakStart: e.target.value })} /></label>
+          <label>Lunch break ends <input type="time" value={form.breakEnd} onChange={(e) => setForm({ ...form, breakEnd: e.target.value })} /></label>
           <label>Idle after (minutes with no mouse or keyboard) <input type="number" min={1} max={60} value={form.idleThresholdMinutes} onChange={(e) => setForm({ ...form, idleThresholdMinutes: e.target.value })} /></label>
           <label>Keep records for (days) <input type="number" min={7} max={730} value={form.retentionDays} onChange={(e) => setForm({ ...form, retentionDays: e.target.value })} /></label>
         </div>
-        <div className="small-muted">Only work hours (India time) are recorded; anything outside them is thrown away. Older records are deleted by themselves. Screenshots: <b>off</b> - TeamLink never takes screenshots or reads what is typed.</div>
+        <div className="small-muted">Only work hours (India time) are recorded; anything outside them is thrown away. The lunch break counts as Break, not idle, and keeps no app details. Older records are deleted by themselves. Screenshots: <b>off</b> - TeamLink never takes screenshots or reads what is typed.</div>
       </Panel>
       <Panel title={`Consent notice (version ${data.policyVersion})`} sub="Every employee reads and accepts this before anything is recorded. Changing it makes a new version that everyone accepts again.">
         <textarea rows={10} value={form.policyText} onChange={(e) => setForm({ ...form, policyText: e.target.value })} aria-label="Consent notice" style={{ width: '100%' }} />

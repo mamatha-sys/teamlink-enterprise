@@ -75,7 +75,7 @@ async function settings() {
   let row = await prisma.monitoringSetting.findUnique({ where: { id: 'default' } });
   if (!row) row = await prisma.monitoringSetting.create({ data: { id: 'default', policyText: DEFAULT_POLICY } }).catch(() => null);
   if (row && row.policyText === FIRST_POLICY) row = await prisma.monitoringSetting.update({ where: { id: 'default' }, data: { policyText: DEFAULT_POLICY, policyVersion: (row.policyVersion || 1) + 1 } }).catch(() => row);
-  const s = row || { workStart: '09:30', workEnd: '18:30', idleThresholdMinutes: 5, retentionDays: 90, screenshotsEnabled: false, policyVersion: 1, policyText: DEFAULT_POLICY };
+  const s = row || { workStart: '09:30', workEnd: '18:30', breakStart: '12:30', breakEnd: '13:15', idleThresholdMinutes: 5, retentionDays: 90, screenshotsEnabled: false, policyVersion: 1, policyText: DEFAULT_POLICY };
   return { ...s, policyText: s.policyText || DEFAULT_POLICY, screenshotsEnabled: false };
 }
 async function saveSettings(user, body = {}) {
@@ -84,6 +84,11 @@ async function saveSettings(user, body = {}) {
   if (body.workStart !== undefined) { if (!HM.test(String(body.workStart))) return { status: 400, error: 'Write the start of work like 09:30.' }; data.workStart = String(body.workStart); }
   if (body.workEnd !== undefined) { if (!HM.test(String(body.workEnd))) return { status: 400, error: 'Write the end of work like 18:30.' }; data.workEnd = String(body.workEnd); }
   if ((data.workStart || cur.workStart) >= (data.workEnd || cur.workEnd)) return { status: 400, error: 'Work must end after it starts.' };
+  if (body.breakStart !== undefined || body.breakEnd !== undefined) {
+    const bs = String(body.breakStart || ''); const be = String(body.breakEnd || '');
+    if ((bs || be) && !(HM.test(bs) && HM.test(be) && bs < be)) return { status: 400, error: 'Write the lunch break like 12:30 to 13:15, or leave both empty for no break.' };
+    data.breakStart = bs; data.breakEnd = be;
+  }
   if (body.idleThresholdMinutes !== undefined) {
     const n = Math.round(Number(body.idleThresholdMinutes));
     if (!(n >= 1 && n <= 60)) return { status: 400, error: 'Idle after: 1 to 60 minutes.' };
@@ -192,10 +197,17 @@ async function ingest(device, records) {
     const a = Math.max(st, ws);
     const b = Math.min(en, we);
     if (b - a < 1000) { skipped += 1; continue; } // eslint-disable-line no-continue
-    rows.push({
-      deviceId: device.id, employeeId: device.employeeId, appName: app, windowTitle: cleanTitle(app, r.windowTitle),
-      startTime: new Date(a), endTime: new Date(b), durationSeconds: Math.round((b - a) / 1000), isIdle: r.isBreak !== true && (r.isIdle === true || r.idle === true), isBreak: r.isBreak === true, day,
-    });
+    // THE LUNCH BREAK (founder 2026-11-05: "break 12:30 - 1:15 consider cheyyu"): the part inside it is Break - not idle, and no app or title kept
+    const bs = HM.test(s.breakStart || '') && HM.test(s.breakEnd || '') && s.breakStart < s.breakEnd ? atIst(day, s.breakStart).getTime() : null;
+    const be = bs ? atIst(day, s.breakEnd).getTime() : null;
+    const parts = bs && a < be && b > bs
+      ? [[a, bs, false], [Math.max(a, bs), Math.min(b, be), true], [be, b, false]]
+      : [[a, b, false]];
+    parts.filter(([x, y]) => y - x >= 1000).forEach(([x, y, lunch]) => rows.push({
+      deviceId: device.id, employeeId: device.employeeId, appName: lunch ? 'Break' : app, windowTitle: lunch ? null : cleanTitle(app, r.windowTitle),
+      startTime: new Date(x), endTime: new Date(y), durationSeconds: Math.round((y - x) / 1000),
+      isIdle: !lunch && r.isBreak !== true && (r.isIdle === true || r.idle === true), isBreak: lunch || r.isBreak === true, day,
+    }));
   }
   // A batch can come twice (the answer was lost on a bad line, or the PC restarted right after sending): the same piece counts once.
   const fresh = [];
@@ -292,6 +304,9 @@ function liveStatus(dev, onLeave, now) {
 async function overview(day, access = null) {
   const d = validDay(day) ? day : todayIst();
   const live = d === todayIst();
+  const cfg = await settings();
+  const nowHm = new Date(Date.now() + IST).toISOString().slice(11, 16);
+  const lunchNow = live && cfg.breakStart && cfg.breakStart <= nowHm && nowHm < cfg.breakEnd;
   const [devices, logs, catOf, leaves] = await Promise.all([
     prisma.monitoringDevice.findMany({ where: { isActive: true, ...within(access) }, select: { employeeId: true, lastSeenAt: true, currentApp: true, currentIdle: true, pausedState: true } }),
     prisma.activityLog.findMany({ where: { day: d, ...within(access) }, select: LOG_SELECT }),
@@ -310,7 +325,8 @@ async function overview(day, access = null) {
     const e = emps.get(id) || { id, name: 'Employee', department: null };
     const t = totalsOf(byEmp.get(id), catOf, e.department || '');
     const dev = latest.get(id) || null;
-    const status = live ? liveStatus(dev, onLeave.has(id), now) : (onLeave.has(id) ? 'On leave' : null);
+    let status = live ? liveStatus(dev, onLeave.has(id), now) : (onLeave.has(id) ? 'On leave' : null);
+    if (lunchNow && ['Online', 'Idle'].includes(status)) status = 'On break'; // the lunch break
     return {
       employeeId: id, name: e.name, code: e.employeeCode || null, department: e.department || null, team: e.team || null,
       firstSeen: t.first, lastSeen: t.last, activeHours: t.activeHours, idleHours: t.idleHours, breakHours: t.breakHours, productivity: t.productivity,
