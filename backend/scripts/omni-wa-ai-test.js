@@ -300,6 +300,10 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     const anyJob = await T3.searchJobs('any jobs?', { department: 'ZZEducation' });
     check('"any jobs?" on a number of one department lists that department; "Yes" lists nothing', anyJob.jobs.length === 1 && (await T3.searchJobs('Yes', { department: 'ZZEducation' })).searched === false, anyJob);
     await prisma.requirement.delete({ where: { id: eduJob.id } });
+    const liveJob = await prisma.requirement.create({ data: { title: 'ZZTEST Zzstaff Nurses', clientId: client.id, status: 'RECRUITER_ASSIGNED', department: 'Medical', description: 'ZZTEST staff nurses for a hospital in Hyderabad, day and night shifts, full time.' } });
+    const assigned = await T3.searchJobs('any vacancy for zzstaff nurse');
+    check('a job with a recruiter on it is still open and is found', assigned.jobs.some((j) => /Zzstaff/.test(j.title)), assigned);
+    await prisma.requirement.delete({ where: { id: liveJob.id } });
     const none = await require(path.join(BACK, 'src/omniwa/tools')).searchJobs('zzqqxx astronaut');
     const empty = await require(path.join(BACK, 'src/omniwa/tools')).searchJobs('I am looking for a job');
     check('nothing matches: an honest empty list; only "a job" with no kind: no search', none.searched === true && none.jobs.length === 0 && empty.searched === false);
@@ -427,14 +431,18 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     // ---- 8b1. YES to a promotion: the details are asked in order
     console.log('\n-- YES: the details');
     const q = await mkCandidate(41, 'Queen');
-    await promote(q, 41);
+    await promote(q, 41, undefined, true);
     await inbound(phoneOf(41), 'YES');
     stub.calls.length = 0;
+    await run();
+    await inbound(phoneOf(41), 'YES');
     await run();
     let qSent = await aiMsgs(q.id);
     check('YES: thanks and the first question of the list, the model is not asked', stub.calls.length === 0 && /looking for a job change/.test(qSent[qSent.length - 1].body), qSent.map((x) => x.body));
     const say = async (t) => { await inbound(phoneOf(41), t); await run(); };
-    await say('yes');
+    await say('job change');
+    qSent = await aiMsgs(q.id);
+    check('an answer with job words in it is an answer, not a search', /applied|interested/i.test(qSent[qSent.length - 1].body) && !/could not find/.test(qSent[qSent.length - 1].body), qSent.slice(-1).map((x) => x.body));
     await say('Yes interested');
     await say('exploring');
     await say('Not working');

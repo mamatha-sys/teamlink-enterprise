@@ -7,6 +7,7 @@ const prisma = require('../db');
 const S = require('../outreach/store');
 const Cfg = require('./config');
 const Portal = require('../utils/jobPortalBridge');
+const { REQUIREMENT_LIVE_STATUSES } = require('../utils/atsVocab'); // a job with a recruiter on it is still open: most live jobs are RECRUITER_ASSIGNED, not OPEN
 
 const TOOL_HELP = `Tools (each is {"tool":"name","args":{...}}):
 - get_candidate_profile {}: skills, location, applied jobs, application status, AI interview status.
@@ -26,7 +27,7 @@ async function jobFacts(requirementId) {
   const JP = require('../jobPublish/jobPayload'); // eslint-disable-line global-require
   const built = await JP.build(requirementId, 'career').catch(() => null);
   if (!built || !built.payload || built.blocked) return { available: false, note: 'The job details cannot be shared.' };
-  const open = /^open$/i.test(String(built.requirement && built.requirement.status));
+  const open = REQUIREMENT_LIVE_STATUSES.includes(String(built.requirement && built.requirement.status).toUpperCase());
   if (!open) return { available: false, note: 'This job is closed.' };
   const p = built.payload;
   const r = built.requirement;
@@ -60,9 +61,10 @@ async function searchJobs(text, { limit = 5, department = null } = {}) {
   if (!words.length && !generic) return { searched: false, jobs: [], total: 0 };
   const stems = words.map(stemOf);
   const where = generic ? { department } : { OR: stems.flatMap((w) => FIELDS.map(([f]) => ({ [f]: { contains: w } }))) };
-  const rows = await prisma.requirement.findMany({ where: { status: 'OPEN', internal: false, ...where }, orderBy: { createdAt: 'desc' }, take: 200, select: { id: true, title: true, specialisation: true, department: true, skills: true, location: true } });
+  const rows = await prisma.requirement.findMany({ where: { status: { in: REQUIREMENT_LIVE_STATUSES }, internal: false, ...where }, orderBy: { createdAt: 'desc' }, take: 300, select: { id: true, title: true, specialisation: true, department: true, skills: true, location: true, portalPublished: true } });
   const scoreOf = (r) => (generic ? 1 : stems.reduce((n, w) => n + FIELDS.reduce((m, [f, pts]) => m + (wordStarts(r[f], w) ? pts : 0), 0), 0));
-  const scored = rows.map((r) => ({ id: r.id, n: scoreOf(r) })).filter((r) => r.n > 0).sort((a, b) => b.n - a.n);
+  // the better fit first, and among equals a job with a Job Portal page (it can get an apply link)
+  const scored = rows.map((r) => ({ id: r.id, n: scoreOf(r), pub: r.portalPublished ? 1 : 0 })).filter((r) => r.n > 0).sort((a, b) => b.n - a.n || b.pub - a.pub);
   const jobs = [];
   const seen = new Set();
   for (const r of scored.slice(0, 30)) {
@@ -191,7 +193,7 @@ function quickAnswer(job, text, { justShown = false } = {}) {
 
 // what the model may read of the chat's memory
 function collectedView(conv) {
-  const { jobChoices, applyLinkSentAt, cardShown, promoJob, promoCardSent, intakeOn, intakeDone, intakeAt, ...rest } = JSON.parse(conv.collected || '{}');
+  const { jobChoices, applyLinkSentAt, cardShown, promoJob, promoCardSent, intakeOn, intakeDone, intakeAt, chosenJob, ...rest } = JSON.parse(conv.collected || '{}');
   return rest;
 }
 

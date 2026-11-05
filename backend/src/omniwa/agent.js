@@ -306,7 +306,7 @@ async function askModel(conv, cfg, input) {
   if (picked) {
     const sel = await T.selectJob(conv, { number: picked }, ctx);
     if (sel.selected) {
-      await remember({ cardShown: true });
+      await remember({ cardShown: true, chosenJob: sel.job && conv.requirementId });
       return { ctx, calls, reply: T.jobCardText(sel.job), written: true };
     }
   }
@@ -315,14 +315,18 @@ async function askModel(conv, cfg, input) {
     await remember({ promoCardSent: true, cardShown: true });
     return { ctx, calls, reply: T.jobCardText(job), written: true };
   }
-  if (promoJob && asksOther) return { ctx, calls, reply: T.onlyThisJobText(job), written: true };
-  if ((!job.available && !picked) || asksOther) {
+  // an answer inside the questions is an answer, whatever words it has ("job change" is not a search)
+  const answering = mem.intakeOn && !/\?\s*$/.test(input);
+  if (promoJob && asksOther && !answering) return { ctx, calls, reply: T.onlyThisJobText(job), written: true };
+  if (((!job.available && !picked) || asksOther) && !answering) {
     const found = await T.offerJobs(conv, input).catch(() => ({ searched: false, jobs: [] }));
     if (found.jobs.length) return { ctx, calls, reply: T.jobListText(found.jobs, found.total), written: true };
-    if (found.searched) return { ctx, calls, reply: T.NO_MATCH_TEXT, written: true };
+    if (found.searched && T.askedAboutJob(input)) return { ctx, calls, reply: T.NO_MATCH_TEXT, written: true }; // "sounds good" asks for no job: that is the model's
   }
   // YES to a promotion: TeamLink asks for the details itself, one at a time. A question in between is answered first, then the next detail is asked again with the next answer.
   const now2 = JSON.parse(conv.collected || '{}');
+  // the job the questions may name: the promoted one or the one they chose, never a leftover application from an old chat
+  const talkJob = job.available && (promoJob || now2.chosenJob === conv.requirementId) ? job : null;
   if (T.isNo(input) && !now2.intakeDone && !now2.intakeOn) { // inside the questions NO is just an answer
     await T.run('save_candidate_data', { interested: false }, conv, ctx);
     await remember({ intakeOn: false, intakeDone: true });
@@ -341,15 +345,15 @@ async function askModel(conv, cfg, input) {
       if (field) await T.run('save_candidate_data', { [field]: input }, conv, ctx);
       from = Number(now2.intakeAt) + 1;
     }
-    const next = T.nextQuestion(list, from, job.available ? { ...job, candidate: conv.name } : { candidate: conv.name }, answers);
+    const next = T.nextQuestion(list, from, talkJob ? { ...talkJob, candidate: conv.name } : { candidate: conv.name }, answers);
     if (next) {
       await remember({ intakeOn: true, intakeAt: next.index, answers, cardShown: false });
-      const hello = startIntake ? `Thank you for your interest. I have a few questions${job.available ? ` about the ${job.title} position` : ''}.\n` : '';
+      const hello = startIntake ? `Thank you for your interest. I have a few questions${talkJob ? ` about the ${talkJob.title} position` : ''}.\n` : '';
       return { ctx, calls, reply: `${hello}${next.text}`, written: true };
     }
     await remember({ intakeOn: false, intakeDone: true, answers, cardShown: false });
     ctx.handoff = 'Interested: their answers are in the chat';
-    const link = job.available ? await T.run('send_apply_link', {}, conv, ctx) : null;
+    const link = talkJob ? await T.run('send_apply_link', {}, conv, ctx) : null;
     if (link) calls.push({ tool: 'send_apply_link', args: {}, result: link });
     return { ctx, calls, reply: link && link.sent ? `${closing}\nYou can also apply here:` : closing, written: true };
   }
@@ -426,8 +430,9 @@ async function runTurn(row, defaults, now = Date.now()) {
     if (gs) promoted = true;
     if (gs && gs.campaignId !== conv.campaignId) {
       const promoJob = await T.jobOfCampaign(gs.campaignName);
-      Object.assign(conv, { promoAt: gs.at, campaignId: gs.campaignId, campaignName: gs.campaignName, requirementId: promoJob || conv.requirementId });
-      const { promoCardSent, cardShown, intakeOn, intakeDone, intakeAt, answers, ...keep } = JSON.parse(conv.collected || '{}');
+      // a new campaign starts a new talk: what the last chat was about is dropped
+      Object.assign(conv, { promoAt: gs.at, campaignId: gs.campaignId, campaignName: gs.campaignName, requirementId: promoJob || null });
+      const { promoCardSent, cardShown, intakeOn, intakeDone, intakeAt, answers, chosenJob, jobChoices, ...keep } = JSON.parse(conv.collected || '{}');
       conv.collected = JSON.stringify({ ...keep, promoJob: promoJob || null });
       conv.aiTurns = 0;
       await S.run('UPDATE "OmniWaConv" SET promoAt = ?, campaignId = ?, campaignName = ?, requirementId = ?, collected = ?, aiTurns = 0, updatedAt = ? WHERE id = ?', gs.at, gs.campaignId, gs.campaignName, conv.requirementId, conv.collected, now, conv.id);

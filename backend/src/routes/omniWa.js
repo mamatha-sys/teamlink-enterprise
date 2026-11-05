@@ -76,7 +76,7 @@ router.post('/conversations/:key/send', wrap(async (req, res) => {
 router.get('/promo-jobs', wrap(async (req, res) => {
   const prisma = require('../db'); // eslint-disable-line global-require
   const where = await require('../utils/scope').requirementWhere(req.user); // eslint-disable-line global-require
-  const jobs = await prisma.requirement.findMany({ where: { AND: [where, { status: 'OPEN' }] }, orderBy: { createdAt: 'desc' }, take: 300, select: { id: true, title: true, reqCode: true } }).catch(() => []);
+  const jobs = await prisma.requirement.findMany({ where: { AND: [where, { status: { in: require('../utils/atsVocab').REQUIREMENT_LIVE_STATUSES } }] }, orderBy: { createdAt: 'desc' }, take: 300, select: { id: true, title: true, reqCode: true } }).catch(() => []);
   res.json({ jobs: jobs.map((j) => ({ id: j.id, title: j.title, code: j.reqCode || null })) });
 }));
 router.get('/promotions', wrap(async (req, res) => res.json(await Inbox.promotions(req.user, req.query))));
