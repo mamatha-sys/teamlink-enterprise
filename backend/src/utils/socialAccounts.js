@@ -208,6 +208,13 @@ async function defaultLinkedin() {
   };
 }
 
+// The default YouTube channel for Omni-Channel (utils/greenStartIntegrations.js -> Green Start POST /social/youtube/connect-token)
+async function defaultYoutube() {
+  const a = (await readAll()).find((x) => x.platform === 'youtube' && x.isDefault && x.status !== 'Removed');
+  if (!a) return null;
+  return { token: tokenOf(a), lasting: a.tokenKind === 'refresh', name: a.name };
+}
+
 // Threads default -> the Social Media channel's Threads fields (what utils/greenStartIntegrations.js gives Omni-Channel)
 async function writeThreadsChannel(token, profile) {
   const w = await writeValues('social', { 'Threads access token': token || '-', 'Threads profile': profile || '' });
@@ -286,4 +293,4 @@ async function edit(user, id, { name, token } = {}, { saveFacebook } = {}) {
   return { ok: !result || result.ok !== false, account: shape(acc), tokenChanged: !!t, result };
 }
 
-module.exports = { addX, defaultXKeys, defaultLinkedin, edit, list, addFacebookPages, refreshInstagram, addThreads, addLinkedin, addYoutube, tokenOf, setDefault, remove, writeThreadsChannel, readAll, PLATFORMS };
+module.exports = { addX, defaultXKeys, defaultLinkedin, defaultYoutube, edit, list, addFacebookPages, refreshInstagram, addThreads, addLinkedin, addYoutube, tokenOf, setDefault, remove, writeThreadsChannel, readAll, PLATFORMS };

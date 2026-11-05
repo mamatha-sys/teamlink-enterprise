@@ -167,12 +167,22 @@ async function teamlinkChannels() {
     else if (li.expired) out.linkedin = { none: 'The LinkedIn sign-in in TeamLink has expired (it lasts about 60 days). Press Connect LinkedIn again in Social Media > LinkedIn.' };
     else out.linkedin = { body: { accessToken: li.token, ...(li.expiresAt ? { expiresAt: new Date(li.expiresAt).toISOString() } : {}), ...(li.page ? { organization: li.page } : {}) }, name: li.page ? `${li.name} + Company Page ${li.page.name}` : li.name };
   } catch (err) { out.linkedin = { none: `LinkedIn could not be read: ${err.message}` }; }
+  // YouTube (2026-11-05, "youtube kuda connect cheyyi ... greenstart ki"): the default channel of Social Media > YouTube, with its refresh
+  // token and TeamLink's Google app (Google renews a token only for the app that issued it) -> Green Start POST /social/youtube/connect-token
+  try {
+    const yt = await require('./socialAccounts').defaultYoutube(); // eslint-disable-line global-require
+    const app = yt ? await require('./youtubeConnect').readApp() : null; // eslint-disable-line global-require
+    if (!yt) out.youtube = { none: 'YouTube is not connected in TeamLink (Administration > Integrations > Social Media > YouTube).' };
+    else if (!yt.token || !yt.lasting) out.youtube = { none: 'Google gave TeamLink only a one-hour sign-in for this channel. Press Connect YouTube channel again in Social Media > YouTube.' };
+    else if (!app.id || !app.secret) out.youtube = { none: 'The Google app of Social Media > YouTube is not set up in TeamLink.' };
+    else out.youtube = { body: { refreshToken: yt.token, clientId: app.id, clientSecret: app.secret }, name: yt.name };
+  } catch (err) { out.youtube = { none: `YouTube could not be read: ${err.message}` }; }
   return out;
 }
 
 // ---- one channel into one workspace -----------------------------------------------
-const NAME = { email: 'Email', sms: 'SMS', whatsapp: 'WhatsApp', facebook: 'Facebook', threads: 'Threads', rcs: 'RCS', x: 'X (Twitter)', linkedin: 'LinkedIn' };
-const ONE_ROW = ['whatsapp', 'facebook', 'threads', 'rcs', 'x', 'linkedin']; // channels that are one row in Green Start's integration list (removed by that row's id)
+const NAME = { email: 'Email', sms: 'SMS', whatsapp: 'WhatsApp', facebook: 'Facebook', threads: 'Threads', rcs: 'RCS', x: 'X (Twitter)', linkedin: 'LinkedIn', youtube: 'YouTube' };
+const ONE_ROW = ['whatsapp', 'facebook', 'threads', 'rcs', 'x', 'linkedin', 'youtube']; // channels that are one row in Green Start's integration list (removed by that row's id)
 const PROVIDER = { rcs: 'smstake_rcs', x: 'twitter' }; // Green Start's provider name where it is not the channel's
 const GONE = ['NOT_CONNECTED', 'DISCONNECTED'];
 async function pushOne(token, ws, channel, want, prev, force) {
@@ -265,6 +275,22 @@ async function pushOne(token, ws, channel, want, prev, force) {
         throw err;
       }
       return { state: 'sent', words: `Same LinkedIn account as TeamLink now${want.name ? ` (${want.name})` : ''}`, fp };
+    }
+    if (channel === 'youtube') {
+      // the same rule as X: a YouTube connection made inside Omni-Channel itself (its own Google sign-in) is never replaced
+      if (!prev) {
+        const list = await call('GET', '/integrations', { token, ws: ws.id });
+        if ((list || []).some((x) => x.provider === 'youtube' && x.status && !GONE.includes(x.status))) {
+          return { state: 'skipped', words: 'Omni-Channel already has its own YouTube connection, so TeamLink left it as it is.' };
+        }
+      }
+      try {
+        await call('POST', '/social/youtube/connect-token', { token, ws: ws.id, body: want.body });
+      } catch (err) {
+        if (/404|cannot post|not found/i.test(err.message)) return { state: 'failed', words: 'Omni-Channel does not take a YouTube channel from TeamLink yet: its YouTube update is not installed on this server.', fp: prev };
+        throw err;
+      }
+      return { state: 'sent', words: `Same YouTube channel as TeamLink now${want.name ? ` (${want.name})` : ''}`, fp };
     }
     if (channel === 'email') await call('PUT', '/integrations/email', { token, ws: ws.id, body: want.body });
     else if (channel === 'sms') await call('PUT', '/integrations/sms', { token, ws: ws.id, body: want.body });
@@ -393,7 +419,7 @@ async function sync({ force = false, why = 'manual', by = null } = {}) {
       }
       for (const [i, ws] of wss.entries()) {
         const one = { id: ws.id, name: ws.name, main: i === 0, channels: {} };
-        for (const ch of ['email', 'sms', 'whatsapp', 'facebook', 'threads', 'rcs', 'x', 'linkedin']) {
+        for (const ch of ['email', 'sms', 'whatsapp', 'facebook', 'threads', 'rcs', 'x', 'linkedin', 'youtube']) {
           const k = `${ws.id}:${ch}`;
           let r;
           if (ch === 'whatsapp' && mapped && ws.waDone) r = ws.waDone;
@@ -414,7 +440,7 @@ async function sync({ force = false, why = 'manual', by = null } = {}) {
       const waDead = result.workspaces.map((w) => w.channels.whatsapp).find((c) => c && c.state === 'failed' && TOKEN_DEAD.test(c.words || ''));
       if (waDead) await markWhatsappTokenRejected(waDead.words);
       result.ok = !bad.length;
-      result.words = bad.length ? `Not everything reached Omni-Channel: ${bad.join(' | ')}` : 'Omni-Channel uses the same Email, SMS, WhatsApp, Facebook, Instagram, Threads, RCS, X and LinkedIn as TeamLink.';
+      result.words = bad.length ? `Not everything reached Omni-Channel: ${bad.join(' | ')}` : 'Omni-Channel uses the same Email, SMS, WhatsApp, Facebook, Instagram, Threads, RCS, X, LinkedIn and YouTube as TeamLink.';
     } catch (err) {
       result.words = err.message;
       result.down = !!err.down;
