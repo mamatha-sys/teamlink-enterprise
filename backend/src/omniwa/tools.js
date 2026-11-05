@@ -29,9 +29,16 @@ async function jobFacts(requirementId) {
   const open = /^open$/i.test(String(built.requirement && built.requirement.status));
   if (!open) return { available: false, note: 'This job is closed.' };
   const p = built.payload;
+  const r = built.requirement;
+  const client = r.client && r.client.name;
+  // straight from the ATS requirement; never the client's name, and never the import notes some requirements carry as a description
+  const ats = (v, n = 300) => { const t = clean(noClient(v, client), n); return t && !/^(any|n\/?a|-|none)$/i.test(t) ? t : null; };
+  const note = /^created from|local import/i;
   return {
     available: true, title: p.title, location: (p.location && p.location.text) || null, experience: (p.experience && p.experience.text) || null,
-    salary: (p.salary && p.salary.text) || null, skills: Array.isArray(p.skills) ? p.skills.slice(0, 15) : null, description: clean(p.description, 900),
+    salary: (p.salary && p.salary.text) || null, skills: Array.isArray(p.skills) ? p.skills.slice(0, 15) : null, description: note.test(String(p.description || '')) ? null : clean(p.description, 900),
+    qualification: ats(r.qualifications) || ats(r.education), employmentType: ats(r.employmentType), workMode: ats(r.workMode), openings: r.openings || null,
+    department: ats(r.department), specialisation: ats(r.specialisation), joining: ats(r.joiningTimeline), responsibilities: ats(r.responsibilities, 500),
   };
 }
 
@@ -104,6 +111,43 @@ const NO_MATCH_TEXT = 'I could not find an open job for that right now. Tell me 
 const askedAboutJob = (text) => wordsOf(text).length > 0 && JOB_ASK.test(String(text || ''));
 const pickedNumber = (text) => { const m = /^\D*([1-5])\D*$/.exec(String(text || '').trim()); return m ? Number(m[1]) : null; };
 const titleHas = (title, text) => wordsOf(text).some((w) => wordStarts(title, stemOf(w)));
+
+// a job's details and the common questions about it are answered HERE from the ATS requirement: the model could not be trusted with them in the live tests
+function jobCardText(job) {
+  const line = (label, v) => (v ? `${label}: ${Array.isArray(v) ? v.join(', ') : v}` : null);
+  const rows = [
+    `*${job.title}*`, line('Department', job.department), line('Speciality', job.specialisation), line('Location', job.location), line('Experience', job.experience), line('Salary', job.salary),
+    line('Qualification', job.qualification), line('Skills', job.skills), line('Type', [job.employmentType, job.workMode].filter(Boolean).join(', ')), line('Openings', job.openings), line('Joining', job.joining), job.description || job.responsibilities,
+  ].filter(Boolean);
+  return `${rows.join('\n')}\n\nDo you want to apply? Reply *apply*, or ask me anything about this job.`;
+}
+const ASKS = [
+  ['salary', 'salary', 'The salary', /\b(salary|sal|ctc|pay|package|lpa|stipend|jeetham|jeetam)\b|\u0c1c\u0c40\u0c24\u0c02|\u0935\u0947\u0924\u0928/i],
+  ['location', 'location', 'The location', /\b(location|where|place|city|ekkada|kahan)\b|\u0c0e\u0c15\u0c4d\u0c15\u0c21/i],
+  ['experience', 'experience', 'The experience needed', /\b(experience|exp|fresher|freshers)\b/i],
+  ['qualification', 'qualification', 'The qualification', /\b(qualifi\w*|degree|eligib\w*|study|studies)\b/i],
+  ['skills', 'skills', 'The skills', /\b(skills?)\b/i],
+  ['type', 'employmentType', 'The job type', /\b(timings?|shift|full.?time|part.?time|work mode|remote|wfh)\b/i],
+  ['openings', 'openings', 'The number of openings', /\b(how many|openings?|seats?)\b/i],
+];
+const YES_TO_CARD = /^\W*(yes|yeah|yep|ok|okay|sure|interested|i am interested|im interested|avunu|haan|ha)\W*$/i;
+// { text } answered | { apply: true } they want the link | { missing } the ATS has no such detail | null not a job question
+function quickAnswer(job, text, { justShown = false } = {}) {
+  const t = String(text || '');
+  if (/\b(apply|application)\b/i.test(t) || (justShown && YES_TO_CARD.test(t))) return { apply: true };
+  if (/\b(details?|about (this|the) (job|post|position|role)|tell me more|more info\w*|description|jd)\b/i.test(t)) return { text: jobCardText(job) };
+  // "expecting 8 LPA" tells us something, "salary entha?" asks: only a question is answered here
+  const asking = /\?|\b(what|whats|which|how|when|where|tell|share|give|entha|enta|ekkada|ela|emiti|kya|kitna|kitni|kahan|batao)\b/i.test(t) || t.trim().split(/\s+/).length <= 3;
+  if (!asking) return null;
+  for (const [, field, label, re] of ASKS) {
+    if (re.test(t)) {
+      const v = job[field];
+      if (v && String(v).length) return { text: `${label}: ${Array.isArray(v) ? v.join(', ') : v}.` };
+      return { missing: label.replace(/^The /, '').toLowerCase() };
+    }
+  }
+  return null;
+}
 
 // what the model may read of the chat's memory
 function collectedView(conv) {
@@ -189,4 +233,4 @@ async function run(name, args, conv, ctx) {
 }
 
 const NAMES = ['get_candidate_profile', 'get_job_details', 'search_knowledge_base', 'save_candidate_data', 'send_apply_link', 'send_interview_link', 'handoff_to_recruiter'];
-module.exports = { run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };
+module.exports = { jobCardText, quickAnswer, run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };

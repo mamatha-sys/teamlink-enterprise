@@ -294,15 +294,42 @@ async function askModel(conv, cfg, input) {
   // WHICH JOBS ARE OPEN is never the model's to say: it invented jobs in the first live chats. The list, the "nothing found" and the choice of a job are done here, from the database.
   const offered = (JSON.parse(conv.collected || '{}').jobChoices || []).length > 0;
   const picked = offered ? T.pickedNumber(input) : null;
+  const remember = async (patch) => {
+    conv.collected = JSON.stringify({ ...JSON.parse(conv.collected || '{}'), ...patch });
+    await S.run('UPDATE "OmniWaConv" SET collected = ? WHERE id = ?', conv.collected, conv.id);
+  };
   if (picked) {
     const sel = await T.selectJob(conv, { number: picked }, ctx);
-    if (sel.selected) { job = sel.job; ctx.facts.push(JSON.stringify(job)); }
+    if (sel.selected) {
+      await remember({ cardShown: true });
+      return { ctx, calls, reply: T.jobCardText(sel.job), written: true };
+    }
   }
   const asksOther = job.available && !picked && T.askedAboutJob(input) && !T.titleHas(job.title, input);
   if ((!job.available && !picked) || asksOther) {
     const found = await T.offerJobs(conv, input).catch(() => ({ searched: false, jobs: [] }));
     if (found.jobs.length) return { ctx, calls, reply: T.jobListText(found.jobs, found.total), written: true };
     if (found.searched) return { ctx, calls, reply: T.NO_MATCH_TEXT, written: true };
+  }
+  // a question about this chat's job: answered from the ATS requirement, the model is not asked
+  if (job.available) {
+    const justShown = !!JSON.parse(conv.collected || '{}').cardShown;
+    const quick = T.quickAnswer(job, input, { justShown });
+    if (quick) await remember({ cardShown: false });
+    if (quick && quick.text) return { ctx, calls, reply: quick.text, written: true };
+    if (quick && quick.missing) {
+      ctx.handoff = `They asked for the ${quick.missing}, which is not on the requirement`;
+      return { ctx, calls, reply: `The ${quick.missing} is not in our record for this job yet. Our recruiter will confirm it and get back to you.`, written: true };
+    }
+    if (quick && quick.apply) {
+      await T.run('save_candidate_data', { interested: true }, conv, ctx);
+      const link = await T.run('send_apply_link', {}, conv, ctx);
+      calls.push({ tool: 'send_apply_link', args: {}, result: link });
+      if (link.sent) return { ctx, calls, reply: 'Thank you. Please apply here:', written: true };
+      if (/already/.test(String(link.note))) return { ctx, calls, reply: 'You already have the apply link above. Tell me if you need anything else.', written: true };
+      ctx.handoff = `Wants to apply for ${job.title}`;
+      return { ctx, calls, reply: 'Thank you for your interest. Our recruiter will contact you about this job soon.', written: true };
+    }
   }
   ctx.jobTitle = job.available ? job.title : null;
   const jobLine = job.available ? `The job this chat is about: ${JSON.stringify(job)}. Talk only about this job, never another one. Collect what is missing, then use send_apply_link.` : 'NO JOB is linked to this chat. Never name a job and never say a job is available, open, filled or closed. Ask what work they want.';

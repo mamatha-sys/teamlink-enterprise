@@ -37,7 +37,7 @@ const JOB_WORD = /\b(jobs?|positions?|openings?|vacanc(?:y|ies)|roles?)\b/i;
 const JOB_STATE = /\b(available|filled|open|closed|no longer|couldn'?t find|could not find|not find|don'?t have|do not have|we have)\b/i;
 function jobClaim(reply, title = null) {
   const own = String(title || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 3);
-  const hit = String(reply || '').split(/(?<=[.!?\n।])\s*/).find((s) => JOB_WORD.test(s) && JOB_STATE.test(s) && !own.some((w) => s.toLowerCase().includes(w)));
+  const hit = String(reply || '').split(/(?<=[.!?\n।])\s*/).find((s) => JOB_WORD.test(s) && JOB_STATE.test(s) && !own.some((w) => s.toLowerCase().includes(w)) && !(title && /\bthis (job|position|role|post)\b/i.test(s)));
   return hit ? `Says something about openings that it does not know: "${hit.trim().slice(0, 120)}"` : null;
 }
 
