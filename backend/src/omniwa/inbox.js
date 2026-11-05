@@ -121,7 +121,7 @@ async function detail(user, key) {
   let collected = {};
   try { collected = c ? JSON.parse(c.collected || '{}') : {}; } catch { collected = {}; }
   delete collected.applyLinkSentAt;
-  ['jobChoices', 'cardShown', 'promoJob', 'promoCardSent'].forEach((k) => { delete collected[k]; });
+  ['jobChoices', 'cardShown', 'promoJob', 'promoCardSent', 'intakeOn', 'intakeDone'].forEach((k) => { delete collected[k]; });
   return { conv: c, view: { key, ai: aiOf(c), window: { open: !!closesAt && closesAt > Date.now(), closesAt }, alreadyContacted: seen, stopped: blocked, collected, ownerName: c ? c.ownerName : null, leadName: type === 'LEAD' && c ? c.name : null } };
 }
 

@@ -321,6 +321,27 @@ async function askModel(conv, cfg, input) {
     if (found.jobs.length) return { ctx, calls, reply: T.jobListText(found.jobs, found.total), written: true };
     if (found.searched) return { ctx, calls, reply: T.NO_MATCH_TEXT, written: true };
   }
+  // YES to a promotion: TeamLink asks for the details itself, one at a time. A question in between is answered first, then the next detail is asked again with the next answer.
+  const now2 = JSON.parse(conv.collected || '{}');
+  if (T.isNo(input) && !now2.intakeDone) {
+    await T.run('save_candidate_data', { interested: false }, conv, ctx);
+    await remember({ intakeOn: false, intakeDone: true });
+    return { ctx, calls, reply: 'No problem. Thank you for your time.', written: true };
+  }
+  const startIntake = !now2.intakeOn && !now2.intakeDone && T.isYes(input) && (!job.available || !promoJob || now2.cardShown);
+  if (startIntake || (now2.intakeOn && !/\?/.test(input))) {
+    if (startIntake) { await T.run('save_candidate_data', { interested: true }, conv, ctx); await remember({ intakeOn: true, cardShown: false }); } else {
+      const asked = T.intakeNext(now2);
+      if (asked) await T.run('save_candidate_data', { [asked[0]]: input }, conv, ctx);
+    }
+    const next = T.intakeNext(JSON.parse(conv.collected || '{}'));
+    if (next) return { ctx, calls, reply: `${startIntake ? 'Thank you for your interest. I need a few details.\n' : ''}${next[1]}`, written: true };
+    await remember({ intakeOn: false, intakeDone: true });
+    ctx.handoff = 'Interested: their details are collected';
+    const link = job.available ? await T.run('send_apply_link', {}, conv, ctx) : null;
+    if (link) calls.push({ tool: 'send_apply_link', args: {}, result: link });
+    return { ctx, calls, reply: link && link.sent ? 'Thank you. I have noted your details. Please apply here, and our recruiter will contact you soon:' : 'Thank you. I have noted your details. Our recruiter will contact you soon.', written: true };
+  }
   // a question about this chat's job: answered from the ATS requirement, the model is not asked
   if (job.available) {
     const justShown = !!JSON.parse(conv.collected || '{}').cardShown;
@@ -395,9 +416,10 @@ async function runTurn(row, defaults, now = Date.now()) {
     if (gs && gs.campaignId !== conv.campaignId) {
       const promoJob = await T.jobOfCampaign(gs.campaignName);
       Object.assign(conv, { promoAt: gs.at, campaignId: gs.campaignId, campaignName: gs.campaignName, requirementId: promoJob || conv.requirementId });
-      const { promoCardSent, cardShown, ...keep } = JSON.parse(conv.collected || '{}');
+      const { promoCardSent, cardShown, intakeOn, intakeDone, ...keep } = JSON.parse(conv.collected || '{}');
       conv.collected = JSON.stringify({ ...keep, promoJob: promoJob || null });
-      await S.run('UPDATE "OmniWaConv" SET promoAt = ?, campaignId = ?, campaignName = ?, requirementId = ?, collected = ?, updatedAt = ? WHERE id = ?', gs.at, gs.campaignId, gs.campaignName, conv.requirementId, conv.collected, now, conv.id);
+      conv.aiTurns = 0;
+      await S.run('UPDATE "OmniWaConv" SET promoAt = ?, campaignId = ?, campaignName = ?, requirementId = ?, collected = ?, aiTurns = 0, updatedAt = ? WHERE id = ?', gs.at, gs.campaignId, gs.campaignName, conv.requirementId, conv.collected, now, conv.id);
     }
   }
   if (!ongoing && !promoted) {
@@ -453,7 +475,8 @@ async function runTurn(row, defaults, now = Date.now()) {
     await stamp('send_failed', { calls, output: reply, error: sent.error, ms, model: cfg.model });
     return { handoff: 'send_failed' };
   }
-  await S.run('UPDATE "OmniWaConv" SET aiTurns = aiTurns + 1, aiStartedAt = COALESCE(aiStartedAt, ?), lastAiAt = ?, updatedAt = ? WHERE id = ?', now, now, now, conv.id);
+  // only the model's own replies count against the limit: a list or a question from TeamLink costs nothing
+  await S.run('UPDATE "OmniWaConv" SET aiTurns = aiTurns + ?, aiStartedAt = COALESCE(aiStartedAt, ?), lastAiAt = ?, updatedAt = ? WHERE id = ?', got.written ? 0 : 1, now, now, now, conv.id);
   if (ctx.notInterested) await S.run('UPDATE "OmniWaConv" SET state = \'not_interested\', updatedAt = ? WHERE id = ?', now, conv.id);
   if (ctx.handoff) await handoff(conv, ctx.handoff, now);
   await stamp(ctx.handoff ? 'handoff_tool' : ctx.notInterested ? 'not_interested' : 'replied', { calls, output: reply, ms, model: cfg.model });

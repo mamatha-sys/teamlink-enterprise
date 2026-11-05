@@ -98,7 +98,7 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     console.log('\n-- promotion, interested, details, apply link, then a person');
     const conv0 = await convAt(phoneOf(1));
     check('the reply is tied to the promotion: job, campaign, owner', conv0.requirementId === job.id && !!conv0.campaignId && !!conv0.promoAt && !!conv0.ownerUserId, conv0);
-    await inbound(phoneOf(1), 'I am interested');
+    await inbound(phoneOf(1), 'sounds good to me');
     stub.script = [{ tool: 'get_candidate_profile', args: {} }, { tool: 'save_candidate_data', args: { interested: true, location: 'Hyderabad' } }, { reply: 'Great! When can you join, and what is your expected salary?' }];
     await run();
     let sent = await aiMsgs(a.id);
@@ -397,7 +397,7 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     await run();
     check('a candidate no campaign reached: Green Start is asked (every workspace, this number), and the AI stays out', gsSeen.length === 2 && gsSeen.every((x) => x.url.includes(`phone=${phoneOf(10)}`) && x.auth === 'Bearer zz-gs-token') && stub.calls.length === 0, gsSeen);
     gs.found = true;
-    await inbound(phoneOf(10), 'I am interested');
+    await inbound(phoneOf(10), 'sounds good to me');
     stub.script = [{ reply: 'Thank you, let me help.' }];
     await run();
     conv = await convAt(phoneOf(10));
@@ -423,6 +423,31 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     await run();
     check('Green Start not answering: nothing breaks, nobody gets a wrong AI reply', stub.calls.length === 0 && (await aiMsgs(j.id)).length === 0);
     gsServer.close();
+
+    // ---- 8b1. YES to a promotion: the details are asked in order
+    console.log('\n-- YES: the details');
+    const q = await mkCandidate(41, 'Queen');
+    await promote(q, 41);
+    await inbound(phoneOf(41), 'YES');
+    stub.calls.length = 0;
+    await run();
+    let qSent = await aiMsgs(q.id);
+    check('YES: thanks and the first question, the model is not asked', stub.calls.length === 0 && /Which city/.test(qSent[qSent.length - 1].body), qSent.map((x) => x.body));
+    for (const a of ['Hyderabad', 'B.Sc Nursing', '3 years', 'immediate', '30000', 'tomorrow 10 am']) {
+      await inbound(phoneOf(41), a);
+      await run();
+    }
+    conv = await convAt(phoneOf(41));
+    const got = JSON.parse(conv.collected);
+    qSent = await aiMsgs(q.id);
+    check('each answer is saved under its question, then thanks, and a recruiter is told', got.location === 'Hyderabad' && got.qualification === 'B.Sc Nursing' && got.experience === '3 years' && got.notice_period === 'immediate' && got.expected_salary === '30000' && got.availability === 'tomorrow 10 am' && conv.state === 'needs_human' && /recruiter will contact you/.test(qSent[qSent.length - 1].body) && stub.calls.length === 0, [got, conv.state]);
+    check('questions from TeamLink do not use up the AI replies', Number(conv.aiTurns) === 0, conv.aiTurns);
+    const nope = await mkCandidate(42, 'Nope');
+    await promote(nope, 42);
+    await inbound(phoneOf(42), 'No');
+    await run();
+    conv = await convAt(phoneOf(42));
+    check('NO: thanked, marked not interested', conv.state === 'not_interested' && /Thank you for your time/.test((await aiMsgs(nope.id)).pop().body), conv.state);
 
     // ---- 8b2. only what was promoted
     console.log('\n-- only what was promoted');

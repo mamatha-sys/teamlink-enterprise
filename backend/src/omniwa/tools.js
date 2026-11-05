@@ -112,6 +112,19 @@ const askedAboutJob = (text) => wordsOf(text).length > 0 && JOB_ASK.test(String(
 const pickedNumber = (text) => { const m = /^\D*([1-5])\D*$/.exec(String(text || '').trim()); return m ? Number(m[1]) : null; };
 const titleHas = (title, text) => wordsOf(text).some((w) => wordStarts(title, stemOf(w)));
 
+// YES to a promotion: the details are asked here, one question at a time, and saved. No model: on the live server it was too slow and could not hold the order (founder 2026-11-05)
+const INTAKE = [
+  ['location', 'Which city are you in now?'],
+  ['qualification', 'What is your qualification?'],
+  ['experience', 'How many years of experience do you have?'],
+  ['notice_period', 'What is your notice period? If you can join now, write "immediate".'],
+  ['expected_salary', 'What is your expected salary?'],
+  ['availability', 'When are you free for an interview?'],
+];
+const isYes = (t) => /^\W*(yes|yeah|yep|y|ok|okay|sure|interested|i am interested|im interested|i'm interested|avunu|haan|ha)\W*$/i.test(String(t || ''));
+const isNo = (t) => /^\W*(no|nope|no thanks|no thank you|not interested|vaddu|nahi)\W*$/i.test(String(t || ''));
+const intakeNext = (collected) => INTAKE.find(([k]) => !collected[k]) || null;
+
 // a Green Start campaign has no job field: "Nurses REQ-0620" in its name says which job it promotes
 async function jobOfCampaign(name) {
   const m = /\bREQ[-\s]?(\d{1,6})\b/i.exec(String(name || ''));
@@ -160,7 +173,7 @@ function quickAnswer(job, text, { justShown = false } = {}) {
 
 // what the model may read of the chat's memory
 function collectedView(conv) {
-  const { jobChoices, applyLinkSentAt, cardShown, promoJob, promoCardSent, ...rest } = JSON.parse(conv.collected || '{}');
+  const { jobChoices, applyLinkSentAt, cardShown, promoJob, promoCardSent, intakeOn, intakeDone, ...rest } = JSON.parse(conv.collected || '{}');
   return rest;
 }
 
@@ -185,7 +198,7 @@ async function profileFacts(conv) {
 async function saveData(conv, args, ctx) {
   const was = JSON.parse(conv.collected || '{}');
   const next = { ...was };
-  ['availability', 'expected_salary', 'notice_period', 'location'].forEach((k) => { const v = clean(args[k], 100); if (v) next[k] = v; });
+  ['availability', 'expected_salary', 'notice_period', 'location', 'experience', 'qualification'].forEach((k) => { const v = clean(args[k], 100); if (v) next[k] = v; });
   if (typeof args.interested === 'boolean') next.interested = args.interested;
   conv.collected = JSON.stringify(next);
   await S.run('UPDATE "OmniWaConv" SET collected = ?, updatedAt = ? WHERE id = ?', conv.collected, Date.now(), conv.id);
@@ -242,4 +255,4 @@ async function run(name, args, conv, ctx) {
 }
 
 const NAMES = ['get_candidate_profile', 'get_job_details', 'search_knowledge_base', 'save_candidate_data', 'send_apply_link', 'send_interview_link', 'handoff_to_recruiter'];
-module.exports = { jobOfCampaign, onlyThisJobText, jobCardText, quickAnswer, run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };
+module.exports = { isYes, isNo, intakeNext, jobOfCampaign, onlyThisJobText, jobCardText, quickAnswer, run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };
