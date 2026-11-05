@@ -12,8 +12,8 @@ import './monitoring.css';
 // ---------------------------------------------------------------------------
 // HRMS -> EMPLOYEE MONITORING (2026-11-04). How office PCs are used in work hours, from the TeamLink desktop agent the
 // employee installs and agrees to (backend: routes/monitoring.js, utils/monitoring.js; the agent: backend/agent/TeamLinkMonitor.ps1).
-//   HR / Admin  Live Dashboard · Reports · App usage · Productivity rules · Devices · Audit log · Settings · My activity
-//   TL / STL / Manager  Live Dashboard · Reports · App usage (their own team) · My activity
+//   HR / Admin  Live Dashboard · Reports · App usage · Alerts · Productivity rules · Devices · Audit log · Settings · My activity
+//   TL / STL / Manager  Live Dashboard · Reports · App usage · Alerts (their own team) · My activity
 //   everyone    My activity: their own day, their PCs and the notice they accepted
 // Only the app name, window title and active / idle time are recorded - never keystrokes, passwords, the clipboard,
 // screenshots or chat content - and only after the employee accepts the notice.
@@ -29,7 +29,7 @@ const dur = (sec) => (sec < 60 ? `${sec} sec` : sec < 3600 ? `${Math.round(sec /
 const pct = (v) => (v == null ? '—' : `${v}%`);
 const CAT_TONE = { productive: 'green', neutral: 'slate', unproductive: 'red' };
 const CAT_WORD = { productive: 'Productive', neutral: 'Neutral', unproductive: 'Unproductive' };
-const STATUS_TONE = { Online: 'green', Idle: 'amber', 'On break': 'teal', 'Clocked out': 'slate', 'On leave': 'violet', Offline: 'slate' };
+const STATUS_TONE = { Online: 'green', Idle: 'amber', 'On break': 'teal', 'Clocked out': 'slate', Stopped: 'red', 'On leave': 'violet', Offline: 'slate' };
 
 function useGet(url, params, deps = []) {
   const [st, setSt] = useState({ data: null, error: '', loading: true });
@@ -50,8 +50,8 @@ export default function EmployeeMonitoring() {
   const admin = !!(me.data && me.data.isAdmin);
   const lead = !!(me.data && me.data.isLead);
   const tabs = admin
-    ? [['overview', 'Live Dashboard'], ['reports', 'Reports'], ['usage', 'App usage'], ['categories', 'Productivity rules'], ['devices', 'Devices'], ['audit', 'Audit log'], ['settings', 'Settings'], ['mine', 'My activity']]
-    : lead ? [['overview', 'Live Dashboard'], ['reports', 'Reports'], ['usage', 'App usage'], ['mine', 'My activity']] : [['mine', 'My activity']];
+    ? [['overview', 'Live Dashboard'], ['reports', 'Reports'], ['usage', 'App usage'], ['alerts', 'Alerts'], ['categories', 'Productivity rules'], ['devices', 'Devices'], ['audit', 'Audit log'], ['settings', 'Settings'], ['mine', 'My activity']]
+    : lead ? [['overview', 'Live Dashboard'], ['reports', 'Reports'], ['usage', 'App usage'], ['alerts', 'Alerts'], ['mine', 'My activity']] : [['mine', 'My activity']];
   const tab = tabs.some(([k]) => k === params.get('tab')) ? params.get('tab') : tabs[0][0];
   const employee = params.get('employee');
   const go = (t, extra = {}) => setParams({ tab: t, ...extra });
@@ -80,6 +80,7 @@ export default function EmployeeMonitoring() {
             {tab === 'reports' && <Reports onOpen={(id) => go('reports', { employee: id })} />}
             {tab === 'usage' && <Usage />}
             {tab === 'audit' && <Audit />}
+            {tab === 'alerts' && <Alerts onOpen={(id) => go('alerts', { employee: id })} />}
             {tab === 'devices' && <Devices manage />}
             {tab === 'settings' && <Settings />}
             {tab === 'mine' && <Mine me={me} />}
@@ -226,6 +227,39 @@ function Usage() {
           </Panel>
         </div>
       )}
+    </>
+  );
+}
+
+// ------------------------------------------------------------------------------------------------ Alerts
+const ALERT_TONE = { idle: 'amber', stopped: 'red', offline: 'red', low: 'slate' };
+function Alerts({ onOpen }) {
+  const [from, setFrom] = useState(addDays(todayIst(), -6));
+  const [to, setTo] = useState(todayIst());
+  const [kind, setKind] = useState('');
+  const { data, error } = useGet('/monitoring/alerts', { from, to });
+  const conf = useGet('/monitoring/settings');
+  const all = (data && data.rows) || [];
+  const rows = all.filter((r) => !kind || r.kind === kind);
+  return (
+    <>
+      {conf.data && !conf.data.alertsEnabled && <div className="notice">Alerts are off. {conf.data.canEdit ? 'Switch them on in Settings.' : 'HR can switch them on.'}</div>}
+      <RangeBar from={from} to={to} setFrom={setFrom} setTo={setTo}>
+        <Combo value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Kind of alert">
+          <option value="">All alerts</option>
+          {Object.entries((data && data.kinds) || {}).map(([k, w]) => <option key={k} value={k}>{w}</option>)}
+        </Combo>
+      </RangeBar>
+      {error && <div className="notice red">{error}</div>}
+      <div className="tbl-wrap">
+        <table className="mon-table">
+          <thead><tr><th>When</th><th>Employee</th><th>Department</th><th>Alert</th><th>Detail</th></tr></thead>
+          <tbody>
+            {rows.map((r) => <tr key={r.id} className="row-link" onClick={() => onOpen(r.employeeId)}><td style={{ whiteSpace: 'nowrap' }}>{dt(r.at)}</td><td><b>{r.name}</b>{r.code && <div className="small-muted">{r.code}</div>}</td><td>{r.department || '—'}</td><td><Pill tone={ALERT_TONE[r.kind] || 'slate'}>{r.word}</Pill></td><td className="small-muted">{r.detail || '—'}</td></tr>)}
+            {data && !rows.length && <tr><td colSpan={5} className="small-muted">No alerts in these days.</td></tr>}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }
@@ -600,7 +634,7 @@ function Settings() {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (data) setForm({ workStart: data.workStart, workEnd: data.workEnd, breakStart: data.breakStart || '', breakEnd: data.breakEnd || '', idleThresholdMinutes: data.idleThresholdMinutes, retentionDays: data.retentionDays, policyText: data.policyText }); }, [data]);
+  useEffect(() => { if (data) setForm({ workStart: data.workStart, workEnd: data.workEnd, breakStart: data.breakStart || '', breakEnd: data.breakEnd || '', idleThresholdMinutes: data.idleThresholdMinutes, retentionDays: data.retentionDays, policyText: data.policyText, alertsEnabled: !!data.alertsEnabled, longIdleMinutes: data.longIdleMinutes, offlineMinutes: data.offlineMinutes, lowActivityHours: data.lowActivityHours }); }, [data]);
   if (error) return <div className="notice red">{error}</div>;
   if (!form) return <div className="small-muted">Loading…</div>;
   async function save() {
@@ -619,6 +653,14 @@ function Settings() {
           <label>Keep records for (days) <input type="number" min={7} max={730} value={form.retentionDays} onChange={(e) => setForm({ ...form, retentionDays: e.target.value })} /></label>
         </div>
         <div className="small-muted">Only work hours (India time) are recorded; anything outside them is thrown away. The lunch break counts as Break, not idle, and keeps no app details. Older records are deleted by themselves. Screenshots: <b>off</b> - TeamLink never takes screenshots or reads what is typed.</div>
+      </Panel>
+      <Panel title="Alerts" sub="Sent to the team lead and HR by the bell, each kind at most once a day per person. Never on leave, holidays, or during lunch.">
+        <label className="mon-check"><input type="checkbox" checked={form.alertsEnabled} onChange={(e) => setForm({ ...form, alertsEnabled: e.target.checked })} /> Send alerts</label>
+        <div className="mon-grid" style={{ marginTop: 8 }}>
+          <label>Long idle after (minutes) <input type="number" min={5} max={240} value={form.longIdleMinutes} onChange={(e) => setForm({ ...form, longIdleMinutes: e.target.value })} /></label>
+          <label>No signal after (minutes) <input type="number" min={5} max={240} value={form.offlineMinutes} onChange={(e) => setForm({ ...form, offlineMinutes: e.target.value })} /></label>
+          <label>Low activity under (hours in a day) <input type="number" min={1} max={12} value={form.lowActivityHours} onChange={(e) => setForm({ ...form, lowActivityHours: e.target.value })} /></label>
+        </div>
       </Panel>
       <Panel title={`Consent notice (version ${data.policyVersion})`} sub="Every employee reads and accepts this before anything is recorded. Changing it makes a new version that everyone accepts again.">
         <textarea rows={10} value={form.policyText} onChange={(e) => setForm({ ...form, policyText: e.target.value })} aria-label="Consent notice" style={{ width: '100%' }} />

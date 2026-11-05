@@ -1059,6 +1059,7 @@ model Employee {
   // Employee Monitoring (2026-11-04): office PCs, the consent, the activity (models at the end of this file)
   monitoringDevices         MonitoringDevice[]
   monitoringConsents        MonitoringConsent[]
+  monitoringAlerts          MonitoringAlert[]
   activityLogs              ActivityLog[]
   punches                   AttendancePunch[]
   attendanceRegularizations AttendanceRegularization[]
@@ -5223,6 +5224,20 @@ model MonitoringDevice {
   @@map("monitoring_devices")
 }
 
+model MonitoringAlert {
+  id         String   @id @default(cuid())
+  employeeId String   @map("employee_id")
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  kind       String // idle | stopped | offline | low
+  day        String // YYYY-MM-DD, India time
+  detail     String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([employeeId, kind, day])
+  @@index([day])
+  @@map("monitoring_alerts")
+}
+
 model MonitoringConsent {
   id            String   @id @default(cuid())
   employeeId    String   @map("employee_id")
@@ -5276,6 +5291,10 @@ model MonitoringSetting {
   workEnd              String   @default("18:30") @map("work_end")
   breakStart           String   @default("12:30") @map("break_start") // the daily lunch break, HH:MM India time ("" = none)
   breakEnd             String   @default("13:15") @map("break_end")
+  alertsEnabled        Boolean  @default(false) @map("alerts_enabled") // off until HR switches them on
+  longIdleMinutes      Int      @default(30) @map("long_idle_minutes")
+  offlineMinutes       Int      @default(15) @map("offline_minutes")
+  lowActivityHours     Int      @default(4) @map("low_activity_hours")
   idleThresholdMinutes Int      @default(5) @map("idle_threshold_minutes")
   retentionDays        Int      @default(90) @map("retention_days")
   screenshotsEnabled   Boolean  @default(false) @map("screenshots_enabled") // stays off: TeamLink takes no screenshots

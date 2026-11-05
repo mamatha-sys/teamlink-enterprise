@@ -19,7 +19,7 @@ param(
   [string]$Server = 'https://teamlink.teamlinks.in'
 )
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '1.6'
+$AgentVersion = '1.7'
 # older Windows would otherwise try an old, refused kind of secure connection
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, System.Security
@@ -187,6 +187,7 @@ function Restore-Saved {
 Restore-Saved
 $current = $null      # the open segment: app, title, idle, brk, start
 $lastSample = $null   # when the PC last looked: a long gap means it was asleep
+$stopping = $false    # the employee pressed Stop recording
 $paused = $false      # stopped by TeamLink (no consent, PC switched off)
 $onBreak = $false     # the employee pressed Pause: only the break itself is timed
 $clockedOutDay = ''   # the employee clocked out: nothing until the next day
@@ -294,7 +295,7 @@ function Ask-Consent($data) {
 function Heartbeat {
   # what the Live Dashboard shows: the app's name only, never a title
   $c = $script:current
-  $state = if ($script:clockedOutDay) { 'clockout' } elseif ($script:onBreak) { 'break' } else { $null }
+  $state = if ($script:stopping) { 'stopped' } elseif ($script:clockedOutDay) { 'clockout' } elseif ($script:onBreak) { 'break' } else { $null }
   $beat = @{ agentVersion = $AgentVersion; paused = $state; currentApp = $(if ($c -and -not $c.brk) { $c.app } else { '' }); idle = [bool]($c -and $c.idle) }
   $r = Call-Api 'POST' '/heartbeat' $beat $script:cfg.token
   if ($r.status -eq 200) {
@@ -321,7 +322,8 @@ function Update-Menu {
   $script:clockItem.Enabled = -not $script:clockedOutDay
   $script:tray.Text = if ($script:clockedOutDay) { 'TeamLink: clocked out for today, nothing is recorded' } elseif ($script:onBreak) { 'TeamLink: on a break, nothing is recorded' } else { 'TeamLink: recording PC use in work hours' }
 }
-[void]$menu.Items.Add('Stop recording and close', $null, { Flush; $script:tray.Visible = $false; [Windows.Forms.Application]::Exit() })
+# HR sees that it was stopped: stopping is allowed, and never silent
+[void]$menu.Items.Add('Stop recording and close', $null, { Flush; $script:stopping = $true; try { Heartbeat } catch {}; $script:tray.Visible = $false; [Windows.Forms.Application]::Exit() })
 [void]$menu.Items.Add('Do not start with Windows', $null, { Remove-Item -Path $StartupLink -ErrorAction SilentlyContinue; $script:tray.ShowBalloonTip(5000, 'TeamLink', 'It will not start with Windows any more.', 'Info') })
 $tray.ContextMenuStrip = $menu
 $tray.ShowBalloonTip(6000, 'TeamLink', 'Recording PC use in work hours: app names, window titles, active and idle time. Nothing you type is recorded.', 'Info')

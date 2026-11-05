@@ -13,6 +13,7 @@
 //   GET  /employee/:id?from=&to=                 the same reach, or :id = me (a look at someone else is audited)
 //   GET  /reports?from=&to=&department=&view=employee|daily|team&format=   the same reach (format=xlsx|csv|pdf: the file)
 //   GET  /usage?from=&to=&department=            top apps, top websites, the productive split
+//   GET  /alerts?from=&to=                       long idle, agent stopped, no signal, low activity: the same reach
 //   GET  /audit?from=&to=                        HR / Admin: who looked at what, exports, settings, PCs
 //   GET/POST/PUT/DELETE /app-categories          HR / Admin (GET: + apps seen with no category)
 //   GET/PUT /settings                            HR / Admin (GET is open to everyone: work hours and the notice)
@@ -38,6 +39,7 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 const publicSettings = (s) => ({
   workStart: s.workStart, workEnd: s.workEnd, breakStart: s.breakStart, breakEnd: s.breakEnd, idleThresholdMinutes: s.idleThresholdMinutes, retentionDays: s.retentionDays,
   screenshotsEnabled: false, policyVersion: s.policyVersion,
+  alertsEnabled: !!s.alertsEnabled, longIdleMinutes: s.longIdleMinutes, offlineMinutes: s.offlineMinutes, lowActivityHours: s.lowActivityHours,
 });
 
 // =============================================================== the agent
@@ -176,6 +178,13 @@ router.get('/reports', teamOnly, wrap(async (req, res) => {
 }));
 
 router.get('/usage', teamOnly, wrap(async (req, res) => res.json(await M.usage(req.query.from, req.query.to, req.query.department || '', req.access))));
+
+router.get('/alerts', teamOnly, wrap(async (req, res) => {
+  const day = /^\d{4}-\d{2}-\d{2}$/;
+  const to = day.test(String(req.query.to || '')) ? String(req.query.to) : M.todayIst();
+  const from = day.test(String(req.query.from || '')) ? String(req.query.from) : to;
+  res.json(await require('../utils/monitoringAlerts').list(from, to, req.access)); // eslint-disable-line global-require
+}));
 
 router.get('/audit', adminOnly, wrap(async (req, res) => res.json(await M.auditRows(req.query.from, req.query.to))));
 

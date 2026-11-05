@@ -592,6 +592,8 @@ const server = app.listen(PORT, () => {
   require('./utils/leaverHandover').startSweep();
   // Employee Monitoring: activity older than the retention days is deleted every 6 hours (utils/monitoring.js).
   require('./utils/monitoring').startSweep();
+  // Employee Monitoring alerts, every 5 minutes; off until HR switches them on (utils/monitoringAlerts.js).
+  require('./utils/monitoringAlerts').startSweep();
   // Automatic stage messages: sends the scheduled ones that are due (reads the table, so a restart
   // loses nothing). Does nothing until Admin / HR first save the rules (utils/autoMessages.js).
   require('./utils/autoMessages').startSweep();

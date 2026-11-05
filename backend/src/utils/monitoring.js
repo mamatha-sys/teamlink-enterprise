@@ -47,6 +47,7 @@ const FIRST_POLICY = POLICY_LINES.filter((l) => l !== PAUSE_LINE).map((l) => (l 
 
 // --- time ------------------------------------------------------------------------------------------------------
 const istDay = (d) => new Date(new Date(d).getTime() + IST).toISOString().slice(0, 10);
+const istTime = (d) => new Date(d).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true });
 const todayIst = () => istDay(Date.now());
 const atIst = (day, hm) => new Date(`${day}T${hm}:00+05:30`);
 const validDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) && !Number.isNaN(new Date(`${s}T00:00:00Z`).getTime());
@@ -98,6 +99,15 @@ async function saveSettings(user, body = {}) {
     const n = Math.round(Number(body.retentionDays));
     if (!(n >= 7 && n <= 730)) return { status: 400, error: 'Keep records for 7 to 730 days.' };
     data.retentionDays = n;
+  }
+  if (body.alertsEnabled !== undefined) data.alertsEnabled = body.alertsEnabled === true;
+  const limits = [['longIdleMinutes', 5, 240, 'Long idle: 5 to 240 minutes.'], ['offlineMinutes', 5, 240, 'No signal: 5 to 240 minutes.'], ['lowActivityHours', 1, 12, 'Low activity: 1 to 12 hours.']];
+  for (const [k, lo, hi, msg] of limits) {
+    if (body[k] !== undefined) {
+      const n = Math.round(Number(body[k]));
+      if (!(n >= lo && n <= hi)) return { status: 400, error: msg };
+      data[k] = n;
+    }
   }
   if (body.policyText !== undefined) {
     const t = String(body.policyText || '').trim().slice(0, 6000);
@@ -231,7 +241,7 @@ async function ingest(device, records) {
 
 // A heartbeat: what the PC is doing now, for the Live Dashboard (the app's name only, never a title).
 async function heartbeat(device, body = {}) {
-  const paused = ['break', 'clockout'].includes(body.paused) ? body.paused : null;
+  const paused = ['break', 'clockout', 'stopped'].includes(body.paused) ? body.paused : null;
   await prisma.monitoringDevice.update({
     where: { id: device.id },
     data: {
@@ -295,6 +305,7 @@ function liveStatus(dev, onLeave, now) {
   if (fresh) {
     if (dev.pausedState === 'break') return 'On break';
     if (dev.pausedState === 'clockout') return 'Clocked out';
+    if (dev.pausedState === 'stopped') return 'Stopped';
     return dev.currentIdle ? 'Idle' : 'Online';
   }
   return onLeave ? 'On leave' : 'Offline';
@@ -340,7 +351,7 @@ async function overview(day, access = null) {
   return {
     day: d, live,
     cards: {
-      tracked: new Set(devices.map((x) => x.employeeId)).size, online: count('Online'), idle: count('Idle'), offline: count('Offline'), onLeave: count('On leave'),
+      tracked: new Set(devices.map((x) => x.employeeId)).size, online: count('Online'), idle: count('Idle'), offline: count('Offline') + count('Stopped'), onLeave: count('On leave'),
       onBreak: count('On break') + count('Clocked out'), avgActiveHours: avg('activeHours'), avgIdleHours: avg('idleHours'),
     },
     rows,
@@ -540,6 +551,7 @@ async function purge() {
   const s = await settings();
   const cutoff = addDays(todayIst(), -s.retentionDays);
   const r = await prisma.activityLog.deleteMany({ where: { day: { lt: cutoff } } });
+  await prisma.monitoringAlert.deleteMany({ where: { day: { lt: cutoff } } });
   return r.count;
 }
 let TIMER = null;
@@ -552,6 +564,6 @@ function startSweep() {
 }
 
 module.exports = {
-  newSetupCode, readSetupCode, endSetupCode, agentSetupFile, CATEGORIES, DEFAULT_POLICY, AUDIT_ENTITIES, isMonitorAdmin, accessOf, heartbeat, usage, auditRows, settings, saveSettings, hasConsent, recordConsent, hashToken, deviceOf, registerDevice,
+  istTime, totalsOf, newSetupCode, readSetupCode, endSetupCode, agentSetupFile, CATEGORIES, DEFAULT_POLICY, AUDIT_ENTITIES, isMonitorAdmin, accessOf, heartbeat, usage, auditRows, settings, saveSettings, hasConsent, recordConsent, hashToken, deviceOf, registerDevice,
   ingest, categoryIndex, overview, employeeDetail, reportRows, uncategorised, pcActivity, purge, startSweep, todayIst, istDay, cleanTitle,
 };
