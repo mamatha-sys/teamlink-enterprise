@@ -28,6 +28,7 @@ const ask = (viewer, month = Cr.thisMonth()) => Z.call('GET', `/api/public/omni-
   const OTHER = `ZZTEST SCB Other ${Z.RUN}`;
   const positions = [];
   let savedLogins = null;
+  const callIds = [];
   try {
     if (String(process.env.GREENSTART_SSO_SECRET || '').length < 32) { Z.check('the sandbox has the shared secret', false, 'GREENSTART_SSO_SECRET missing'); return; }
     const noToken = await Z.call('GET', '/api/public/omni-voice/credit-use?month=2026-11&viewer=x');
@@ -61,6 +62,18 @@ const ask = (viewer, month = Cr.thisMonth()) => Z.call('GET', `/api/public/omni-
 
     const me = (await ask(r1.id)).body;
     const mine = (me.persons || [])[0];
+    await require('../src/calling/schema').ensure();
+    const stamp = new Date().toISOString();
+    const call = (id, by, status, secs, key = null) => prisma.$executeRawUnsafe('INSERT INTO "AiCall" ("id","mode","purpose","status","candidateId","dedupeKey","initiatedById","durationSec","createdAt","updatedAt") VALUES (?,\'live\',\'zz\',?,?,?,?,?,?,?)', id, status, `ZZTEST-${Z.RUN}`, key || id, by, secs, stamp, stamp);
+    callIds.push(`zzc1${Z.RUN}`, `zzc2${Z.RUN}`, `zzc3${Z.RUN}`, `zzc4${Z.RUN}`);
+    await call(callIds[0], r1.id, 'completed', 90);
+    await call(callIds[1], r1.id, 'no-answer', 0); // nobody talked: not counted
+    await call(callIds[2], r1.id, 'completed', 60, `web:${callIds[2]}`); // a browser talk, not a phone call
+    await call(callIds[3], null, 'completed', 30); // no person
+    const me2 = (await ask(r1.id)).body;
+    const m2 = me2.persons && me2.persons[0];
+    Z.check('B7 tokens per way of sending, AI calls counted only when they talked, a call with no person goes apart', m2 && m2.channels.whatsapp === 3 && m2.aiCalls.calls === 1 && m2.aiCalls.seconds === 90 && m2.aiCalls.tokens === 0 && me2.noPersonCalls.calls >= 1, m2 ? { c: m2.channels, ai: m2.aiCalls, none: me2.noPersonCalls } : me2);
+
     Z.check('B2 a Recruiter: scope me, ONLY their row, 3 tokens, department Education from the seat code, no department list', me.ok === true && me.viewer.scope === 'me' && me.persons.length === 1 && mine.userId === r1.id && mine.credits === 3 && mine.department === 'Education' && mine.seat === `EDU-ZZ${Z.RUN}` && me.viewer.departments.length === 0, me.ok ? { v: me.viewer, mine } : me);
 
     const team = (await ask(lead.id)).body;
@@ -95,6 +108,7 @@ const ask = (viewer, month = Cr.thisMonth()) => Z.call('GET', `/api/public/omni-
   } catch (err) { Z.fail += 1; console.log('FAIL  crashed', err && err.stack ? err.stack.slice(0, 900) : err); } finally {
     try {
       await prisma.$executeRawUnsafe('DELETE FROM "OmniCreditLedger" WHERE source = \'zz-scb\'');
+      for (const id of callIds) await prisma.$executeRawUnsafe('DELETE FROM "AiCall" WHERE "id" = ?', id); // eslint-disable-line no-await-in-loop
       await prisma.positionAssignment.deleteMany({ where: { positionId: { in: positions } } });
       await prisma.position.deleteMany({ where: { id: { in: positions } } });
       await prisma.appSetting.deleteMany({ where: { key: 'omni.gs.deptLogins' } });

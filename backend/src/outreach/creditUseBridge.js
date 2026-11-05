@@ -8,6 +8,9 @@
 //   past        TeamLink tokens of people not in a seat now, by department, with no names: past credits stay in the month's history.
 //   company     every seat holder's tokens + joinings, only for the "costly" yardstick. Green Start never shows these rows.
 //   workspaces  Green Start workspace id -> department (utils/omniDeptLogins.js), for the sends no person can be named for.
+//   channels    (founder 2026-11-05) tokens per way of sending: { whatsapp, sms, email, call }, from the ledger, on every person and past row.
+//   aiCalls     AI phone calls that really talked (AiCall live + completed, browser talks left out): ONE source for every AI call, because Green Start only keeps a
+//               history copy of them. Counted to who started the call or its campaign; calls with no such person go to noPersonCalls. Tokens = calls x the Credits "call" cost.
 // A login that is not active here is refused. Reads only; writes nothing.
 // ---------------------------------------------------------------------------
 const prisma = require('../db');
@@ -54,6 +57,30 @@ async function interviewsBy(ids, from, to) {
   return out;
 }
 
+/** Ledger tokens per way of sending. -> userId -> { whatsapp, sms, email, call } (live, not failed; test messages use no tokens) */
+async function channelsBy(from, to) {
+  const rows = await prisma.$queryRawUnsafe('SELECT userId u, channel c, COALESCE(SUM(credits),0) t FROM "OmniCreditLedger" WHERE at >= ? AND at < ? AND mode = \'live\' AND result <> \'failed\' AND userId IS NOT NULL GROUP BY userId, channel', from, to);
+  const out = new Map();
+  rows.forEach((r) => { const o = out.get(r.u) || {}; o[r.c] = (o[r.c] || 0) + num(r.t); out.set(r.u, o); });
+  return out;
+}
+
+/** AI calls of the month that really talked. -> { by: Map(userId -> { calls, seconds }), none: { calls, seconds } } */
+async function aiCallsBy(from, to, known) {
+  const by = new Map(); const none = { calls: 0, seconds: 0 };
+  let rows = [];
+  try {
+    await require('../calling/schema').ensure(); // eslint-disable-line global-require
+    rows = await prisma.$queryRawUnsafe(`SELECT COALESCE(a."initiatedById", c."createdById") u, COUNT(*) n, COALESCE(SUM(a."durationSec"),0) s FROM "AiCall" a LEFT JOIN "AiCallCampaign" c ON c."id" = a."campaignId"
+      WHERE a."mode" = 'live' AND a."status" = 'completed' AND COALESCE(a."dedupeKey",'') NOT LIKE 'web:%' AND a."createdAt" >= ? AND a."createdAt" < ? GROUP BY 1`, new Date(from).toISOString(), new Date(to).toISOString());
+  } catch { rows = []; } // no calls table yet
+  rows.forEach((r) => {
+    if (r.u && known.has(r.u)) by.set(r.u, { calls: num(r.n), seconds: num(r.s) });
+    else { none.calls += num(r.n); none.seconds += num(r.s); }
+  });
+  return { by, none };
+}
+
 /** -> { ok:true, ... } or { ok:false, code, error } (never throws for an unknown login). */
 async function forOmni(viewerId, month) {
   const id = String(viewerId || '').trim().slice(0, 80);
@@ -75,22 +102,28 @@ async function forOmni(viewerId, month) {
   const ids = rows.map((r) => r.userId);
   const replyBy = await Ins.repliesByOwner(ids, from, to);
   const intBy = await interviewsBy(ids, from, to);
+  await Cr.ensureTables();
+  const chanBy = await channelsBy(from, to);
+  const companyIds = new Set([...holders.keys(), ...ids]);
+  const calls = await aiCallsBy(from, to, new Set(everybody.rows.map((r) => r.userId)));
+  const perCall = num(act.rules.cost.call);
+  const aiOf = (id) => { const c = calls.by.get(id) || { calls: 0, seconds: 0 }; return { ...c, tokens: c.calls * perCall }; };
   const persons = rows.map((r) => {
     const h = holders.get(r.userId);
-    return { userId: r.userId, name: r.name, code: r.code || null, seat: h ? h.seat : null, department: (h && h.department) || r.department || 'No department', credits: r.used, sent: r.sent, replies: replyBy.get(r.userId) || 0, interviews: intBy.get(r.userId) || 0, joinings: r.joinings };
+    const ai = aiOf(r.userId);
+    return { userId: r.userId, name: r.name, code: r.code || null, seat: h ? h.seat : null, department: (h && h.department) || r.department || 'No department', credits: r.used + ai.tokens, sent: r.sent, replies: replyBy.get(r.userId) || 0, interviews: intBy.get(r.userId) || 0, joinings: r.joinings, channels: chanBy.get(r.userId) || {}, aiCalls: ai };
   });
 
-  await Cr.ensureTables();
   const ledger = await prisma.$queryRawUnsafe('SELECT userId u, department d, COUNT(*) n, COALESCE(SUM(credits),0) c FROM "OmniCreditLedger" WHERE at >= ? AND at < ? AND mode = \'live\' AND result <> \'failed\' AND userId IS NOT NULL GROUP BY userId, department', from, to);
   const pastBy = new Map();
   ledger.filter((r) => !holders.has(r.u) && !ids.includes(r.u)).forEach((r) => {
     const k = r.d || 'No department';
-    const o = pastBy.get(k) || { department: k, credits: 0, sent: 0 };
+    const o = pastBy.get(k) || { department: k, credits: 0, sent: 0, channels: {} };
     o.credits += num(r.c); o.sent += num(r.n);
+    Object.entries(chanBy.get(r.u) || {}).forEach(([c, t]) => { o.channels[c] = (o.channels[c] || 0) + t; });
     pastBy.set(k, o);
   });
 
-  const companyIds = new Set([...holders.keys(), ...ids]);
   const departments = [...new Set([...(sc.departments || []), ...persons.map((p) => p.department)])];
   return {
     ok: true, month: m,
@@ -98,7 +131,8 @@ async function forOmni(viewerId, month) {
     cost: act.rules.cost,
     persons,
     past: [...pastBy.values()],
-    company: [...everybody.rows, ...rows].filter((r, i, all) => companyIds.has(r.userId) && all.findIndex((x) => x.userId === r.userId) === i).map((r) => ({ userId: r.userId, credits: r.used, joinings: r.joinings })),
+    company: [...everybody.rows, ...rows].filter((r, i, all) => companyIds.has(r.userId) && all.findIndex((x) => x.userId === r.userId) === i).map((r) => ({ userId: r.userId, credits: r.used + aiOf(r.userId).tokens, joinings: r.joinings })),
+    noPersonCalls: { ...calls.none, tokens: calls.none.calls * perCall },
     workspaces: await workspaceDepartments(),
   };
 }
