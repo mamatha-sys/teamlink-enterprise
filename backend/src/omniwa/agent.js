@@ -23,8 +23,9 @@ const Live = require('./live');
 const delivery = require('../utils/messageDelivery');
 
 const AI_NAME = 'AI assistant';
-const MAX_STEPS = 5;
-const MODEL_TIMEOUT_MS = 120000;
+// founder 2026-11-05: replies took a minute. Each model step costs 5-15 s on this server, so at most 3, and one that hangs gives way to the fallback.
+const MAX_STEPS = 3;
+const MODEL_TIMEOUT_MS = 45000;
 const FALLBACK_GAP_MS = 12 * 3600000;
 const clip = (v, n) => S.clip(v, n);
 // founder 2026-11-05: nobody should press a button each time. A chat the AI passed on because it had no answer comes back to it with the person's next message.
@@ -337,6 +338,7 @@ async function askModel(conv, cfg, input) {
   const history = await memory(conv, cfg.memoryCount);
   if (!history.length) history.push({ role: 'user', content: clip(input, 1500) });
   for (let step = 0; step < MAX_STEPS; step += 1) {
+    if (step === MAX_STEPS - 1) history.push({ role: 'user', content: 'Do not use a tool now. Answer with {"reply":"your short message"}.' });
     const out = await ai.chatJson(system, history, { model: cfg.model || undefined, timeoutMs: MODEL_TIMEOUT_MS }); // eslint-disable-line no-await-in-loop
     const reply = typeof out.reply === 'string' ? out.reply.trim() : '';
     if (reply) return { ctx, calls, reply }; // a small model may send both: the words win, the tool is not run on a guess
@@ -475,7 +477,7 @@ async function tick(now = Date.now(), { force = false } = {}) {
 let timer = null;
 function start() {
   if (timer || process.env.NODE_ENV === 'test' || require('../utils/sandbox').isSandbox()) return; // eslint-disable-line global-require
-  timer = setInterval(() => { tick().catch((e) => console.error('[omni-wa] tick:', e && e.message)); }, 3000); // eslint-disable-line no-console
+  timer = setInterval(() => { tick().catch((e) => console.error('[omni-wa] tick:', e && e.message)); }, 1000); // eslint-disable-line no-console
   if (timer.unref) timer.unref();
 }
 

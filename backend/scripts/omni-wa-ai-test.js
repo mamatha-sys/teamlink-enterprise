@@ -99,7 +99,7 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     const conv0 = await convAt(phoneOf(1));
     check('the reply is tied to the promotion: job, campaign, owner', conv0.requirementId === job.id && !!conv0.campaignId && !!conv0.promoAt && !!conv0.ownerUserId, conv0);
     await inbound(phoneOf(1), 'I am interested');
-    stub.script = [{ tool: 'get_candidate_profile', args: {} }, { tool: 'get_job_details', args: {} }, { tool: 'save_candidate_data', args: { interested: true, location: 'Hyderabad' } }, { reply: 'Great! When can you join, and what is your expected salary?' }];
+    stub.script = [{ tool: 'get_candidate_profile', args: {} }, { tool: 'save_candidate_data', args: { interested: true, location: 'Hyderabad' } }, { reply: 'Great! When can you join, and what is your expected salary?' }];
     await run();
     let sent = await aiMsgs(a.id);
     const sys = stub.calls[stub.calls.length - 1].messages[0].content;
