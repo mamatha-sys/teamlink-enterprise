@@ -507,7 +507,44 @@ function Devices({ manage = false }) {
 }
 
 // ------------------------------------------------------------------------------------------------ Setting up a PC (Settings, My activity)
-function SetUpPc() {
+// A one-time code to type into the agent instead of a password. HR / Admin pick the employee; anyone else gets their own.
+function SetUpCode({ pick = false }) {
+  const [q, setQ] = useState('');
+  const [found, setFound] = useState([]);
+  const [who, setWho] = useState(null);
+  const [out, setOut] = useState(null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    if (!pick || q.trim().length < 2 || (who && who.name === q)) { setFound([]); return undefined; }
+    const t = setTimeout(() => { api.get('/monitoring/people', { params: { q } }).then((r) => setFound(r.data.rows || [])).catch(() => setFound([])); }, 250);
+    return () => clearTimeout(t);
+  }, [q, pick]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function make() {
+    setErr(''); setOut(null);
+    try { const r = await api.post('/monitoring/setup-code', pick ? { employeeId: who.id } : {}); setOut(r.data); } catch (e) { setErr(errOf(e, 'Could not make a code.')); }
+  }
+  return (
+    <div className="mon-code">
+      <b>Set-up code</b>
+      <div className="small-muted">{pick ? 'No password needed: make a code for the employee and type it into the agent.' : 'No password needed: type this code into the agent.'} One use, 30 minutes.</div>
+      {pick && (
+        <div className="mon-bar" style={{ margin: '8px 0 0' }}>
+          <input type="search" placeholder="Search the employee's name or code" value={q} onChange={(e) => { setQ(e.target.value); setWho(null); setOut(null); }} aria-label="Employee" />
+        </div>
+      )}
+      {pick && found.length > 0 && !who && (
+        <ul className="mon-pick">
+          {found.map((e) => <li key={e.id}><button type="button" className="btn btn-sm btn-ghost" onClick={() => { setWho(e); setQ(e.name); setFound([]); }}>{e.name}<span className="small-muted">{[e.employeeCode, e.department].filter(Boolean).map((x) => ` · ${x}`).join('')}</span></button></li>)}
+        </ul>
+      )}
+      <button type="button" className="btn" style={{ marginTop: 8 }} disabled={pick && !who} onClick={make}>{pick ? 'Make the code' : 'Get my code'}</button>
+      {err && <div className="notice red" style={{ marginTop: 8 }}>{err}</div>}
+      {out && <div className="mon-code-box"><span>{out.code}</span><div className="small-muted">{`For ${out.employee}. The employee reads and accepts the notice themself on the PC.`}</div></div>}
+    </div>
+  );
+}
+
+function SetUpPc({ pick = false }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   async function download() {
@@ -525,11 +562,13 @@ function SetUpPc() {
       <ol className="mon-steps">
         <li>On the office PC, sign in to TeamLink and press <b>Download the PC agent</b>. If the browser warns about the file, choose <b>Keep</b>.</li>
         <li>Double-click the downloaded file <b>TeamLinkMonitorSetup.cmd</b>. If Windows shows a blue box, press <b>More info</b> → <b>Run anyway</b>.</li>
-        <li>The employee signs in with their own TeamLink email and password, reads the notice and accepts it.</li>
+        <li>Type the <b>set-up code</b> below into the agent, or sign in with the employee&apos;s own TeamLink email and password.</li>
+        <li>The employee reads the notice and accepts it.</li>
         <li>Done. A TeamLink icon stays next to the clock, it starts with Windows, and the PC appears under <b>Devices</b>.</li>
       </ol>
       <button type="button" className="btn btn-primary" style={{ marginTop: 10 }} disabled={busy} onClick={download}>{busy ? 'Downloading…' : 'Download the PC agent'}</button>
       {err && <div className="notice red" style={{ marginTop: 8 }}>{err}</div>}
+      <SetUpCode pick={pick} />
     </Panel>
   );
 }
@@ -562,7 +601,7 @@ function Settings() {
       <Panel title={`Consent notice (version ${data.policyVersion})`} sub="Every employee reads and accepts this before anything is recorded. Changing it makes a new version that everyone accepts again.">
         <textarea rows={10} value={form.policyText} onChange={(e) => setForm({ ...form, policyText: e.target.value })} aria-label="Consent notice" style={{ width: '100%' }} />
       </Panel>
-      <SetUpPc />
+      <SetUpPc pick />
       {msg && <div className="notice green">{msg}</div>}
       {err && <div className="notice red">{err}</div>}
       <button type="button" className="btn btn-primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>

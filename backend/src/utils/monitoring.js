@@ -134,6 +134,34 @@ async function registerDevice({ employeeId, deviceName, os }) {
   return { token, device };
 }
 
+// --- one-time set-up codes (founder 2026-11-05: "naa emp login isthey, theeskovatledhu, developer dhi isthey theeskovatledhu") ----
+// HR / Admin, or the employee, gets a code in TeamLink and types it into the agent instead of a password: nobody hands a password to
+// a set-up, and a service login can set up a PC for an employee. One use, 30 minutes, kept only as a hash (AppSetting). The notice
+// is still shown and accepted at the PC, by the employee.
+const CODE_PREFIX = 'monitoring.code.';
+const CODE_MS = 30 * 60000;
+const CODE_ABC = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0 / O or 1 / I / L: read off a screen
+const codeKey = (c) => CODE_PREFIX + hashToken(String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, ''));
+async function newSetupCode(employeeId, user) {
+  const raw = [...crypto.randomBytes(8)].map((x) => CODE_ABC[x % CODE_ABC.length]).join('');
+  const until = new Date(Date.now() + CODE_MS).toISOString();
+  // codes past their time go, and this employee's older code with them
+  const old = await prisma.appSetting.findMany({ where: { key: { startsWith: CODE_PREFIX } } });
+  const drop = old.filter((r) => { try { const v = JSON.parse(r.value); return v.until < new Date().toISOString() || v.employeeId === employeeId; } catch { return true; } }).map((r) => r.key);
+  if (drop.length) await prisma.appSetting.deleteMany({ where: { key: { in: drop } } });
+  await prisma.appSetting.create({ data: { key: codeKey(raw), value: JSON.stringify({ employeeId, until, by: user ? user.name || null : null }), updatedById: user ? user.id : null, updatedByName: user ? user.name || null : null } });
+  return { code: `${raw.slice(0, 4)}-${raw.slice(4)}`, until };
+}
+async function readSetupCode(code) {
+  const row = await prisma.appSetting.findUnique({ where: { key: codeKey(code) } });
+  if (!row) return null;
+  try {
+    const v = JSON.parse(row.value);
+    return v.until > new Date().toISOString() ? v : null;
+  } catch { return null; }
+}
+const endSetupCode = (code) => prisma.appSetting.deleteMany({ where: { key: codeKey(code) } });
+
 // --- one batch from the agent -------------------------------------------------------------------------------------------
 const cleanApp = (s) => String(s || '').trim().replace(/\.exe$/i, '').replace(/[^\w .+-]/g, '').slice(0, 80);
 function cleanTitle(app, title) {
@@ -496,6 +524,6 @@ function startSweep() {
 }
 
 module.exports = {
-  agentSetupFile, CATEGORIES, DEFAULT_POLICY, AUDIT_ENTITIES, isMonitorAdmin, accessOf, heartbeat, usage, auditRows, settings, saveSettings, hasConsent, recordConsent, hashToken, deviceOf, registerDevice,
+  newSetupCode, readSetupCode, endSetupCode, agentSetupFile, CATEGORIES, DEFAULT_POLICY, AUDIT_ENTITIES, isMonitorAdmin, accessOf, heartbeat, usage, auditRows, settings, saveSettings, hasConsent, recordConsent, hashToken, deviceOf, registerDevice,
   ingest, categoryIndex, overview, employeeDetail, reportRows, uncategorised, pcActivity, purge, startSweep, todayIst, istDay, cleanTitle,
 };

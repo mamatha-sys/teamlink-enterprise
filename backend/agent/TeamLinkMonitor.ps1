@@ -19,7 +19,7 @@ param(
   [string]$Server = 'https://teamlink.teamlinks.in'
 )
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '1.4'
+$AgentVersion = '1.5'
 # older Windows would otherwise try an old, refused kind of secure connection
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, System.Security
@@ -119,19 +119,22 @@ function Show-Notice($text, $version) {
 $script:lastEmail = ''
 function Ask-Login {
   $f = New-Object Windows.Forms.Form
-  $f.Text = 'TeamLink - sign in to set up this PC'; $f.Width = 420; $f.Height = 260; $f.StartPosition = 'CenterScreen'; $f.TopMost = $true
-  $l1 = New-Object Windows.Forms.Label; $l1.Text = 'Your TeamLink email'; $l1.Left = 20; $l1.Top = 18; $l1.Width = 360
-  $e = New-Object Windows.Forms.TextBox; $e.Left = 20; $e.Top = 40; $e.Width = 360; $e.Text = $script:lastEmail
-  $l2 = New-Object Windows.Forms.Label; $l2.Text = 'Password'; $l2.Left = 20; $l2.Top = 72; $l2.Width = 360
-  $p = New-Object Windows.Forms.TextBox; $p.Left = 20; $p.Top = 94; $p.Width = 360; $p.UseSystemPasswordChar = $true
-  $show = New-Object Windows.Forms.CheckBox; $show.Text = 'Show password'; $show.Left = 20; $show.Top = 122; $show.Width = 200
+  $f.Text = 'TeamLink - set up this PC'; $f.Width = 420; $f.Height = 320; $f.StartPosition = 'CenterScreen'; $f.TopMost = $true
+  $l0 = New-Object Windows.Forms.Label; $l0.Text = 'Set-up code from TeamLink (if you have one)'; $l0.Left = 20; $l0.Top = 14; $l0.Width = 360
+  $c = New-Object Windows.Forms.TextBox; $c.Left = 20; $c.Top = 34; $c.Width = 360; $c.CharacterCasing = 'Upper'
+  $lo = New-Object Windows.Forms.Label; $lo.Text = 'or sign in with your own TeamLink login:'; $lo.Left = 20; $lo.Top = 68; $lo.Width = 360
+  $l1 = New-Object Windows.Forms.Label; $l1.Text = 'Email'; $l1.Left = 20; $l1.Top = 90; $l1.Width = 360
+  $e = New-Object Windows.Forms.TextBox; $e.Left = 20; $e.Top = 110; $e.Width = 360; $e.Text = $script:lastEmail
+  $l2 = New-Object Windows.Forms.Label; $l2.Text = 'Password'; $l2.Left = 20; $l2.Top = 138; $l2.Width = 360
+  $p = New-Object Windows.Forms.TextBox; $p.Left = 20; $p.Top = 158; $p.Width = 360; $p.UseSystemPasswordChar = $true
+  $show = New-Object Windows.Forms.CheckBox; $show.Text = 'Show password'; $show.Left = 20; $show.Top = 186; $show.Width = 200
   $show.Add_CheckedChanged({ $p.UseSystemPasswordChar = -not $show.Checked }.GetNewClosure())
-  $ok = New-Object Windows.Forms.Button; $ok.Text = 'Set up this PC'; $ok.Left = 20; $ok.Top = 158; $ok.Width = 160; $ok.DialogResult = 'OK'
-  $no = New-Object Windows.Forms.Button; $no.Text = 'Cancel'; $no.Left = 200; $no.Top = 158; $no.Width = 100; $no.DialogResult = 'Cancel'
-  $f.Controls.AddRange(@($l1, $e, $l2, $p, $show, $ok, $no)); $f.AcceptButton = $ok; $f.CancelButton = $no
+  $ok = New-Object Windows.Forms.Button; $ok.Text = 'Set up this PC'; $ok.Left = 20; $ok.Top = 222; $ok.Width = 160; $ok.DialogResult = 'OK'
+  $no = New-Object Windows.Forms.Button; $no.Text = 'Cancel'; $no.Left = 200; $no.Top = 222; $no.Width = 100; $no.DialogResult = 'Cancel'
+  $f.Controls.AddRange(@($l0, $c, $lo, $l1, $e, $l2, $p, $show, $ok, $no)); $f.AcceptButton = $ok; $f.CancelButton = $no
   if ($f.ShowDialog() -ne 'OK') { return $null }
   $script:lastEmail = $e.Text.Trim()
-  return @{ email = $e.Text.Trim(); password = $p.Text }
+  return @{ code = $c.Text.Trim(); email = $e.Text.Trim(); password = $p.Text }
 }
 
 function Register {
@@ -140,13 +143,15 @@ function Register {
   while ($true) {
     $login = Ask-Login
     if (-not $login) { return $null }
-    $body = @{ email = $login.email; password = $login.password; deviceName = $env:COMPUTERNAME; os = $os }
+    $body = @{ deviceName = $env:COMPUTERNAME; os = $os }
+    if ($login.code) { $body.setupCode = $login.code } else { $body.email = $login.email; $body.password = $login.password }
     if ($version) { $body.acceptPolicyVersion = $version }
     $r = Call-Api 'POST' '/devices/register' $body $null
     if ($r.status -eq 412 -and $r.data.consentRequired) {
       if (-not (Show-Notice $r.data.policyText $r.data.policyVersion)) { [Windows.Forms.MessageBox]::Show('Nothing was set up and nothing is recorded.', 'TeamLink') | Out-Null; return $null }
       $version = $r.data.policyVersion
-      $r = Call-Api 'POST' '/devices/register' (@{ email = $login.email; password = $login.password; deviceName = $env:COMPUTERNAME; os = $os; acceptPolicyVersion = $version }) $null
+      $body.acceptPolicyVersion = $version
+      $r = Call-Api 'POST' '/devices/register' $body $null
     }
     if ($r.status -eq 201) {
       $cfg = @{ server = $script:Server; token = $r.data.deviceToken; employee = $r.data.employee }

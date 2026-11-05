@@ -5,6 +5,7 @@
 //   POST /devices/register   { email, password, deviceName, os, acceptPolicyVersion? }   the employee's own TeamLink login.
 //                            -> 412 { consentRequired, policyVersion, policyText } until they accept the notice, then
 //                            -> { deviceToken, settings }  (the token is shown once; only its hash is kept)
+//                            { setupCode, deviceName, os, acceptPolicyVersion? }   the same with a one-time code from TeamLink
 //   POST /activity           { records: [{ appName, windowTitle, start, end, isIdle }] }   every 1-5 minutes
 //   POST /heartbeat          -> { settings, consentRequired }   updates last seen
 // THE SCREENS (a TeamLink login; HR / Admin see everyone, anybody else only themselves):
@@ -17,6 +18,8 @@
 //   GET/PUT /settings                            HR / Admin (GET is open to everyone: work hours and the notice)
 //   GET  /devices, PUT /devices/:id/deactivate   HR / Admin all; an employee their own PCs
 //   GET  /me, POST /me/consent                   my notice, my consent, my PCs
+//   POST /setup-code { employeeId? }              a one-time code for the agent: HR / Admin for anyone, an employee for themselves
+//   GET  /people?q=                              HR / Admin: find an employee for a code
 //   GET  /agent                                  the double-click setup file holding the PC agent, for any TeamLink login
 // The general API limit counts an agent per device (utils/apiRateLimit.js), with its own strict limits.
 // ---------------------------------------------------------------------------
@@ -40,52 +43,65 @@ const publicSettings = (s) => ({
 // =============================================================== the agent
 router.post('/devices/register', wrap(async (req, res) => {
   const b = req.body || {};
-  const email = String(b.email || '').trim();
-  const pw = String(b.password || '');
-  if (!email || !pw) return fail(res, 400, 'Type your TeamLink email and password.');
-  const { isLocked, MAX_FAILED_LOGINS, LOCK_MINUTES } = require('../utils/passwordPolicy'); // eslint-disable-line global-require
-  const { accounts } = await require('../utils/loginAccounts').resolveIdentifier(email); // eslint-disable-line global-require
-  // the same rules as the website's sign-in: a locked login says so, and wrong tries lock it
-  if (accounts.length && accounts.every(isLocked)) {
-    const until = accounts.map((u) => new Date(u.lockedUntil).getTime()).sort((a, b) => a - b)[0];
-    const mins = Math.max(1, Math.ceil((until - Date.now()) / 60000));
-    return fail(res, 423, `This login is locked after too many wrong passwords. Try again in ${mins} minute${mins === 1 ? '' : 's'}.`);
-  }
-  const matched = [];
-  for (const u of accounts) {
-    // eslint-disable-next-line no-await-in-loop
-    if (!isLocked(u) && u.passwordHash && await bcrypt.compare(pw, u.passwordHash)) matched.push(u);
-  }
-  if (!matched.length) {
-    if (accounts.length === 1) {
-      const failed = (accounts[0].failedLoginCount || 0) + 1;
-      const lock = failed >= MAX_FAILED_LOGINS;
-      await prisma.user.update({ where: { id: accounts[0].id }, data: lock ? { failedLoginCount: 0, lockedUntil: new Date(Date.now() + LOCK_MINUTES * 60000) } : { failedLoginCount: failed } }).catch(() => {});
+  // a one-time code from TeamLink, or the employee's own email and password
+  const setupCode = String(b.setupCode || '').trim();
+  let who;
+  if (setupCode) {
+    const c = await M.readSetupCode(setupCode);
+    if (!c) return fail(res, 401, 'This set-up code is wrong or has expired. Get a new one from TeamLink.');
+    const emp = await prisma.employee.findUnique({ where: { id: c.employeeId }, select: { id: true, name: true, employmentStatus: true } });
+    if (!emp || ['Exited', 'Relieved', 'Terminated'].includes(emp.employmentStatus)) return fail(res, 403, 'This employee is not active.');
+    who = { employeeId: emp.id, name: emp.name, userId: null };
+  } else {
+    const email = String(b.email || '').trim();
+    const pw = String(b.password || '');
+    if (!email || !pw) return fail(res, 400, 'Type your TeamLink email and password.');
+    const { isLocked, MAX_FAILED_LOGINS, LOCK_MINUTES } = require('../utils/passwordPolicy'); // eslint-disable-line global-require
+    const { accounts } = await require('../utils/loginAccounts').resolveIdentifier(email); // eslint-disable-line global-require
+    // the same rules as the website's sign-in: a locked login says so, and wrong tries lock it
+    if (accounts.length && accounts.every(isLocked)) {
+      const until = accounts.map((u) => new Date(u.lockedUntil).getTime()).sort((a, b) => a - b)[0];
+      const mins = Math.max(1, Math.ceil((until - Date.now()) / 60000));
+      return fail(res, 423, `This login is locked after too many wrong passwords. Try again in ${mins} minute${mins === 1 ? '' : 's'}.`);
     }
-    await logAudit({ action: 'Monitoring agent: wrong sign-in', entity: 'User', toValue: email.slice(0, 120), reason: `IP ${ipOf(req)}` }).catch(() => {});
-    return fail(res, 401, 'The email or password is not right. Use the same email and password as the TeamLink website.');
+    const matched = [];
+    for (const u of accounts) {
+      // eslint-disable-next-line no-await-in-loop
+      if (!isLocked(u) && u.passwordHash && await bcrypt.compare(pw, u.passwordHash)) matched.push(u);
+    }
+    if (!matched.length) {
+      if (accounts.length === 1) {
+        const failed = (accounts[0].failedLoginCount || 0) + 1;
+        const lock = failed >= MAX_FAILED_LOGINS;
+        await prisma.user.update({ where: { id: accounts[0].id }, data: lock ? { failedLoginCount: 0, lockedUntil: new Date(Date.now() + LOCK_MINUTES * 60000) } : { failedLoginCount: failed } }).catch(() => {});
+      }
+      await logAudit({ action: 'Monitoring agent: wrong sign-in', entity: 'User', toValue: email.slice(0, 120), reason: `IP ${ipOf(req)}` }).catch(() => {});
+      return fail(res, 401, 'The email or password is not right. Use the same email and password as the TeamLink website.');
+    }
+    // several logins on one email and password: the one with an employee record (a PC belongs to an employee)
+    let user = matched[0];
+    let idn = await resolveIdentity(user.id);
+    for (const u of matched.slice(1)) {
+      if (idn && idn.employeeId) break;
+      // eslint-disable-next-line no-await-in-loop
+      const other = await resolveIdentity(u.id);
+      if (other && other.employeeId) { user = u; idn = other; }
+    }
+    if (!idn || (idn.status && idn.status !== 'Active') || require('../utils/leftLogin').hasLeft(idn)) return fail(res, 403, 'This login is not active.'); // eslint-disable-line global-require
+    if (user.failedLoginCount) await prisma.user.update({ where: { id: user.id }, data: { failedLoginCount: 0 } }).catch(() => {});
+    if (!idn.employeeId) return fail(res, 403, 'This is a service login with no employee record. Sign in with the TeamLink login of the employee who uses this PC.');
+    who = { employeeId: idn.employeeId, name: idn.name, userId: user.id };
   }
-  // several logins on one email and password: the one with an employee record (a PC belongs to an employee)
-  let user = matched[0];
-  let idn = await resolveIdentity(user.id);
-  for (const u of matched.slice(1)) {
-    if (idn && idn.employeeId) break;
-    // eslint-disable-next-line no-await-in-loop
-    const other = await resolveIdentity(u.id);
-    if (other && other.employeeId) { user = u; idn = other; }
-  }
-  if (!idn || (idn.status && idn.status !== 'Active') || require('../utils/leftLogin').hasLeft(idn)) return fail(res, 403, 'This login is not active.'); // eslint-disable-line global-require
-  if (user.failedLoginCount) await prisma.user.update({ where: { id: user.id }, data: { failedLoginCount: 0 } }).catch(() => {});
-  if (!idn.employeeId) return fail(res, 403, 'This is a service login with no employee record. Sign in with the TeamLink login of the employee who uses this PC.');
   const s = await M.settings();
   // NO HIDDEN MODE: the employee accepts the notice (this version) before the PC is registered
-  if (!(await M.hasConsent(idn.employeeId, s.policyVersion))) {
+  if (!(await M.hasConsent(who.employeeId, s.policyVersion))) {
     if (Number(b.acceptPolicyVersion) !== s.policyVersion) return fail(res, 412, 'Please read and accept the monitoring notice first.', { consentRequired: true, policyVersion: s.policyVersion, policyText: s.policyText });
-    await M.recordConsent(idn.employeeId, s.policyVersion, ipOf(req), 'Agent');
+    await M.recordConsent(who.employeeId, s.policyVersion, ipOf(req), 'Agent');
   }
-  const { token, device } = await M.registerDevice({ employeeId: idn.employeeId, deviceName: b.deviceName, os: b.os });
-  await logAudit({ userId: user.id, action: 'Monitoring: PC registered', entity: 'MonitoringDevice', entityId: device.id, toValue: device.deviceName }).catch(() => {});
-  return res.status(201).json({ deviceToken: token, deviceId: device.id, employee: idn.name, settings: publicSettings(s) });
+  const { token, device } = await M.registerDevice({ employeeId: who.employeeId, deviceName: b.deviceName, os: b.os });
+  if (setupCode) await M.endSetupCode(setupCode); // one use
+  await logAudit({ userId: who.userId, actorName: who.name, action: setupCode ? 'Monitoring: PC registered with a set-up code' : 'Monitoring: PC registered', entity: 'MonitoringDevice', entityId: device.id, toValue: `${device.deviceName} · ${who.name}` }).catch(() => {});
+  return res.status(201).json({ deviceToken: token, deviceId: device.id, employee: who.name, settings: publicSettings(s) });
 }));
 
 const agent = wrap(async (req, res, next) => {
@@ -241,6 +257,27 @@ router.get('/pc-activity', wrap(async (req, res) => {
   const ids = access.ids || [...new Set((await prisma.activityLog.findMany({ where: { day: { gte: from, lte: to } }, select: { employeeId: true }, distinct: ['employeeId'] })).map((x) => x.employeeId))];
   const map = await M.pcActivity(ids, from, to);
   res.json({ rows: Object.fromEntries(map) });
+}));
+
+// --- a one-time set-up code for the agent
+router.post('/setup-code', wrap(async (req, res) => {
+  const id = String((req.body || {}).employeeId || '') || req.user.employeeId;
+  if (!id) return fail(res, 400, 'Pick the employee.');
+  if (!M.isMonitorAdmin(req.user) && id !== req.user.employeeId) return fail(res, 403, 'You can get a code only for yourself.');
+  const emp = await prisma.employee.findUnique({ where: { id }, select: { id: true, name: true, employmentStatus: true } });
+  if (!emp || ['Exited', 'Relieved', 'Terminated'].includes(emp.employmentStatus)) return fail(res, 404, 'This employee is not active.');
+  const out = await M.newSetupCode(id, req.user);
+  await logAudit({ userId: req.user.id, actorName: req.user.name, action: 'Monitoring: set-up code made', entity: 'Monitoring', entityId: id, toValue: emp.name }).catch(() => {});
+  return res.status(201).json({ ...out, employee: emp.name });
+}));
+router.get('/people', adminOnly, wrap(async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) return res.json({ rows: [] });
+  const rows = await prisma.employee.findMany({
+    where: { employmentStatus: { notIn: ['Exited', 'Relieved', 'Terminated'] }, OR: [{ name: { contains: q } }, { employeeCode: { contains: q } }] },
+    select: { id: true, name: true, employeeCode: true, department: true }, orderBy: { name: 'asc' }, take: 12,
+  });
+  return res.json({ rows });
 }));
 
 // --- the agent itself: any TeamLink login downloads it from Settings / My activity (it records nothing until its own set-up)
