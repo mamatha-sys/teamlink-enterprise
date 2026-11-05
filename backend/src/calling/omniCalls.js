@@ -17,6 +17,7 @@ const svc = require('./callService');
 const S = require('./scripts');
 const prisma = require('../db');
 const { parseScript, ScriptDialogue } = require('./scriptDialogue');
+const vacancy = require('./vacancyScript');
 
 const AUD = 'teamlink-voice';
 // The ATS agent rules (300 characters, 14 lines, one question, a closing, forbidden words) do not apply to a script from Omni-Channel
@@ -89,6 +90,7 @@ async function versionsFor(text, lang, given, tdeps) {
 /** Ask for the other-language versions of a script to be made now (Green Start does it when an agent is saved and when a campaign starts). */
 async function prepare(textIn, tdeps) {
   let text = textIn;
+  if (vacancy.parseFacts(text)) return { ok: true, language: vacancy.startLanguage(vacancy.parseFacts(text)), ready: ['English', 'Telugu', 'Hindi'], pending: [] }; // built from the facts: nothing to translate
   text = normalizeScript(text);
   const err = checkScript(text, {});
   if (err) return { ok: false, error: err };
@@ -158,17 +160,27 @@ function turnsOf(row) {
 async function create(input, deps = {}) {
   const externalId = String(input.externalId || '').slice(0, 120);
   if (!externalId) return { ok: false, status: 400, code: 'externalId', reason: 'externalId is needed.' };
-  const text = normalizeScript(input.script);
-  const err = checkScript(text, input.scripts);
+  // the FACTS of a vacancy (Role / Location / Salary ...): the call is built from them in all three languages, nothing is translated by a model
+  const facts = vacancy.parseFacts(input.script);
+  let text; let scriptLang; let scripts;
+  if (facts) {
+    const built = vacancy.build(facts);
+    scriptLang = vacancy.startLanguage(facts);
+    text = built[scriptLang];
+    scripts = { ...built }; delete scripts[scriptLang];
+  } else {
+    text = normalizeScript(input.script);
+    scriptLang = detectLang(text);
+  }
+  const err = checkScript(text, scripts || input.scripts);
   if (err) return { ok: false, status: 422, code: 'script', reason: err };
-  const scriptLang = detectLang(text);
-  const scripts = await versionsFor(text, scriptLang, input.scripts, deps.translate);
+  if (!facts) scripts = await versionsFor(text, scriptLang, input.scripts, deps.translate);
   const dup = await DB.one('SELECT "id" FROM "AiCall" WHERE "dedupeKey" = ? AND "status" <> \'cancelled\'', `omni:${externalId}`);
   if (dup) return { ok: true, id: dup.id, again: true };
   const scriptJson = {
     omni: { name: String(input.name || '').slice(0, 80), externalId },
     fields: {},
-    agentScript: { text, language: scriptLang, texts: scripts, name: String(input.agentName || 'AI agent').slice(0, 60) },
+    agentScript: { text, language: scriptLang, texts: scripts, facts: facts || null, name: String(input.agentName || 'AI agent').slice(0, 60) },
   };
   const r = await require('./voice/sipCall').dialOmni({ externalId, toNumber: input.toNumber, language: scriptLang, scriptJson }, deps); // eslint-disable-line global-require
   return r.ok ? { ok: true, id: r.id } : { ok: false, status: r.code === 'not_ready' || r.code === 'not_dialled' ? 503 : 409, code: r.code, reason: r.reason };
@@ -193,7 +205,7 @@ function dialogueFor(row, s) {
   const name = (j.omni && j.omni.name) || '';
   const d = new ScriptDialogue({
     purpose: row.purpose, language: row.language || 'English', data: { name, firstName: firstName(name), jobTitle: '', company: '' }, fields: {},
-    recordingNotice: !!(s && (s.recording || s.keepTranscripts)), script: a.text, scriptLanguage: a.language, scripts: a.texts, scriptName: a.name, seed: row.id, limits: LIMITS,
+    recordingNotice: !!(s && (s.recording || s.keepTranscripts)), script: a.text, scriptLanguage: a.language, scripts: a.texts, scriptName: a.name, seed: row.id, limits: LIMITS, facts: a.facts || null,
   });
   const snap = svc.safeJson(row.botStateJson);
   if (snap && snap.step) d.restore(snap);

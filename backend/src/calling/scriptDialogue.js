@@ -22,6 +22,7 @@
 // person / recruiter words as every AI call. It does not choose the language: the call speaks the language of the agent, and the script is written in it.
 // ---------------------------------------------------------------------------
 const S = require('./scripts');
+const vacancy = require('./vacancyScript');
 const D = require('./dialogue');
 
 const KINDS = { opening: 'opening', say: 'say', ask: 'ask', interest: 'interest', closing: 'closing', decline: 'decline', convince: 'convince' };
@@ -108,6 +109,7 @@ class ScriptDialogue extends D.Dialogue {
       if (ps && sameShape(ps.steps, mainSplit.steps)) { this.byLang[lang] = ps.steps; this.declines[lang] = ps.decline; this.convinces[lang] = ps.convince; } // a version that does not match line for line is not used
     });
     this.scriptLanguage = first;
+    this.facts = opts.facts || null; // the facts of a vacancy: a person's questions about the pay, the place ... are answered from them
     // no question in the script (only what the AI says): the call says all of it and ends
     this.noQuestion = !mainSplit.steps.some((s) => s.kind === 'ask' || s.kind === 'interest');
     this.autoLanguage = Object.keys(this.byLang).length > 1; // follow the person's language only when there is another version to speak
@@ -235,6 +237,10 @@ class ScriptDialogue extends D.Dialogue {
       st.identity = true;
     } else {
       // a question the script cannot answer from verified facts is noted for the recruiter, never answered from memory
+      if (this.facts && (k.intent === 'info_q' || k.intent === 'salary_q' || k.intent === 'other_cand') && vacancy.answer(this.facts, text, this.language)) {
+        turn.understood = 'question_noted';
+        return { say: this.speak(vacancy.answer(this.facts, text, this.language), cur.kind === 'ask' || cur.kind === 'interest' ? this.line(sc.idx) : this.again()), done: false }; // answered from the facts, then the question again
+      }
       if (!st.pitchCount && (k.intent === 'info_q' || k.intent === 'salary_q' || k.intent === 'ai_q' || k.intent === 'other_cand')) { // (after a try to convince, what is said is the reason, kept below)
         const q = S.clean(text, 200);
         if (q && !st.pending.includes(q) && st.pending.length < 5) st.pending.push(q);
