@@ -8,12 +8,19 @@
 // a kind close - in English, Telugu AND Hindi from built-in phrases (nothing is machine-translated, so it is quick and the facts cannot go wrong), and a
 // person's questions about the pay, the place, the qualification and the role are answered from the facts. Keys: Role, Company, Location, Salary, Qualification,
 // Experience, Details, Benefits, Contact, Next, Language (the language the call starts in: English / Telugu / Hindi).
+//
+// HOW THE CALL GOES (founder 2026-11-05, the "AI Voice Calling Agent" and "Professional AI" documents: "ee document lo vunnattu matladali ai"): name confirmed -> which language -> who is calling,
+// two minutes? -> the vacancy, of interest? -> one question at a time (experience, the industry, qualification, working?, notice period, salary, location) -> questions? -> what was
+// noted is read back -> the resume -> a kind close. More keys: Caller (the name the assistant gives, Bhavana by default), Industry (manufacturing), Client (for the team only: THE CLIENT'S NAME IS NEVER SAID),
+// Work mode, Interview, Notice period, Vacancies, Key requirement, Persuasion, Channel. It says it is an AI assistant: that is not hidden from anybody.
 // ---------------------------------------------------------------------------
 const KEYS = {
   role: 'role|position|post|job|designation|vacancy', company: 'company|organization|organisation|firm', location: 'location|place|city|area',
   salary: 'salary|pay|package|ctc', qualification: 'qualification|education', experience: 'experience', details: 'details|responsibilities|duties|work',
   benefits: 'benefits|perks', vacancies: 'vacancies|openings|no of vacancies|number of vacancies', keyreq: 'key requirement|requirement|note', persuasion: 'persuasion|hook|advantage|upside', channel: 'channel|contact channel',
-  contact: 'contact|recruiter|manager|contact person', next: 'next|next step', langask: 'language choice|ask language|choose language|language question', language: 'language|start language',
+  contact: 'contact|recruiter|manager|contact person', next: 'next|next step', language: 'language|start language',
+  caller: 'caller|caller name|agent name', client: 'client|client name|hiring company|employer', industry: 'industry|sector', interview: 'interview|interview mode',
+  workmode: 'work mode|workmode|mode of work', notice: 'notice|notice period',
 };
 const ALL = Object.values(KEYS).join('|');
 const KEY_OF = Object.entries(KEYS).map(([k, v]) => [k, new RegExp(`^(${v})$`, 'i')]);
@@ -28,7 +35,7 @@ function parseFacts(raw) {
     const key = (KEY_OF.find(([, r]) => r.test(m[1].trim())) || [])[0];
     // a pasted paragraph ends where its next heading begins ("... hiring process Interest check Are you interested ...")
     let value = m[2].split(/[“”"]|\b(?:interest check|if interested|if not interested|if yes|closing)\b/i)[0].replace(/\s+/g, ' ').replace(/[.\s]+$/, '').trim();
-    const max = key === 'details' || key === 'benefits' || key === 'next' ? 300 : 70;
+    const max = ['details', 'benefits', 'next', 'persuasion', 'keyreq', 'interview', 'workmode'].includes(key) ? 300 : 70;
     if (value.length > max) value = value.slice(0, max).replace(/[,;\s][^,;\s]*$/, '').trim();
     if (key && value && !facts[key]) facts[key] = value;
     m = re.exec(text);
@@ -37,131 +44,208 @@ function parseFacts(raw) {
   return facts.role && n >= 3 ? facts : null;
 }
 
-// good morning / afternoon / evening by the hour in India (the recruiter's script: "Good [morning/afternoon]")
-function dayPart() { const h = new Date(Date.now() + 19800000).getUTCHours(); return h < 12 ? 0 : (h < 17 ? 1 : 2); }
-const GREET = { English: ['good morning', 'good afternoon', 'good evening'], Telugu: ['శుభోదయం', 'శుభ మధ్యాహ్నం', 'శుభ సాయంత్రం'], Hindi: ['शुभ प्रभात', 'शुभ दोपहर', 'शुभ संध्या'] };
-const greet = (lang) => GREET[lang][dayPart()];
-
+// THE WORDS OF THE CALL: the founder's "AI Voice Calling Agent" document (2026-11-05), in English, Telugu and Hindi. One question at a time; the client's name is never said.
 const L = {
   English: {
-    open: (f) => `Hello {name}, ${greet('English')}. This is an automated AI assistant calling from ${f.company || 'our company'}${f.contact ? ` on behalf of ${f.contact}` : ''}.`,
-    perm: () => 'Do you have one minute to talk about a job opportunity?',
-    lang: () => 'Which language are you most comfortable with: English, Telugu or Hindi?',
+    open: () => '{greet}, am I speaking with {name}?',
+    lang: () => 'Thank you for confirming. Before we continue, which language are you most comfortable with: English, Hindi, Telugu, or a mix?',
+    langOk: () => 'Perfect, I will continue in English.',
+    intro: (f) => `This is ${f.caller}, an AI assistant calling from ${f.company}, on behalf of our recruitment team.`,
+    perm: () => 'I have a job opportunity to share. Do you have two minutes?',
+    say: (f) => `We have an opening for ${f.role}${f.industry ? ` with a ${f.industry} company` : ''}${f.location ? `, based in ${f.location}` : ''}.${f.details ? ` The role involves ${f.details}.` : ''}${f.qualification ? ` They are looking for ${f.qualification}.` : ''}${f.experience ? ` The experience needed is around ${f.experience}.` : ''}${f.salary ? ` The salary is ${f.salary}.` : ''}${f.vacancies ? ` There are ${f.vacancies} positions open right now.` : ''}${f.keyreq ? ` One thing to flag for this role: ${f.keyreq}.` : ''}`,
+    interest: () => 'Would this be of interest to you?',
+    exp: () => 'How many years of relevant experience do you have?',
+    ind: (f) => `Is your experience in a ${f.industry} company?`,
+    indOther: () => 'That is perfectly fine. Which industry have you worked in?',
+    duties: () => 'Thank you. Could you briefly tell me about your work in your current or previous company?',
+    edu: () => 'What is your highest qualification?',
+    work: () => 'Are you currently working?',
+    notice: () => 'What is your notice period?',
+    sal: () => 'What is your current and expected salary?',
+    loc: (f) => (f.location ? `Are you based in ${f.location} already, or would this need relocation?` : 'Where are you currently located?'),
+    doubt: () => 'Do you have any questions about this job?',
+    next: (f) => `That is great. ${f.next ? `${cap(f.next)}.` : `Could you share your updated resume on ${f.channel}? Our team will review it and reach out about next steps.`}`,
+    close: () => 'Thank you for your time, {name}. We will be in touch soon. Have a good day.',
+    reason: () => 'No problem. May I know if there is a specific reason, such as location, salary, role, or career plans? This will help us find more suitable opportunities for you.',
+    keep: () => 'No problem at all, thank you for letting me know. If a more suitable opening comes up, may I reach out again?',
+    bye: () => 'Thank you. We appreciate your time and wish you the very best in your career. Have a good day.',
+    wrong: () => 'I apologize for the inconvenience. Thank you for letting me know. Have a good day.',
+    cbq: () => 'No problem. When would be a better time to call you back?',
+    cbok: () => 'Certainly. I will schedule a call back for then. Thank you for your time. Have a great day.',
+    near: (f) => `Excellent, ${f.location} suits you.`,
+    fits: () => 'That fits the range.',
+    budgetNote: (f) => `Thank you. The current budget for this role is up to ${f.budget}. I will note your expectation for our recruitment team.`,
+    budget: (f) => `I understand, thank you for sharing that.${f.persuasion ? ` ${cap(f.persuasion)}.` : ''} The current budget for this role is up to ${f.budget}. If there is any flexibility from the company side after profile evaluation, our recruitment team will discuss it with you. Would you still like to proceed?`,
+    budgetYes: () => 'Great. I will note your salary expectation and share it with our recruitment team.',
+    prefloc: () => 'I understand. May I know your preferred work location?',
+    reloc: (f) => `Thank you for sharing that. This position is based in ${f.location}. Would you be open to relocating if the role and career growth are suitable?`,
+    locKeep: () => 'No problem. I will note your location preference and keep your profile for suitable opportunities closer to you.',
+    both: () => 'I understand, thank you for your feedback. May I know your expected salary and preferred location, so that we can consider you for more suitable opportunities?',
+    bothKeep: () => 'Thank you, I have noted your preferences. With your permission, we will keep your profile in our database and contact you if we receive matching opportunities. Is that okay?',
+    objExp: () => 'No problem, I have noted that. I will check if there is a role that is a closer match to your current level and get back to you. Thank you for your time.',
+    objJob: (f) => `I completely understand. Many professionals prefer to explore opportunities even when they are not actively looking.${f.details ? ` This role offers exposure to ${f.details}.` : ''} Would you be open to reviewing the details and deciding later?`,
+    detailsOk: () => 'Certainly. Our team will share the job details on WhatsApp. Please review them at your convenience, and we can discuss further if you are interested. Thank you for your time.',
+    objTrust: (f) => `That is a fair question. Yes, this is a confirmed requirement from ${f.who}${f.location ? ` in ${f.location}` : ''}. Our team can also share the job description and contact details on WhatsApp for your reference.`,
+    family: () => 'Certainly, this is an important decision and I completely understand. Would it be helpful if our team shared the job details on WhatsApp, so you can review them?',
+    followup: () => 'Great, our team will send the details. May I follow up with you in two days?',
+    followupOk: () => 'Thank you. We will connect with you again in two days. Have a good day.',
+    studies: () => 'That is wonderful, I wish you success in your studies. I will update our records accordingly. If you are looking for opportunities in the future, we would be happy to assist you. Have a great day.',
+    wfhKeep: () => 'Understood, I will note your preference. With your permission, we will contact you if suitable work from home roles become available. Is that okay?',
+    company: (f) => `This opportunity is with ${f.who}${f.location ? ` in ${f.location}` : ''}. Once your profile matches the requirement, our recruitment team will share the complete company details and interview process.`,
+    benefits: () => 'That is a good question. I do not have the complete benefits information right now. Our recruitment team can give you accurate details about insurance, leave policy, incentives and other benefits in the next stage.',
+    interview: () => 'The interview mode is decided by the hiring team. It may be online, offline, or in multiple rounds, depending on the company process. If the exact mode is finalized, our recruitment team will share it with you before scheduling.',
+    ivPref: () => 'Understood. I will note your preference and share it with our recruitment team. The final interview mode will be confirmed by the company.',
+    ivTravel: () => 'Thank you for letting me know. I will inform our recruitment team and check whether an online interview option is available.',
+    noticeLong: (f) => `Thank you for sharing that. This position prefers candidates who can join within ${f.notice}. However, I will note your notice period and discuss it with the hiring team.`,
+    unknown: () => 'That is a good question. I do not have that detail in front of me, but our recruiter will confirm it with you directly.',
+    aiYes: () => 'Yes, I am an AI assistant calling for our recruitment team. A recruiter will follow up with you personally.',
     sum: (a) => `Let me confirm what I noted. ${a.loc ? `Location, ${a.loc}. ` : ''}${a.exp ? `Experience, ${a.exp}. ` : ''}${a.edu ? `Qualification, ${a.edu}. ` : ''}${a.work ? `Working and notice period, ${a.work}. ` : ''}${a.sal ? `Salary, ${a.sal}. ` : ''}Is that correct?`,
     sumFix: () => 'Okay, I will note the correction for our team.',
-    budget: (f) => `I understand, thank you for sharing your expectation. The budget for this role is ${f.salary}. If there is any flexibility after your profile is evaluated, our recruitment team will discuss it with you. Would you still like to proceed?`,
-    noticeLong: () => 'Thank you for sharing that. I will note your notice period and discuss it with the hiring team.',
-    objFamily: () => 'Certainly, this is an important decision and I understand. I will share the job details on WhatsApp so you can review them with your family, and our team will follow up with you in two days. Thank you.',
-    objStudies: () => 'That is wonderful, I wish you success in your studies. I will update our records, and if you look for opportunities in the future we would be happy to help. Have a great day.',
-    objWfh: () => 'Understood, I will note your preference for work from home. If a suitable remote opening comes up, we will contact you. Thank you for your time.',
-    say: (f) => `We have an opening for ${f.role}.${f.location ? ` The location is ${f.location}.` : ''}${f.salary ? ` The salary is ${f.salary}.` : ''}${f.qualification ? ` The qualification needed is ${f.qualification}.` : ''}${f.experience ? ` Experience: ${f.experience}.` : ''}${f.details ? ` The work is ${f.details}.` : ''}${f.benefits ? ` Benefits: ${f.benefits}.` : ''}${f.vacancies ? ` There are ${f.vacancies} position(s) open right now.` : ''}${f.keyreq ? ` One thing to flag for this role: ${f.keyreq}.` : ''}`,
-    interest: () => 'Are you interested in this opportunity?',
-    loc: (f) => `Where are you currently located?${f.location ? ` Are you open to working at ${f.location}?` : ''}`,
-    exp: () => 'How many years of relevant experience do you have?',
-    edu: () => 'What is your highest qualification?',
-    work: () => 'Are you currently working? If so, what is your notice period?',
-    sal: () => 'What is your current salary, and what do you expect?',
-    doubt: () => 'Do you have any doubts about this job?',
-    objLoc: () => 'Understood. Are you open to relocating for the right opportunity?',
-    objExp: () => 'No problem, I have noted that. I will check for a role closer to your level and get back to you.',
-    objJob: () => 'Totally understandable. Think of it as just exploring an option. There is no cost to sending your resume and hearing them out, and if it is not the right fit after the interview, you simply stay where you are. Would you like to explore?',
-    objTrust: (f) => `Fair question. This is a confirmed opening${f.company ? ` with ${f.company}` : ''}${f.location ? ` in ${f.location}` : ''}. I can share the role details on WhatsApp so you can verify. Shall we continue?`,
-    cbq: () => 'No problem. When would be a better time to call you back?',
-    cbok: () => 'Okay, I will call you then. Thank you.',
-    near: (f) => `That is good, ${f.location} is close to you.`,
-    salaryPitch: (f) => `I understand.${f.persuasion ? ` ${cap(f.persuasion)}.` : ''} The salary can be discussed in the interview, and if you do well in the interview there is a chance of an increase. Would you like to attend the interview?`,
-    next: (f) => `Great. ${f.next ? `${cap(f.next)}.` : `${f.contact ? `I can have ${f.contact} call you to explain the next steps, or you` : 'You'} can share your updated resume on ${f.channel || 'WhatsApp'}.`} What would be a good time for a call?`,
-    c1: () => 'May I know what the problem is? If something about the job is a concern, please tell me.',
-    c2: () => 'If the location or the salary is a concern, I can note it for our team. What would you prefer?',
-    decline: () => 'No problem. Thank you for your time. If you know anyone who is looking for a job, please share this opportunity with them. Have a great day.',
-    close: (f) => `Thank you, {name}.${f.contact ? ` For any queries, please contact ${f.contact}.` : ''} Have a nice day.`,
+    calm: () => 'I understand, I am sorry for the trouble. Thank you for your time. Goodbye.',
   },
   Telugu: {
-    open: (f) => `నమస్కారం {name} గారు, ${greet('Telugu')}. నేను ${f.company || 'మా సంస్థ'} నుండి మాట్లాడుతున్న ఆటోమేటెడ్ AI అసిస్టెంట్‌ని.`,
-    perm: () => 'మీకు ఒక నిమిషం మాట్లాడే సమయం ఉందా? ఒక ఉద్యోగ అవకాశం గురించి చెప్పాలి.',
-    lang: () => 'మీకు ఏ లాంగ్వేజ్ కంఫర్టబుల్: ఇంగ్లీష్, తెలుగు లేదా హిందీ?',
+    open: () => '{greet}, నేను {name} గారితో మాట్లాడుతున్నానా?',
+    lang: () => 'కన్ఫర్మ్ చేసినందుకు థాంక్యూ. ముందుకు వెళ్ళే ముందు, మీకు ఏ లాంగ్వేజ్ కంఫర్టబుల్‌గా ఉంటుంది: ఇంగ్లీష్, హిందీ, తెలుగు, లేదా మిక్స్?',
+    langOk: () => 'సరే అండి, తెలుగులో మాట్లాడుతాను.',
+    intro: (f) => `నేను ${f.caller}, ${f.company} నుండి మా రిక్రూట్‌మెంట్ టీమ్ తరపున మాట్లాడుతున్న AI అసిస్టెంట్‌ని.`,
+    perm: () => 'ఒక జాబ్ ఆపర్చునిటీ గురించి చెప్పాలి. మీకు రెండు నిమిషాలు ఉన్నాయా?',
+    say: (f) => `${f.industry ? `${f.industry} కంపెనీలో ` : ''}${f.role} ఓపెనింగ్ ఉంది.${f.location ? ` లొకేషన్ ${f.location}.` : ''}${f.details ? ` ఈ రోల్‌లో ${f.details} ఉంటాయి.` : ''}${f.qualification ? ` క్వాలిఫికేషన్ ${f.qualification}.` : ''}${f.experience ? ` ఎక్స్‌పీరియన్స్ సుమారు ${f.experience} కావాలి.` : ''}${f.salary ? ` సాలరీ ${f.salary}.` : ''}${f.vacancies ? ` ప్రస్తుతం ${f.vacancies} పొజిషన్లు ఉన్నాయి.` : ''}${f.keyreq ? ` ఈ రోల్‌కి ఒక ముఖ్యమైన విషయం: ${f.keyreq}.` : ''}`,
+    interest: () => 'ఇది మీకు ఇంట్రెస్ట్‌గా ఉందా?',
+    exp: () => 'మీకు ఎన్ని ఇయర్స్ రిలీవెంట్ ఎక్స్‌పీరియన్స్ ఉంది?',
+    ind: (f) => `మీ ఎక్స్‌పీరియన్స్ ${f.industry} కంపెనీలోనేనా?`,
+    indOther: () => 'పర్వాలేదు అండి. మీరు ఏ ఇండస్ట్రీలో పని చేశారు?',
+    duties: () => 'థాంక్యూ. మీ కరెంట్ లేదా పాత కంపెనీలో మీరు చేసిన పని గురించి క్లుప్తంగా చెప్పగలరా?',
+    edu: () => 'మీ హైయెస్ట్ క్వాలిఫికేషన్ ఏమిటి?',
+    work: () => 'మీరు ప్రస్తుతం జాబ్ చేస్తున్నారా?',
+    notice: () => 'మీ నోటీస్ పీరియడ్ ఎంత?',
+    sal: () => 'మీ కరెంట్ సాలరీ, ఎక్స్‌పెక్టెడ్ సాలరీ ఎంత?',
+    loc: (f) => (f.location ? `మీరు ఇప్పటికే ${f.location} లో ఉంటున్నారా, లేదా రీలొకేట్ అవ్వాలా?` : 'మీరు ప్రస్తుతం ఎక్కడ ఉంటున్నారు?'),
+    doubt: () => 'ఈ జాబ్ గురించి మీకు ఏవైనా డౌట్స్ ఉన్నాయా?',
+    next: (f) => `చాలా బాగుంది. మీ అప్‌డేటెడ్ రెజ్యూమ్ ${f.channel} లో పంపగలరా? మా టీమ్ రివ్యూ చేసి నెక్స్ట్ స్టెప్స్ గురించి మిమ్మల్ని కాంటాక్ట్ చేస్తుంది.`,
+    close: () => 'మీ సమయానికి ధన్యవాదాలు {name} గారు. మేము త్వరలో కాంటాక్ట్ చేస్తాము. శుభదినం.',
+    reason: () => 'పర్వాలేదు అండి. లొకేషన్, సాలరీ, రోల్ లేదా కెరీర్ ప్లాన్స్ లాంటి కారణం ఏదైనా ఉందా? చెప్తే మీకు సరిపోయే ఆపర్చునిటీస్ చూడగలం.',
+    keep: () => 'పర్వాలేదు అండి, చెప్పినందుకు థాంక్యూ. మీకు సరిపోయే ఓపెనింగ్ వస్తే మళ్ళీ కాంటాక్ట్ చేయవచ్చా?',
+    bye: () => 'థాంక్యూ అండి. మీ సమయానికి ధన్యవాదాలు, మీ కెరీర్‌కి ఆల్ ది బెస్ట్. శుభదినం.',
+    wrong: () => 'క్షమించండి, ఇబ్బంది కలిగించాను. చెప్పినందుకు థాంక్యూ. శుభదినం.',
+    cbq: () => 'పర్వాలేదు అండి. మళ్ళీ ఎప్పుడు కాల్ చేస్తే మీకు కన్వీనియంట్?',
+    cbok: () => 'సరే అండి, ఆ టైమ్‌కి కాల్ చేస్తాను. మీ సమయానికి ధన్యవాదాలు. శుభదినం.',
+    near: (f) => `చాలా మంచిది, ${f.location} మీకు సరిపోతుంది.`,
+    fits: () => 'ఇది రేంజ్‌లోనే ఉంది.',
+    budgetNote: (f) => `థాంక్యూ. ఈ రోల్‌కి ప్రస్తుత బడ్జెట్ ${f.budget} వరకు ఉంది. మీ ఎక్స్‌పెక్టేషన్ మా రిక్రూట్‌మెంట్ టీమ్‌కి నోట్ చేస్తాను.`,
+    budget: (f) => `అర్థమైంది అండి, చెప్పినందుకు థాంక్యూ.${f.persuasion ? ` ${f.persuasion}.` : ''} ఈ రోల్‌కి ప్రస్తుత బడ్జెట్ ${f.budget} వరకు ఉంది. ప్రొఫైల్ ఎవాల్యుయేషన్ తర్వాత కంపెనీ నుండి ఫ్లెక్సిబిలిటీ ఉంటే మా రిక్రూట్‌మెంట్ టీమ్ మీతో మాట్లాడుతుంది. మీరు ముందుకు వెళ్ళాలనుకుంటున్నారా?`,
+    budgetYes: () => 'చాలా బాగుంది. మీ సాలరీ ఎక్స్‌పెక్టేషన్ నోట్ చేసి మా రిక్రూట్‌మెంట్ టీమ్‌కి చెప్తాను.',
+    prefloc: () => 'అర్థమైంది అండి. మీకు ఇష్టమైన వర్క్ లొకేషన్ ఏది?',
+    reloc: (f) => `చెప్పినందుకు థాంక్యూ. ఈ పొజిషన్ ${f.location} లో ఉంది. రోల్ మరియు కెరీర్ గ్రోత్ బాగుంటే రీలొకేట్ అవ్వడానికి మీరు రెడీనా?`,
+    locKeep: () => 'పర్వాలేదు అండి. మీ లొకేషన్ ప్రిఫరెన్స్ నోట్ చేసి, మీకు దగ్గరలో ఓపెనింగ్స్ వస్తే చెప్తాము.',
+    both: () => 'అర్థమైంది అండి, చెప్పినందుకు థాంక్యూ. మీకు సరిపోయే ఆపర్చునిటీస్ కోసం మీ ఎక్స్‌పెక్టెడ్ సాలరీ, ఇష్టమైన లొకేషన్ చెప్పగలరా?',
+    bothKeep: () => 'థాంక్యూ, మీ ప్రిఫరెన్సెస్ నోట్ చేసుకున్నాను. మీ అనుమతితో మీ ప్రొఫైల్ మా డేటాబేస్‌లో ఉంచి, సరిపోయే ఆపర్చునిటీ వస్తే కాంటాక్ట్ చేస్తాము. ఓకేనా?',
+    objExp: () => 'పర్వాలేదు అండి, నోట్ చేసుకున్నాను. మీ లెవెల్‌కి సరిపోయే రోల్ ఉంటే చూసి మళ్ళీ కాంటాక్ట్ చేస్తాను. మీ సమయానికి ధన్యవాదాలు.',
+    objJob: (f) => `పూర్తిగా అర్థమైంది అండి. చాలా మంది జాబ్ వెతకకపోయినా ఆపర్చునిటీస్ చూస్తుంటారు.${f.details ? ` ఈ రోల్‌లో ${f.details} ఎక్స్‌పోజర్ ఉంటుంది.` : ''} డీటెయిల్స్ చూసి తర్వాత డిసైడ్ చేయడం ఓకేనా?`,
+    detailsOk: () => 'తప్పకుండా అండి. మా టీమ్ జాబ్ డీటెయిల్స్ వాట్సాప్‌లో పంపిస్తుంది. మీకు వీలైనప్పుడు చూసి, ఇంట్రెస్ట్ ఉంటే మాట్లాడుకుందాం. మీ సమయానికి ధన్యవాదాలు.',
+    objTrust: (f) => `మంచి ప్రశ్న అండి. అవును, ఇది ${f.who}${f.location ? ` ${f.location} లో` : ''} కన్ఫర్మ్డ్ రిక్వైర్‌మెంట్. మీ రిఫరెన్స్ కోసం మా టీమ్ జాబ్ డిస్క్రిప్షన్, కాంటాక్ట్ డీటెయిల్స్ వాట్సాప్‌లో కూడా పంపిస్తుంది.`,
+    family: () => 'తప్పకుండా అండి, ఇది ముఖ్యమైన నిర్ణయం, నాకు అర్థమైంది. మీరు చూసుకోవడానికి మా టీమ్ జాబ్ డీటెయిల్స్ వాట్సాప్‌లో పంపిస్తే ఉపయోగంగా ఉంటుందా?',
+    followup: () => 'చాలా బాగుంది, మా టీమ్ డీటెయిల్స్ పంపిస్తుంది. రెండు రోజుల్లో మళ్ళీ ఫాలో అప్ చేయవచ్చా?',
+    followupOk: () => 'థాంక్యూ అండి. రెండు రోజుల్లో మళ్ళీ కాంటాక్ట్ చేస్తాము. శుభదినం.',
+    studies: () => 'చాలా మంచిది అండి, మీ స్టడీస్‌కి ఆల్ ది బెస్ట్. మా రికార్డ్స్ అప్‌డేట్ చేస్తాను. భవిష్యత్తులో ఆపర్చునిటీస్ కావాలంటే మేము హెల్ప్ చేస్తాము. శుభదినం.',
+    wfhKeep: () => 'అర్థమైంది అండి, మీ ప్రిఫరెన్స్ నోట్ చేసుకున్నాను. మీ అనుమతితో వర్క్ ఫ్రమ్ హోమ్ రోల్స్ వస్తే కాంటాక్ట్ చేస్తాము. ఓకేనా?',
+    company: (f) => `ఈ ఆపర్చునిటీ ${f.who}${f.location ? ` ${f.location} లో` : ''} ఉంది. మీ ప్రొఫైల్ మ్యాచ్ అయ్యాక మా రిక్రూట్‌మెంట్ టీమ్ కంపెనీ పూర్తి డీటెయిల్స్, ఇంటర్వ్యూ ప్రాసెస్ చెప్తుంది.`,
+    benefits: () => 'మంచి ప్రశ్న అండి. బెనిఫిట్స్ పూర్తి వివరాలు ఇప్పుడు నా దగ్గర లేవు. ఇన్సూరెన్స్, లీవ్ పాలసీ, ఇన్సెంటివ్స్ గురించి నెక్స్ట్ స్టేజ్‌లో మా రిక్రూట్‌మెంట్ టీమ్ కరెక్ట్‌గా చెప్తుంది.',
+    interview: () => 'ఇంటర్వ్యూ మోడ్ హైరింగ్ టీమ్ డిసైడ్ చేస్తుంది. కంపెనీ ప్రాసెస్‌ని బట్టి ఆన్‌లైన్, ఆఫ్‌లైన్ లేదా చాలా రౌండ్లలో ఉండవచ్చు. మోడ్ ఫైనల్ అయితే షెడ్యూల్ ముందే మా టీమ్ చెప్తుంది.',
+    ivPref: () => 'అర్థమైంది అండి. మీ ప్రిఫరెన్స్ నోట్ చేసి మా రిక్రూట్‌మెంట్ టీమ్‌కి చెప్తాను. ఫైనల్ ఇంటర్వ్యూ మోడ్ కంపెనీ కన్ఫర్మ్ చేస్తుంది.',
+    ivTravel: () => 'చెప్పినందుకు థాంక్యూ. మా రిక్రూట్‌మెంట్ టీమ్‌కి చెప్పి ఆన్‌లైన్ ఇంటర్వ్యూ ఆప్షన్ ఉందా చూస్తాను.',
+    noticeLong: (f) => `చెప్పినందుకు థాంక్యూ. ఈ పొజిషన్‌కి ${f.notice} లో జాయిన్ అయ్యేవాళ్ళను ప్రిఫర్ చేస్తారు. అయినా మీ నోటీస్ పీరియడ్ నోట్ చేసి హైరింగ్ టీమ్‌తో మాట్లాడతాను.`,
+    unknown: () => 'మంచి ప్రశ్న అండి. ఆ వివరం ఇప్పుడు నా దగ్గర లేదు, కానీ మా రిక్రూటర్ మీకు డైరెక్ట్‌గా కన్ఫర్మ్ చేస్తారు.',
+    aiYes: () => 'అవును అండి, నేను మా రిక్రూట్‌మెంట్ టీమ్ తరపున కాల్ చేస్తున్న AI అసిస్టెంట్‌ని. మా రిక్రూటర్ మీతో పర్సనల్‌గా మాట్లాడతారు.',
     sum: (a) => `నేను నోట్ చేసుకున్నది కన్ఫర్మ్ చేస్తాను. ${a.loc ? `లొకేషన్, ${a.loc}. ` : ''}${a.exp ? `ఎక్స్‌పీరియన్స్, ${a.exp}. ` : ''}${a.edu ? `క్వాలిఫికేషన్, ${a.edu}. ` : ''}${a.work ? `జాబ్ మరియు నోటీస్ పీరియడ్, ${a.work}. ` : ''}${a.sal ? `సాలరీ, ${a.sal}. ` : ''}ఇది కరెక్టేనా?`,
     sumFix: () => 'సరే అండి, ఆ కరెక్షన్ మా టీమ్‌కి తెలియజేస్తాను.',
-    budget: (f) => `అర్థమైంది అండి, మీ ఎక్స్‌పెక్టేషన్ చెప్పినందుకు ధన్యవాదాలు. ఈ రోల్‌కి బడ్జెట్ ${f.salary}. మీ ప్రొఫైల్ ఎవాల్యుయేట్ చేసిన తర్వాత ఏదైనా ఫ్లెక్సిబిలిటీ ఉంటే మా రిక్రూట్‌మెంట్ టీమ్ మీతో మాట్లాడుతుంది. అయినా ముందుకు వెళ్లడానికి మీకు ఇష్టమేనా?`,
-    noticeLong: () => 'చెప్పినందుకు ధన్యవాదాలు అండి. మీ నోటీస్ పీరియడ్ నోట్ చేసుకుని హైరింగ్ టీమ్‌తో మాట్లాడతాను.',
-    objFamily: () => 'తప్పకుండా అండి, ఇది ముఖ్యమైన నిర్ణయం, అర్థమైంది. జాబ్ డీటెయిల్స్ వాట్సాప్‌లో పంపుతాను, మీ ఫ్యామిలీతో చూసుకోండి. రెండు రోజుల్లో మా టీమ్ మిమ్మల్ని సంప్రదిస్తుంది. ధన్యవాదాలు.',
-    objStudies: () => 'చాలా బాగుంది అండి, మీ చదువులో విజయం సాధించాలని కోరుకుంటున్నాను. రికార్డ్స్ అప్‌డేట్ చేస్తాను. భవిష్యత్తులో ఉద్యోగం కావాలంటే సహాయం చేయడానికి సిద్ధంగా ఉంటాము. మంచి రోజు!',
-    objWfh: () => 'అర్థమైంది అండి, మీ వర్క్ ఫ్రమ్ హోమ్ ప్రాధాన్యతను నోట్ చేసుకుంటాను. తగిన రిమోట్ ఓపెనింగ్ వస్తే మిమ్మల్ని సంప్రదిస్తాము. మీ సమయానికి ధన్యవాదాలు.',
-    say: (f) => `${f.role} ఓపెనింగ్ ఉంది.${f.location ? ` లొకేషన్ ${f.location}.` : ''}${f.salary ? ` సాలరీ ${f.salary}.` : ''}${f.qualification ? ` క్వాలిఫికేషన్ ${f.qualification}.` : ''}${f.experience ? ` ఎక్స్‌పీరియన్స్ ${f.experience}.` : ''}${f.details ? ` జాబ్ రోల్: ${f.details}.` : ''}${f.benefits ? ` బెనిఫిట్స్: ${f.benefits}.` : ''}`,
-    interest: () => 'ఈ ఆపర్చునిటీ మీకు ఇంట్రెస్ట్‌గా ఉందా?',
-    loc: (f) => `మీరు ప్రస్తుతం ఎక్కడ ఉంటున్నారు?${f.location ? ` ${f.location} లో వర్క్ చేయడానికి ఓకేనా?` : ''}`,
-    exp: () => 'మీకు ఎన్ని ఇయర్స్ రిలీవెంట్ ఎక్స్‌పీరియన్స్ ఉంది?',
-    edu: () => 'మీ క్వాలిఫికేషన్ ఏమిటి?',
-    work: () => 'మీరు ప్రస్తుతం ఏదైనా జాబ్ చేస్తున్నారా? అయితే మీ నోటీస్ పీరియడ్ ఎంత?',
-    sal: () => 'మీ కరెంట్ సాలరీ ఎంత, ఎక్స్‌పెక్టెడ్ సాలరీ ఎంత?',
-    doubt: () => 'ఈ జాబ్ గురించి మీకు ఏవైనా డౌట్స్ ఉన్నాయా?',
-    objLoc: () => 'అర్థమైంది అండి. సరైన ఆపర్చునిటీ అయితే రీలొకేట్ అవ్వడానికి మీరు రెడీనా?',
-    objExp: () => 'పర్వాలేదు అండి, నోట్ చేసుకున్నాను. మీ లెవెల్‌కి సరిపోయే రోల్ ఏదైనా ఉంటే మిమ్మల్ని సంప్రదిస్తాను.',
-    objJob: () => 'అర్థమైంది అండి. ఇది ఒక ఆప్షన్ ఎక్స్‌ప్లోర్ చేయడం లాంటిదే. రెజ్యూమ్ పంపడానికి ఖర్చేమీ లేదు, ఇంటర్వ్యూలో సరిపోకపోతే మీరు ఇప్పుడున్న చోటే ఉంటారు. ఎక్స్‌ప్లోర్ చేస్తారా?',
-    objTrust: (f) => `మంచి ప్రశ్న అండి. ఇది${f.company ? ` ${f.company} లో` : ''}${f.location ? ` ${f.location} లో` : ''} కన్ఫర్మ్డ్ ఓపెనింగ్. వెరిఫై చేసుకోవడానికి డీటెయిల్స్ వాట్సాప్‌లో పంపుతాను. కొనసాగించమంటారా?`,
-    cbq: () => 'పర్వాలేదు అండి. మళ్ళీ ఎప్పుడు కాల్ చేస్తే మీకు కన్వీనియంట్?',
-    cbok: () => 'సరే అండి, ఆ టైమ్‌కి కాల్ చేస్తాను. ధన్యవాదాలు.',
-    near: (f) => `చాలా మంచిది, ${f.location} మీకు క్లోజ్‌గానే ఉంది.`,
-    salaryPitch: (f) => `అర్థమైంది అండి.${f.persuasion ? ` ${f.persuasion}.` : ''} సాలరీ గురించి ఇంటర్వ్యూలో మాట్లాడవచ్చు, ఇంటర్వ్యూలో బాగా చేస్తే సాలరీ పెరిగే ఛాన్స్ ఉంది. ఇంటర్వ్యూకి రావడానికి మీకు ఇష్టమేనా?`,
-    next: (f) => `చాలా బాగుంది. ${f.contact ? `${f.contact} గారు కాల్ చేసి డీటెయిల్స్ చెప్తారు, లేదా మీరు` : 'మీరు'} మీ రెజ్యూమ్ ${f.channel ? `${f.channel} కి` : 'వాట్సాప్‌లో'} పంపవచ్చు. మీకు ఏ టైమ్ కన్వీనియంట్‌గా ఉంటుంది?`,
-    c1: () => 'మీకు ఏమి ప్రాబ్లమ్ ఉందో చెప్పగలరా? ఏదైనా ఇబ్బంది ఉంటే చెప్పండి.',
-    c2: () => 'లొకేషన్ లేదా సాలరీ గురించి ఏదైనా ప్రాబ్లమ్ ఉంటే మా టీమ్‌కి తెలియజేస్తాను. మీకు ఏది ఇష్టం?',
-    decline: () => 'సరే అండి, పర్వాలేదు. మీ సమయానికి ధన్యవాదాలు. మీకు తెలిసిన ఎవరైనా ఉద్యోగం కోసం చూస్తుంటే ఈ అవకాశం వారికి చెప్పండి. మంచి రోజు!',
-    close: (f) => `ధన్యవాదాలు {name} గారు.${f.contact ? ` ఏవైనా సందేహాలు ఉంటే ${f.contact} గారిని సంప్రదించండి.` : ''} శుభదినం.`,
+    calm: () => 'అర్థమైంది అండి, ఇబ్బందికి క్షమించండి. మీ సమయానికి ధన్యవాదాలు. నమస్కారం.',
   },
   Hindi: {
-    open: (f) => `नमस्ते {name} जी, ${greet('Hindi')}। मैं ${f.company || 'हमारी कंपनी'} की ओर से बोल रहा ऑटोमेटेड AI असिस्टेंट हूँ।`,
-    perm: () => 'क्या आपके पास एक मिनट बात करने का समय है? एक नौकरी के अवसर के बारे में बताना है।',
-    lang: () => 'आप किस भाषा में सहज हैं: इंग्लिश, तेलुगु या हिंदी?',
+    open: () => '{greet}, क्या मेरी बात {name} जी से हो रही है?',
+    lang: () => 'कन्फर्म करने के लिए धन्यवाद। आगे बढ़ने से पहले, आप किस भाषा में कम्फर्टेबल हैं: इंग्लिश, हिंदी, तेलुगु, या मिक्स?',
+    langOk: () => 'ठीक है, मैं हिंदी में बात करता हूँ।',
+    intro: (f) => `यह ${f.caller} है, ${f.company} से हमारी रिक्रूटमेंट टीम की ओर से AI असिस्टेंट की कॉल है।`,
+    perm: () => 'एक जॉब ऑपॉर्च्युनिटी के बारे में बताना है। क्या आपके पास दो मिनट हैं?',
+    say: (f) => `${f.industry ? `एक ${f.industry} कंपनी में ` : ''}${f.role} की ओपनिंग है।${f.location ? ` लोकेशन ${f.location} है।` : ''}${f.details ? ` इस रोल में ${f.details} शामिल है।` : ''}${f.qualification ? ` क्वालिफिकेशन ${f.qualification} चाहिए।` : ''}${f.experience ? ` एक्सपीरियंस करीब ${f.experience} चाहिए।` : ''}${f.salary ? ` सैलरी ${f.salary} है।` : ''}${f.vacancies ? ` अभी ${f.vacancies} पोज़िशन खुली हैं।` : ''}${f.keyreq ? ` इस रोल की एक खास बात: ${f.keyreq}।` : ''}`,
+    interest: () => 'क्या यह आपको इंटरेस्टिंग लगता है?',
+    exp: () => 'आपके पास कितने साल का रिलेवेंट एक्सपीरियंस है?',
+    ind: (f) => `क्या आपका एक्सपीरियंस ${f.industry} कंपनी में है?`,
+    indOther: () => 'कोई बात नहीं। आपने किस इंडस्ट्री में काम किया है?',
+    duties: () => 'धन्यवाद। अपनी करंट या पिछली कंपनी में अपने काम के बारे में थोड़ा बताएँगे?',
+    edu: () => 'आपकी हाईएस्ट क्वालिफिकेशन क्या है?',
+    work: () => 'क्या आप अभी जॉब कर रहे हैं?',
+    notice: () => 'आपका नोटिस पीरियड कितना है?',
+    sal: () => 'आपकी करंट और एक्सपेक्टेड सैलरी कितनी है?',
+    loc: (f) => (f.location ? `क्या आप पहले से ${f.location} में हैं, या रीलोकेट होना पड़ेगा?` : 'आप अभी कहाँ रहते हैं?'),
+    doubt: () => 'क्या इस जॉब के बारे में आपका कोई सवाल है?',
+    next: (f) => `बहुत अच्छा। क्या आप अपना अपडेटेड रिज्यूमे ${f.channel} पर भेज सकते हैं? हमारी टीम उसे देखकर अगले कदमों के बारे में आपसे संपर्क करेगी।`,
+    close: () => 'आपके समय के लिए धन्यवाद {name} जी। हम जल्द ही संपर्क करेंगे। आपका दिन शुभ हो।',
+    reason: () => 'कोई बात नहीं। क्या कोई खास वजह है, जैसे लोकेशन, सैलरी, रोल या करियर प्लान? इससे हम आपके लिए बेहतर ऑपॉर्च्युनिटी ढूँढ पाएँगे।',
+    keep: () => 'कोई बात नहीं, बताने के लिए धन्यवाद। अगर कोई बेहतर ओपनिंग आए, तो क्या हम दोबारा संपर्क कर सकते हैं?',
+    bye: () => 'धन्यवाद। आपके समय के लिए शुक्रिया, आपके करियर के लिए शुभकामनाएँ। आपका दिन शुभ हो।',
+    wrong: () => 'असुविधा के लिए माफ़ कीजिए। बताने के लिए धन्यवाद। आपका दिन शुभ हो।',
+    cbq: () => 'कोई बात नहीं। आपको किस टाइम पर दोबारा कॉल करना ठीक रहेगा?',
+    cbok: () => 'ठीक है, मैं उस टाइम पर कॉल करूँगा। आपके समय के लिए धन्यवाद। आपका दिन शुभ हो।',
+    near: (f) => `बहुत अच्छा, ${f.location} आपके लिए ठीक है।`,
+    fits: () => 'यह रेंज में ही है।',
+    budgetNote: (f) => `धन्यवाद। इस रोल का मौजूदा बजट ${f.budget} तक है। मैं आपकी एक्सपेक्टेशन हमारी रिक्रूटमेंट टीम के लिए नोट कर लेता हूँ।`,
+    budget: (f) => `समझ गया, बताने के लिए धन्यवाद।${f.persuasion ? ` ${f.persuasion}।` : ''} इस रोल का मौजूदा बजट ${f.budget} तक है। प्रोफाइल देखने के बाद कंपनी की तरफ से कोई फ्लेक्सिबिलिटी हुई तो हमारी रिक्रूटमेंट टीम आपसे बात करेगी। क्या आप फिर भी आगे बढ़ना चाहेंगे?`,
+    budgetYes: () => 'बहुत अच्छा। मैं आपकी सैलरी एक्सपेक्टेशन नोट करके हमारी रिक्रूटमेंट टीम को बता दूँगा।',
+    prefloc: () => 'समझ गया। आपकी पसंदीदा वर्क लोकेशन कौन सी है?',
+    reloc: (f) => `बताने के लिए धन्यवाद। यह पोज़िशन ${f.location} में है। अगर रोल और करियर ग्रोथ अच्छी हो तो क्या आप रीलोकेट हो सकते हैं?`,
+    locKeep: () => 'कोई बात नहीं। मैं आपकी लोकेशन प्रेफरेंस नोट करके आपके पास की ओपनिंग के लिए आपका प्रोफाइल रखूँगा।',
+    both: () => 'समझ गया, बताने के लिए धन्यवाद। आपके लिए बेहतर ऑपॉर्च्युनिटी के लिए, अपनी एक्सपेक्टेड सैलरी और पसंदीदा लोकेशन बताएँगे?',
+    bothKeep: () => 'धन्यवाद, मैंने आपकी प्रेफरेंस नोट कर ली। आपकी अनुमति से हम आपका प्रोफाइल अपने डेटाबेस में रखेंगे और मैचिंग ऑपॉर्च्युनिटी आने पर संपर्क करेंगे। ठीक है?',
+    objExp: () => 'कोई बात नहीं, मैंने नोट कर लिया। आपके लेवल का कोई रोल होगा तो मैं आपसे संपर्क करूँगा। आपके समय के लिए धन्यवाद।',
+    objJob: (f) => `मैं पूरी तरह समझता हूँ। बहुत से लोग जॉब न ढूँढते हुए भी ऑपॉर्च्युनिटी देखते रहते हैं।${f.details ? ` इस रोल में ${f.details} का एक्सपोज़र मिलता है।` : ''} क्या आप डिटेल्स देखकर बाद में तय करना चाहेंगे?`,
+    detailsOk: () => 'ज़रूर। हमारी टीम जॉब डिटेल्स व्हाट्सएप पर भेज देगी। आप अपने समय पर देख लीजिए, इंटरेस्ट हो तो आगे बात करेंगे। आपके समय के लिए धन्यवाद।',
+    objTrust: (f) => `यह सही सवाल है। हाँ, यह ${f.who} की${f.location ? ` ${f.location} में` : ''} कन्फर्म्ड रिक्वायरमेंट है। आपके रेफरेंस के लिए हमारी टीम जॉब डिस्क्रिप्शन और कॉन्टैक्ट डिटेल्स व्हाट्सएप पर भी भेज सकती है।`,
+    family: () => 'ज़रूर, यह एक ज़रूरी फैसला है, मैं समझता हूँ। क्या आपके देखने के लिए हमारी टीम जॉब डिटेल्स व्हाट्सएप पर भेज दे?',
+    followup: () => 'बहुत अच्छा, हमारी टीम डिटेल्स भेज देगी। क्या मैं दो दिन में दोबारा फॉलो अप कर सकता हूँ?',
+    followupOk: () => 'धन्यवाद। हम दो दिन में आपसे दोबारा संपर्क करेंगे। आपका दिन शुभ हो।',
+    studies: () => 'यह बहुत अच्छी बात है, आपकी पढ़ाई के लिए शुभकामनाएँ। मैं हमारे रिकॉर्ड अपडेट कर देता हूँ। आगे कभी ऑपॉर्च्युनिटी चाहिए हो तो हम मदद करेंगे। आपका दिन शुभ हो।',
+    wfhKeep: () => 'समझ गया, मैंने आपकी प्रेफरेंस नोट कर ली। आपकी अनुमति से वर्क फ्रॉम होम रोल आने पर हम संपर्क करेंगे। ठीक है?',
+    company: (f) => `यह ऑपॉर्च्युनिटी ${f.who} की${f.location ? ` ${f.location} में` : ''} है। आपका प्रोफाइल मैच होने पर हमारी रिक्रूटमेंट टीम कंपनी की पूरी डिटेल्स और इंटरव्यू प्रोसेस बताएगी।`,
+    benefits: () => 'अच्छा सवाल है। बेनिफिट्स की पूरी जानकारी अभी मेरे पास नहीं है। इंश्योरेंस, लीव पॉलिसी और इंसेंटिव के बारे में अगले स्टेज में हमारी रिक्रूटमेंट टीम सही जानकारी देगी।',
+    interview: () => 'इंटरव्यू मोड हायरिंग टीम तय करती है। कंपनी के प्रोसेस के हिसाब से यह ऑनलाइन, ऑफलाइन या कई राउंड में हो सकता है। मोड फाइनल होने पर शेड्यूल से पहले हमारी टीम बता देगी।',
+    ivPref: () => 'समझ गया। मैं आपकी प्रेफरेंस नोट करके हमारी रिक्रूटमेंट टीम को बता दूँगा। फाइनल इंटरव्यू मोड कंपनी कन्फर्म करेगी।',
+    ivTravel: () => 'बताने के लिए धन्यवाद। मैं हमारी रिक्रूटमेंट टीम को बताकर देखता हूँ कि ऑनलाइन इंटरव्यू का ऑप्शन है या नहीं।',
+    noticeLong: (f) => `बताने के लिए धन्यवाद। इस पोज़िशन के लिए ${f.notice} में जॉइन करने वाले बेहतर हैं। फिर भी मैं आपका नोटिस पीरियड नोट करके हायरिंग टीम से बात करूँगा।`,
+    unknown: () => 'अच्छा सवाल है। यह जानकारी अभी मेरे पास नहीं है, लेकिन हमारे रिक्रूटर आपको सीधे कन्फर्म कर देंगे।',
+    aiYes: () => 'जी हाँ, मैं हमारी रिक्रूटमेंट टीम की ओर से कॉल कर रहा AI असिस्टेंट हूँ। हमारे रिक्रूटर आपसे खुद बात करेंगे।',
     sum: (a) => `मैंने जो नोट किया वह कन्फर्म करता हूँ। ${a.loc ? `लोकेशन, ${a.loc}। ` : ''}${a.exp ? `एक्सपीरियंस, ${a.exp}। ` : ''}${a.edu ? `क्वालिफिकेशन, ${a.edu}। ` : ''}${a.work ? `जॉब और नोटिस पीरियड, ${a.work}। ` : ''}${a.sal ? `सैलरी, ${a.sal}। ` : ''}क्या यह सही है?`,
     sumFix: () => 'ठीक है, मैं यह सुधार अपनी टीम को बता दूँगा।',
-    budget: (f) => `समझ गया, अपनी उम्मीद बताने के लिए धन्यवाद। इस रोल का बजट ${f.salary} है। प्रोफ़ाइल देखने के बाद अगर कोई फ्लेक्सिबिलिटी हुई तो हमारी रिक्रूटमेंट टीम आपसे बात करेगी। क्या आप फिर भी आगे बढ़ना चाहेंगे?`,
-    noticeLong: () => 'बताने के लिए धन्यवाद। मैं आपका नोटिस पीरियड नोट करके हायरिंग टीम से बात करूँगा।',
-    objFamily: () => 'ज़रूर, यह एक अहम फैसला है, मैं समझता हूँ। मैं जॉब की डिटेल्स व्हाट्सएप पर भेज दूँगा ताकि आप परिवार के साथ देख सकें, और हमारी टीम दो दिन में आपसे बात करेगी। धन्यवाद।',
-    objStudies: () => 'बहुत अच्छा, आपकी पढ़ाई के लिए शुभकामनाएँ। मैं रिकॉर्ड अपडेट कर दूँगा, और आगे कभी नौकरी चाहिए तो हमें मदद करने में खुशी होगी। आपका दिन शुभ हो।',
-    objWfh: () => 'समझ गया, मैं आपकी वर्क फ्रॉम होम की पसंद नोट कर लेता हूँ। कोई उपयुक्त रिमोट ओपनिंग आई तो हम आपसे संपर्क करेंगे। आपके समय के लिए धन्यवाद।',
-    say: (f) => `${f.role} की ओपनिंग है।${f.location ? ` लोकेशन ${f.location}।` : ''}${f.salary ? ` सैलरी ${f.salary}।` : ''}${f.qualification ? ` क्वालिफिकेशन ${f.qualification}।` : ''}${f.experience ? ` एक्सपीरियंस ${f.experience}।` : ''}${f.details ? ` जॉब रोल: ${f.details}।` : ''}${f.benefits ? ` बेनिफिट्स: ${f.benefits}।` : ''}`,
-    interest: () => 'क्या आप इस ऑपॉर्च्युनिटी में इंटरेस्टेड हैं?',
-    loc: (f) => `आप अभी कहाँ रहते हैं?${f.location ? ` क्या आप ${f.location} में काम करने के लिए ठीक हैं?` : ''}`,
-    exp: () => 'आपके पास कितने साल का रिलेवेंट एक्सपीरियंस है?',
-    edu: () => 'आपकी क्वालिफिकेशन क्या है?',
-    work: () => 'क्या आप अभी कोई जॉब कर रहे हैं? अगर हाँ, तो आपका नोटिस पीरियड क्या है?',
-    sal: () => 'आपकी करंट सैलरी कितनी है और एक्सपेक्टेड सैलरी कितनी?',
-    doubt: () => 'क्या इस जॉब के बारे में आपका कोई डाउट है?',
-    objLoc: () => 'समझ गया। सही ऑपॉर्च्युनिटी हो तो क्या आप रीलोकेट होने के लिए तैयार हैं?',
-    objExp: () => 'कोई बात नहीं, मैंने नोट कर लिया। आपके लेवल का कोई रोल होगा तो मैं आपसे संपर्क करूँगा।',
-    objJob: () => 'समझ गया। इसे बस एक ऑप्शन एक्सप्लोर करने की तरह देखिए। रिज्यूमे भेजने में कोई खर्च नहीं, और इंटरव्यू में सही न लगे तो आप वहीं रहेंगे जहाँ हैं। क्या एक्सप्लोर करेंगे?',
-    objTrust: (f) => `अच्छा सवाल है। यह${f.company ? ` ${f.company} में` : ''}${f.location ? ` ${f.location} की` : ''} कन्फर्म्ड ओपनिंग है। वेरिफाई करने के लिए डिटेल्स व्हाट्सएप पर भेज दूँगा। आगे बढ़ें?`,
-    cbq: () => 'कोई बात नहीं। आपको किस टाइम पर दोबारा कॉल करना ठीक रहेगा?',
-    cbok: () => 'ठीक है, मैं उस टाइम पर कॉल करूँगा। धन्यवाद।',
-    near: (f) => `बहुत अच्छा, ${f.location} आपके क्लोज़ ही है।`,
-    salaryPitch: (f) => `समझ गया।${f.persuasion ? ` ${f.persuasion}.` : ''} सैलरी पर इंटरव्यू में बात हो सकती है, और इंटरव्यू अच्छा जाए तो सैलरी बढ़ने का चांस है। क्या आप इंटरव्यू के लिए आना चाहेंगे?`,
-    next: (f) => `बहुत अच्छा। ${f.contact ? `${f.contact} जी आपको कॉल करके अगले कदम बता सकते हैं, या आप` : 'आप'} अपना रिज्यूमे ${f.channel ? `${f.channel} पर` : 'व्हाट्सएप पर'} भेज सकते हैं। आपके लिए कौन सा समय ठीक रहेगा?`,
-    c1: () => 'क्या आप बता सकते हैं कि क्या प्रॉब्लम है? कोई चिंता हो तो बताइए।',
-    c2: () => 'अगर लोकेशन या सैलरी को लेकर कोई प्रॉब्लम है तो मैं अपनी टीम को बता दूँगा। आप क्या चाहते हैं?',
-    decline: () => 'ठीक है, कोई बात नहीं। आपके समय के लिए धन्यवाद। अगर आपका कोई जानकार नौकरी की तलाश में है तो उन्हें यह अवसर बताइए। आपका दिन शुभ हो।',
-    close: (f) => `धन्यवाद {name} जी।${f.contact ? ` किसी भी सवाल के लिए ${f.contact} से संपर्क करें।` : ''} शुभ दिन।`,
+    calm: () => 'समझ गया, तकलीफ़ के लिए माफ़ कीजिए। आपके समय के लिए धन्यवाद। नमस्ते।',
   },
 };
 function cap(s) { const t = String(s).trim(); return t ? t[0].toUpperCase() + t.slice(1) : t; }
 
 // "10K" is said "10 thousand" (a voice reads the letter K otherwise)
 const THOUSAND = { English: 'thousand', Telugu: 'వేలు', Hindi: 'हज़ार' };
-const sayable = (facts, lang) => Object.fromEntries(Object.entries(facts).map(([k, v]) => [k, String(v).replace(/(\d+(?:\.\d+)?)\s*k\b/gi, `$1 ${THOUSAND[lang]}`)]));
-
-const wantsLangAsk = (facts) => /^(y|on|true|1)/i.test(String((facts && facts.langask) || ''));
-/** What each step of a vacancy call is, in order (the steps are the same in all three languages). */
-const roles = (facts) => ['opening', 'perm', ...(wantsLangAsk(facts) ? ['lang'] : []), 'say', 'interest', 'loc', 'exp', 'edu', 'work', 'sal', 'doubt', 'next'];
+const CLIENT_WORD = {
+  English: (i) => (i ? `one of our ${i} clients` : 'one of our clients'),
+  Telugu: (i) => (i ? `మా ${i} క్లయింట్ కంపెనీలో` : 'మా క్లయింట్ కంపెనీలో'),
+  Hindi: (i) => (i ? `हमारे एक ${i} क्लाइंट` : 'हमारे एक क्लाइंट'),
+};
+const CHANNEL = { English: 'WhatsApp', Telugu: 'వాట్సాప్', Hindi: 'व्हाट्सएप' };
+function sayable(facts, lang) {
+  const f = Object.fromEntries(Object.entries(facts).map(([k, v]) => [k, String(v).replace(/(\d+(?:\.\d+)?)\s*k\b/gi, `$1 ${THOUSAND[lang]}`)]));
+  const industry = (f.industry || '').toLowerCase();
+  return {
+    ...f, industry, budget: String(f.salary || '').replace(/^up\s*to\s+/i, ''), caller: f.caller || 'Bhavana', company: f.company || (lang === 'Telugu' ? 'మా సంస్థ' : (lang === 'Hindi' ? 'हमारी कंपनी' : 'our company')), channel: f.channel || CHANNEL[lang], who: CLIENT_WORD[lang](industry),
+  };
+}
 
 /** The call, as script text, in each language. */
 function build(factsIn) {
   const out = {};
   Object.entries(L).forEach(([lang, t]) => {
-    const facts = sayable(factsIn, lang);
-    out[lang] = [
-      `Opening: ${t.open(facts)}`, `Ask: ${t.perm(facts)}`, ...(wantsLangAsk(factsIn) ? [`Ask: ${t.lang(facts)}`] : []), `Say: ${t.say(facts)}`, `Interest: ${t.interest(facts)}`, `Ask: ${t.loc(facts)}`, `Ask: ${t.exp(facts)}`, `Ask: ${t.edu(facts)}`, `Ask: ${t.work(facts)}`, `Ask: ${t.sal(facts)}`, `Ask: ${t.doubt(facts)}`, `Ask: ${t.next(facts)}`,
-      `Convince: ${t.c1(facts)}`, `Convince: ${t.c2(facts)}`, `Decline: ${t.decline(facts)}`, `Closing: ${t.close(facts)}`,
-    ].join('\n');
+    const f = sayable(factsIn, lang);
+    const lines = [`Opening: ${t.open(f)}`, `Language: ${t.lang(f)}`, `Say: ${t.intro(f)}`, `Ask: ${t.perm(f)}`, `Say: ${t.say(f)}`, `Interest: ${t.interest(f)}`, `Ask: ${t.exp(f)}`];
+    if (f.industry) lines.push(`Ask: ${t.ind(f)}`, `IfNo: ${t.indOther(f)}`, `IfNo: ${t.duties(f)}`);
+    if (f.qualification) lines.push(`Ask: ${t.edu(f)}`);
+    lines.push(`Ask: ${t.work(f)}`, `IfYes: ${t.notice(f)}`, `Ask: ${t.sal(f)}`, `Ask: ${t.loc(f)}`, `Ask: ${t.doubt(f)}`, `Ask: ${t.next(f)}`, `Closing: ${t.close(f)}`, `Convince: ${t.reason(f)}`, `Decline: ${t.keep(f)}`);
+    out[lang] = lines.join('\n');
   });
   return out;
 }
@@ -175,113 +259,127 @@ const Q = {
   qualification: /qualification|degree|graduate|education|eligib|అర్హత|క్వాలిఫికేషన్|योग्यता|क्वालिफिकेशन|पात्र/i,
   role: /what (is|kind|work)|role|work|job|duties|responsibilit|ఏ ఉద్యోగం|పని|రోల్|జాబ్|क्या काम|काम|रोल|जॉब/i,
   experience: /experience|fresher|అనుభవం|अनुभव/i,
-  company: /which company|company name|what company|who are you|ఏ కంపెనీ|కంపెనీ పేరు|कौन सी कंपनी|कंपनी का नाम/i,
-  benefits: /benefit|insurance|perks|incentive|బెనిఫిట్|बेनिफिट|लाभ/i,
-  interview: /\b(online|offline|virtual|video call|walk-?in|interview mode)\b|ఆన్‌లైన్|ఆఫ్‌లైన్|ऑनलाइन|ऑफलाइन/i,
 };
 const A = {
-  English: { salary: (f) => `The salary is ${f.salary}.`, location: (f) => `The location is ${f.location}.`, qualification: (f) => `The qualification needed is ${f.qualification}.`, role: (f) => `The role is ${f.role}${f.details ? `: ${f.details}` : ''}.`, experience: (f) => `Experience: ${f.experience}.`, company: (f) => `This is for ${f.company}.`, benefits: (f) => `Benefits: ${f.benefits}.`, interview: () => 'The interview mode will be decided by the hiring team. It may be online, offline, or in more than one round.' },
-  Telugu: { salary: (f) => `సాలరీ ${f.salary}.`, location: (f) => `లొకేషన్ ${f.location}.`, qualification: (f) => `క్వాలిఫికేషన్ ${f.qualification}.`, role: (f) => `జాబ్ ${f.role}${f.details ? `: ${f.details}` : ''}.`, experience: (f) => `ఎక్స్‌పీరియన్స్ ${f.experience}.`, company: (f) => `ఇది ${f.company} కి సంబంధించినది.`, benefits: (f) => `బెనిఫిట్స్: ${f.benefits}.`, interview: () => 'ఇంటర్వ్యూ ఆన్‌లైన్ ఆ ఆఫ్‌లైన్ ఆ అనేది హైరింగ్ టీమ్ నిర్ణయిస్తుంది. ఒకటి కంటే ఎక్కువ రౌండ్లు కూడా ఉండవచ్చు.' },
-  Hindi: { salary: (f) => `सैलरी ${f.salary}।`, location: (f) => `लोकेशन ${f.location}।`, qualification: (f) => `क्वालिफिकेशन ${f.qualification}।`, role: (f) => `जॉब ${f.role}${f.details ? `: ${f.details}` : ''}।`, experience: (f) => `एक्सपीरियंस ${f.experience}।`, company: (f) => `यह ${f.company} के लिए है।`, benefits: (f) => `बेनिफिट्स: ${f.benefits}।`, interview: () => 'इंटरव्यू ऑनलाइन होगा या ऑफलाइन, यह हायरिंग टीम तय करेगी। एक से ज़्यादा राउंड भी हो सकते हैं।' },
+  English: { salary: (f) => `The salary is ${f.salary}.`, location: (f) => `The location is ${f.location}.`, qualification: (f) => `The qualification needed is ${f.qualification}.`, role: (f) => `The role is ${f.role}${f.details ? `: ${f.details}` : ''}.`, experience: (f) => `Experience: ${f.experience}.` },
+  Telugu: { salary: (f) => `సాలరీ ${f.salary}.`, location: (f) => `లొకేషన్ ${f.location}.`, qualification: (f) => `క్వాలిఫికేషన్ ${f.qualification}.`, role: (f) => `జాబ్ ${f.role}${f.details ? `: ${f.details}` : ''}.`, experience: (f) => `ఎక్స్‌పీరియన్స్ ${f.experience}.` },
+  Hindi: { salary: (f) => `सैलरी ${f.salary}।`, location: (f) => `लोकेशन ${f.location}।`, qualification: (f) => `क्वालिफिकेशन ${f.qualification}।`, role: (f) => `जॉब ${f.role}${f.details ? `: ${f.details}` : ''}।`, experience: (f) => `एक्सपीरियंस ${f.experience}।` },
 };
 // strict: only the pay / place / qualification / experience words count (the plain words of "role" - work, job - are in too many replies)
 function answer(factsIn, text, lang, strict = false) {
   if (!factsIn) return null;
   const facts = sayable(factsIn, lang);
   const a = A[lang] || A.English;
-  const hit = ['salary', 'location', 'qualification', 'experience', 'company', 'benefits', 'interview', 'role'].filter((k) => !(strict && k === 'role')).find((k) => Q[k].test(String(text || '')) && (k === 'interview' || facts[k]));
+  const hit = ['salary', 'location', 'qualification', 'experience', 'role'].filter((k) => !(strict && k === 'role')).find((k) => Q[k].test(String(text || '')) && facts[k]);
   return hit ? a[hit](facts) : null;
 }
 
-// the question "where are you located?" (in any of the three languages), whether an answer says the job is near, and what is said then
-const LOC_START = ['Where are you currently located', 'మీరు ప్రస్తుతం ఎక్కడ ఉంటున్నారు', 'आप अभी कहाँ रहते हैं'];
-const isLocQuestion = (text) => LOC_START.some((p) => String(text || '').trim().startsWith(p));
+// whether an answer says the job is near, and what is said then
 function near(facts, text) {
   const loc = String((facts && facts.location) || '').toLowerCase();
   const t = String(text || '').toLowerCase();
   if (!loc) return false;
   const SS = require('./voice/speakScript'); // eslint-disable-line global-require
-  return t.includes(loc) || t.includes(SS.native(facts.location, 'Telugu')) || t.includes(SS.native(facts.location, 'Hindi')) || /\b(near|nearby|close|around)\b|దగ్గర|పక్క|पास|नज़दीक|नजदीक/.test(t);
+  return t.includes(loc) || t.includes(SS.native(facts.location, 'Telugu')) || t.includes(SS.native(facts.location, 'Hindi')) || /\b(near|nearby|close|around|already)\b|దగ్గర|పక్క|ఇక్కడే|पास|नज़दीक|नजदीक|यहीं/.test(t);
 }
-const nearAck = (facts, lang) => (L[lang] || L.English).near(sayable(facts, lang));
-// pay is the problem ("salary is low"): what can be said (founder 2026-11-05: salary can be talked about in the interview, a chance of an increase if it goes well)
-const SALARY_WORDS = /salary|pay\b|package|ctc|జీతం|శాలరి|సాలరి|సాలరీ|శాలరీ|वेतन|सैलरी|तनख्वाह/i;
-const salaryReason = (text) => SALARY_WORDS.test(String(text || ''));
-const salaryPitch = (facts, lang) => (L[lang] || L.English).salaryPitch(sayable(facts, lang));
 
-// WHAT THE PERSON SAID IS AN OBJECTION: the line that answers it (once each); "experience" closes the call kindly, the others ask again
-const OBJ = [
-  ['family', /(discuss|talk|ask|consult|check)[^.]{0,25}(family|parents|wife|husband|father|mother)|ఇంట్లో[^.]{0,20}(అడగ|మాట్లాడ)|ఫ్యామిలీతో|परिवार[^.]{0,15}(बात|पूछ)|घर वालों/i],
-  ['studies', /higher studies|further studies|preparing for|studying for|చదువుకుంటున్న|ఉన్నత విద్య|उच्च शिक्षा|पढ़ाई कर रहा/i],
-  ['wfh', /(only|prefer|looking for|want|need)[^.]{0,25}(work[- ]from[- ]home|wfh|remote)|ఇంటి నుండి పని మాత్రమే|घर से काम ही/i],
-  ['location', /\b(far|distance|too far|long way|travel|commute)\b|దూరం|దూరంగా|ట్రావెల్|दूर|डिस्टेंस/i],
-  ['experience', /\b(experience|fresher|not enough)\b|అనుభవం|ఎక్స్‌పీరియన్స్|अनुभव|एक्सपीरियंस/i],
-  ['employed', /(already|currently)\s*(working|employed)|have a job|not looking|ఇప్పటికే|ఆల్రెడీ|పనిచేస్తున్నా|जॉब कर रहा|नौकरी कर|पहले से/i],
-  ['trust', /\b(real|genuine|fake|true|scam)\b|నిజమా|ఫేక్|असली|सच|फेक/i],
-  ['salary', SALARY_WORDS],
-];
-const OBJ_LINE = { location: 'objLoc', experience: 'objExp', employed: 'objJob', trust: 'objTrust', family: 'objFamily', studies: 'objStudies', wfh: 'objWfh' };
-const OBJ_END = { experience: 'experience does not match', family: 'wants to discuss with family', studies: 'preparing for higher studies', wfh: 'wants work from home' };
-function objection(facts, text, lang, used = [], only = null) {
-  const t = String(text || '');
-  const hit = OBJ.find(([k, re]) => !used.includes(k) && (!only || only.includes(k)) && re.test(t));
-  if (!hit) return null;
-  const key = hit[0];
+// every line of the call, ready to say, in the language of the call
+const words = (facts, lang) => { const t = L[lang] || L.English; const f = sayable(facts, lang); return Object.fromEntries(Object.keys(t).map((k) => [k, () => t[k](f)])); };
+
+// which line of the call this is (the same words as build())
+const STEP_KEYS = ['perm', 'interest', 'exp', 'ind', 'edu', 'work', 'notice', 'sal', 'loc', 'doubt', 'next'];
+function stepOf(facts, lang, lineText) {
+  const t = L[lang] || L.English;
   const f = sayable(facts, lang);
-  const say = key === 'salary' ? salaryPitch(facts, lang) : (L[lang] || L.English)[OBJ_LINE[key]](f);
-  return { key, say, end: !!OBJ_END[key], why: OBJ_END[key] || null };
+  const line = String(lineText || '').trim();
+  return STEP_KEYS.find((k) => t[k](f).trim() === line) || null;
 }
-const callbackQuestion = (lang) => (L[lang] || L.English).cbq();
-const callbackOk = (lang) => (L[lang] || L.English).cbok();
 
-// "12K", "12,000", "8 LPA", "ten thousand": the money in a sentence, in rupees (null when none); basis 'year' for lakh / LPA words
-const WORDNUM = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20, twenty5: 25, thirty: 30, forty: 40, fifty: 50 };
-function moneyIn(text) {
-  const t = String(text || '').toLowerCase().replace(/(\d),(\d{3})/g, '$1$2').replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty)\b(?=\s*(thousand|lakh|lakhs|lac|k\b))/g, (w) => WORDNUM[w]);
+// "Telugu", "Telugu + English", "తెలుగులో": the language picked (a mix = the Indian language: the lines of that version are in that mix already)
+function languageChoice(text) {
+  const t = String(text || '').toLowerCase();
+  if (/telugu|తెలుగు|तेलुगु/.test(t)) return 'Telugu';
+  if (/hindi|हिंदी|हिन्दी|హిందీ/.test(t)) return 'Hindi';
+  if (/english|ఇంగ్లీష్|ఇంగ్లిష్|इंग्लिश|अंग्रेज़ी|अंग्रेजी/.test(t)) return 'English';
+  return null;
+}
+
+// ---- what a person may bring up at any point of the call ------------------------------------------------------------
+const PAY = /salary|pay\b|package|ctc|\b\d+\s*k\b|జీతం|శాలరి|సాలరి|సాలరీ|శాలరీ|वेतन|सैलरी|तनख्वाह/i;
+const PAY_LOW = /\b(low|less|not enough|too little|very little|more|higher)\b|expect|తక్కువ|సరిపోదు|ఎక్కువ|कम\b|ज़्यादा|ज्यादा|और चाहिए/i;
+const FAR = /\b(far|distance|long way|commute|not (my )?preferred|other (city|place)|another (city|place)|no relocation|not relocat|can'?t relocat|cannot relocat|can'?t move)\b|దూరం|దూరంగా|రీలొకేట్ కాను|दूर|डिस्टेंस|रीलोकेट नहीं/i;
+const TOPICS = [
+  ['studies', /higher stud|further stud|preparing for|studying|\bstudent\b|చదువు|స్టడీస్|ప్రిపేర్|पढ़ाई|स्टडीज|तैयारी कर/i],
+  ['wfh', /work[\s-]*from[\s-]*home|\bwfh\b|\bremote\b|\bhybrid\b|ఇంటి నుండి|వర్క్ ఫ్రమ్ హోమ్|వర్క్ ఫ్రం హోమ్|घर से|वर्क फ्रॉम होम/i],
+  ['family', /\bfamily\b|parents|\bwife\b|\bhusband\b|let me think|think about|need (some )?time|ఫ్యామిలీ|కుటుంబ|ఆలోచి|परिवार|फैमिली|सोच/i],
+  ['company', /which company|what company|company name|name of the company|ఏ కంపెనీ|కంపెనీ పేరు|कौन सी कंपनी|कौनसी कंपनी|कंपनी का नाम/i],
+  ['benefits', /benefit|insurance|\bpf\b|\besi\b|incentive|bonus|leave policy|బెనిఫిట్|ఇన్సూరెన్స్|बेनिफिट|इंश्योरेंस|लाभ/i],
+  ['ivTravel', /(can'?t|cannot|won'?t|not able to|unable to)\s+(be able to\s+)?(travel|come|attend)|రాలేను|रास्ता|नहीं आ सकता|नहीं आ सकती/i],
+  ['ivPref', /prefer.{0,25}(online|offline)|(online|offline).{0,25}prefer|ఆన్‌లైన్ కావాలి|ఆఫ్‌లైన్ కావాలి|ऑनलाइन चाहिए|ऑफलाइन चाहिए/i],
+  ['interview', /\b(online|offline)\b|interview (mode|date|process|round)|ఆన్‌లైన్|ఆఫ్‌లైన్|ఇంటర్వ్యూ ఎప్పుడు|ऑनलाइन|ऑफलाइन|इंटरव्यू कब/i],
+  ['trust', /\b(real|genuine|fake|scam|fraud)\b|నిజమా|ఫేక్|असली|फेक|फर्जी/i],
+  ['details', /send.{0,20}(details|jd|description)|details.{0,20}(send|whatsapp)|డీటెయిల్స్ పంప|डिटेल्स भेज/i],
+  ['notLooking', /(already|currently)\s*(working|employed)|have a job|not (actively )?looking|no job change|job change|happy (here|where)|ఆల్రెడీ.*జాబ్|ఇప్పటికే.*జాబ్|జాబ్ చేంజ్|पहले से.*जॉब|जॉब चेंज|नौकरी कर/i],
+  ['experience', /not enough experience|less experience|no experience|don'?t have (enough |the )?experience|ఎక్స్‌పీరియన్స్ లేదు|అనుభవం లేదు|एक्सपीरियंस नहीं|अनुभव नहीं/i],
+];
+const NOT_INTERESTED = /not interested|no interest|don'?t want|do not want|ఇంట్రెస్ట్ లేదు|వద్దు|ఇష్టం లేదు|इंटरेस्ट नहीं|नहीं चाहिए/i;
+const HOSTILE = /\b(idiot|stupid|nonsense|bloody|shut up|fool)\b|ఎందుకు విసిగిస్త|పిచ్చి|बकवास|बेवकूफ|पागल/i;
+const notInterested = (text) => NOT_INTERESTED.test(String(text || ''));
+const hostile = (text) => HOSTILE.test(String(text || ''));
+
+// the matter the person raised, or null. step: the line just asked; reason: they are answering "is there a specific reason?", so a bare word (salary) is enough.
+function topic(text, { step = null, reason = false } = {}) {
+  const t = String(text || '');
+  const payNow = PAY.test(t) && (reason || PAY_LOW.test(t)) && !/\b(salary|pay|package) is (fine|ok|okay|good)\b/i.test(t);
+  const payBig = /expect\w*\s+(around\s+|about\s+|rs\.?\s*|₹\s*)?\d/i.test(t);
+  const pay = step !== 'sal' && (payNow || payBig);
+  const far = FAR.test(t) || (reason && /\b(location|place|city)\b|లొకేషన్|लोकेशन/i.test(t));
+  const hit = TOPICS.find(([k, re]) => !(k === 'experience' && ['exp', 'ind', 'edu'].includes(step)) && !(k === 'notLooking' && step === 'work' && !/not (actively )?looking|job change|जॉब चेंज|జాబ్ చేంజ్/i.test(t)) && re.test(t));
+  if (hit && !['notLooking', 'experience'].includes(hit[0])) return hit[0];
+  if (pay && far) return 'both';
+  if (far) return 'location';
+  if (pay) return 'salary';
+  return hit ? hit[0] : null;
+}
+
+// ---- reading an answer against the facts -------------------------------------------------------------------------------
+// amounts a month: "30k", "30,000 per month", "5 LPA", "3.5 lakhs"
+function amounts(text) {
+  const t = String(text || '').replace(/(\d),(?=\d)/g, '$1').toLowerCase();
   const out = [];
-  const re = /(\d+(?:\.\d+)?)\s*(k\b|thousand|lakhs?|lacs?|lpa)?/g;
+  const re = /(\d+(?:\.\d+)?)\s*(k\b|thousand|lakhs?\b|lacs?\b|lpa\b|వేలు|లక్ష|हज़ार|हजार|लाख)?/g;
   let m = re.exec(t);
   while (m) {
-    const n = parseFloat(m[1]); const u = m[2] || '';
-    const annual = /lakh|lac|lpa/.test(u);
-    const v = /^(k|thousand)/.test(u) ? n * 1000 : (annual ? n * 100000 : n);
-    if (v >= 1000) out.push({ v, annual: annual || (!u && v >= 200000), at: m.index });
+    const n = Number(m[1]);
+    const u = m[2] || '';
+    if (/k|thousand|వేలు|हज़ार|हजार/.test(u)) out.push(n * 1000);
+    else if (u) out.push(Math.round((n * 100000) / 12));
+    else if (n >= 1000) out.push(n);
     m = re.exec(t);
   }
   return out;
 }
-/** true when what the person expects (the last amount said after "expect", else the last amount) is above the budget of the vacancy. */
 function overBudget(facts, text) {
-  const budget = moneyIn(facts && facts.salary);
-  if (!budget.length) return false;
-  const b = Math.max(...budget.map((x) => (x.annual ? x.v / 12 : x.v)));
-  const t = String(text || '');
-  const ex = /expect|ఎక్స్‌పెక్ట|एक्सपेक्ट|उम्मीद/i.exec(t);
-  const said = moneyIn(ex ? t.slice(ex.index) : t);
-  if (!said.length) return false;
-  const last = said[said.length - 1];
-  return (last.annual ? last.v / 12 : last.v) > b * 1.001;
+  const top = Math.max(0, ...amounts(facts && facts.salary));
+  const asked = amounts(text);
+  return top > 0 && asked.length > 0 && asked[asked.length - 1] > top * 1.1 ? 'over' : (top > 0 && asked.length > 0 ? 'fits' : null);
 }
-/** the notice period in the sentence is long (60 days or more) */
-function noticeLong(text) {
-  const t = String(text || '').toLowerCase();
-  const m = /(\d+)\s*(day|days|month|months|నెల|నెలలు|दिन|महीने|महीना)/.exec(t) || /\b(one|two|three)\s*(month|months)\b/.exec(t);
-  if (!m) return false;
-  const n = WORDNUM[m[1]] || parseFloat(m[1]);
-  return /month|నెల|महीन/.test(m[2]) ? n * 30 >= 60 : n >= 60;
-}
-const budgetLine = (facts, lang) => (L[lang] || L.English).budget(sayable(facts, lang));
-const noticeLine = (lang) => (L[lang] || L.English).noticeLong();
-const languageQuestion = (lang) => (L[lang] || L.English).lang();
-const summaryLine = (ans, lang) => (L[lang] || L.English).sum(ans);
-const summaryFix = (lang) => (L[lang] || L.English).sumFix();
-/** the language a person chose (null when none is named); "Telugu and English" is Telugu, "Hindi + English" is Hindi */
-function chosenLanguage(text) {
-  const t = String(text || '');
-  if (/telugu|తెలుగు|तेलुगु|तेलुगू/i.test(t)) return 'Telugu';
-  if (/hindi|హిందీ|हिंदी|हिन्दी/i.test(t)) return 'Hindi';
-  if (/english|ఇంగ్లీష్|इंग्लिश|अंग्रेज़ी|अंग्रेजी/i.test(t)) return 'English';
-  return null;
+const firstNum = (t) => { const m = /\d+(?:\.\d+)?/.exec(String(t || '')); return m ? Number(m[0]) : null; };
+const lastNum = (t) => { const m = String(t || '').match(/\d+(?:\.\d+)?/g); return m ? Number(m[m.length - 1]) : null; };
+const needsYears = (facts) => firstNum(facts && facts.experience); // the least experience the job asks for, in years
+const maxNotice = (facts) => lastNum(facts && facts.notice); // the longest notice period the job takes, in days
+
+const callbackQuestion = (lang) => (L[lang] || L.English).cbq();
+const callbackOk = (lang) => (L[lang] || L.English).cbok();
+const GREET = {
+  English: ['Good morning', 'Good afternoon', 'Good evening'], Telugu: ['శుభోదయం', 'నమస్కారం', 'శుభ సాయంత్రం'], Hindi: ['सुप्रभात', 'नमस्ते', 'शुभ संध्या'],
+};
+// the greeting for the time of day in India
+function greeting(lang, now = new Date()) {
+  const h = new Date(now.getTime() + 330 * 60000).getUTCHours();
+  return (GREET[lang] || GREET.English)[h < 12 ? 0 : (h < 17 ? 1 : 2)];
 }
 
-module.exports = { roles, overBudget, noticeLong, budgetLine, noticeLine, languageQuestion, summaryLine, summaryFix, chosenLanguage, moneyIn, objection, callbackQuestion, callbackOk, parseFacts, build, startLanguage, answer, isLocQuestion, near, nearAck, salaryReason, salaryPitch, KEYS };
+module.exports = {
+  callbackQuestion, callbackOk, parseFacts, build, startLanguage, answer, near, words, stepOf, languageChoice, topic, notInterested, hostile, overBudget, needsYears, maxNotice, greeting, KEYS,
+};

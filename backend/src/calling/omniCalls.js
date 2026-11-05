@@ -118,7 +118,7 @@ function normalizeScript(raw) {
   const lines = String(raw == null ? '' : raw).replace(/\r/g, '').split('\n').map((l) => l.trim()).filter(Boolean);
   const out = [];
   lines.forEach((l) => {
-    const m = /^(opening|say|ask|interest|closing|decline|convince)\s*[:\-–]\s*(.*)$/i.exec(l);
+    const m = /^(opening|say|ask|interest|closing|decline|convince|language|ifyes|ifno)\s*[:\-–]\s*(.*)$/i.exec(l);
     const body = m ? m[2] : l;
     const segs = [...body.matchAll(/[“"]([^”"]{2,})[”"]/g)];
     if (segs.length < 2) { out.push(l); return; }

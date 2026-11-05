@@ -47,6 +47,7 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
 (async () => {
   try {
     await DB.ensure();
+    await require('../src/calling/settings').save({ [require('../src/calling/exotelConfig').F.mode]: 'Off' }, null).catch(() => {}); // (a copy of the data) the switch of the copied data must not decide: each check gives the line its own mode
     // ---- who may ask
     check('a request signed with the shared secret is accepted', omni.verify(token()).ok === true);
     check('the same signed request twice is refused (used once)', (() => { const t = token({ jti: 'same-1' }); return omni.verify(t).ok && !omni.verify(t).ok; })());
@@ -209,113 +210,36 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const vf = VAC.parseFacts(FACTS);
     check('the facts of a vacancy are read (role, company, location, salary, qualification, details, contact)', vf && vf.role === 'HR Recruiter' && vf.salary === '10K per month' && vf.contact === 'Anil Ravali' && vf.location === 'Kukatpally', vf);
     check('a script that is not facts is not taken for facts', VAC.parseFacts(SCRIPT) === null && VAC.parseFacts('Role: nurse; Location: x') === null);
-    const vr = await omni.create({ externalId: 'vac1', toNumber: '9222333301', name: 'Sravanthi Rao', script: FACTS }, { ...deps, ami: AMI });
-    const vd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(vr.id));
-    const fv0 = vd.start().say; const fv1 = (await vd.hear('hello')).say; const fv2 = (await vd.hear('yes tell me')).say;
-    const fv3 = (await vd.hear('what is the salary?')).say; const fv4 = (await vd.hear('yes interested')).say;
-    const fvL = (await vd.hear('I stay in Kukatpally')).say; const fvE = (await vd.hear('3 years')).say; const fvQ = (await vd.hear('B.Com')).say; const fvW = (await vd.hear('I am working, my notice period is one month')).say; const fvS = (await vd.hear('current nine thousand, expected ten thousand')).say; const fvD = (await vd.hear('no doubts')).say;
-    const fvY = await vd.hear('yes that is correct'); const fv5 = await vd.hear('tomorrow at five');
-    check('the call is built from the facts: greeting, one minute?, the vacancy, interested?', /^Hello Sravanthi, good (morning|afternoon|evening)\. This is an automated AI assistant calling from Teamlink Consultants on behalf of Anil Ravali/.test(fv0) && /one minute/.test(fv1) && /We have an opening for HR Recruiter\. The location is Kukatpally\. The salary is 10 thousand per month/.test(fv2) && /Are you interested in this opportunity\?$/.test(fv2), { fv0, fv1, fv2 });
-    check('a question about the salary is answered from the facts, then the question is asked again', /^The salary is 10 thousand per month\. Are you interested/.test(fv3), fv3);
-    check('interested: the candidate is asked where they are, experience, education, doubts - "close to you" when the place is the job place - then the next step and the closing', /Where are you currently located/.test(fv4) && /^That is good, Kukatpally is close to you. How many years of relevant experience/.test(fvL) && /highest qualification/.test(fvE) && /currently working.{1,3}If so, what is your notice period/.test(fvQ) && /current salary, and what do you expect/.test(fvW) && /any doubts about this job/.test(fvS) && /Let me confirm what I noted\./.test(fvD) && /call you to explain the next steps/.test(fvY.say) && fv5.done === true && /Thank you, Sravanthi\. For any queries, please contact Anil Ravali/.test(fv5.say), { fv4, fvL, fvE, fvQ, fvW, fvS, fvD, fvY, fv5 });
-    const vr2 = await omni.create({ externalId: 'vac2', toNumber: '9222333302', name: 'Ravi Kumar', script: FACTS }, { ...deps, ami: AMI });
-    const vd2 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(vr2.id)); vd2.start();
-    const t1 = await vd2.hear('అవును చెప్పండి', { heard: 'clear', lang: 'Telugu' });
-    const t2 = await vd2.hear('అవును చెప్పండి', { heard: 'clear', lang: 'Telugu' });
-    check('a person who speaks Telugu gets the rest of the call in Telugu, built from the same facts (no translation needed)', vd2.language === 'Telugu' && /ఒక నిమిషం/.test(t1.say) && /HR Recruiter/.test(t2.say) && /Kukatpally/.test(t2.say) && /10 వేలు/.test(t2.say) && /సాలరీ/.test(t2.say), { lang: vd2.language, t1: t1.say, t2: t2.say });
-    const vr3 = await omni.create({ externalId: 'vac3', toNumber: '9222333303', name: 'Asha', script: FACTS.replace('Contact:', 'Language: Hindi; Contact:') }, { ...deps, ami: AMI });
-    const vd3 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(vr3.id));
-    check('"Language: Hindi" starts the call in Hindi', /नमस्ते Asha जी/.test(vd3.start().say), vd3.language);
     const vp = await omni.prepare(FACTS);
     check('nothing is translated for a vacancy: all three languages are ready at once', vp.ok && vp.ready.length === 3 && vp.pending.length === 0, vp);
-    const nr = await omni.create({ externalId: 'vac9', toNumber: '9222333309', name: 'Kiran', script: FACTS }, { ...deps, ami: AMI });
-    const nd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(nr.id)); nd.start(); await nd.hear('hello'); await nd.hear('yes');
-    const n1 = await nd.hear('no');
-    const n2 = await nd.hear('the salary is low');
-    const n3 = await nd.hear('no');
-    check('"not interested": first "what is the problem?"; if pay is the problem: it can be talked about in the interview, a chance of an increase; then a kind close', /May I know what the problem is/.test(n1.say) && !n1.done && /chance of an increase/.test(n2.say) && /attend the interview/.test(n2.say) && !n2.done && n3.done === true && /^No problem. Thank you for your time/.test(n3.say), { n1, n2, n3 });
-    const nr2 = await omni.create({ externalId: 'vac10', toNumber: '9222333310', name: 'Kiran', script: FACTS }, { ...deps, ami: AMI });
-    const nd2 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(nr2.id)); nd2.start(); await nd2.hear('hello'); await nd2.hear('yes'); await nd2.hear('no'); await nd2.hear('the salary is low');
-    const n4 = await nd2.hear('yes I will attend');
-    check('and if the person agrees to the interview, the call goes on with their details', /^(Okay|Alright|Sure|Right)[^.]*. Where are you currently located/.test(n4.say) || /Where are you currently located/.test(n4.say), n4);
-    // TELUGU: "ఉంది" (it is / I am interested) is a yes; "శాలరి ఎంత" (how much salary) is answered from the facts; the question is asked again, not the whole block
-    const te = await omni.create({ externalId: 'vac11', toNumber: '9222333311', name: 'Kiran', script: FACTS }, { ...deps, ami: AMI });
-    const ted = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(te.id)); ted.start();
-    await ted.hear('అవును చెప్పండి', { heard: 'clear', lang: 'Telugu' });
-    const te1 = await ted.hear('చెప్పండి', { heard: 'clear', lang: 'Telugu' });
-    const te2 = await ted.hear('శాలరీ ఎంత', { heard: 'clear', lang: 'Telugu' });
-    const te3 = await ted.hear('ఉంది', { heard: 'clear', lang: 'Telugu' });
-    check('Telugu: the vacancy and the question; the salary question is answered from the facts with only the question again; "ఉంది" is a yes and the details follow', /ఇంట్రెస్ట్.{0,3}గా ఉందా\?$/.test(te1.say) && /^సాలరీ 10 వేలు/.test(te2.say) && /ఇంట్రెస్ట్.{0,3}గా ఉందా\?$/.test(te2.say) && !/ఓపెనింగ్ ఉంది/.test(te2.say) && /ఎక్కడ/.test(te3.say), { te1: te1.say, te2: te2.say, te3: te3.say });
-    // a half heard answer after "what is the problem?" does not close the call: asked once more
-    const wr = await omni.create({ externalId: 'vac12', toNumber: '9222333312', name: 'Kiran', script: FACTS }, { ...deps, ami: AMI });
-    const wd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(wr.id)); wd.start(); await wd.hear('hello'); await wd.hear('yes');
-    await wd.hear('no');
-    const w1 = await wd.hear('సచ్చే', { heard: 'clear' });
-    const w2 = await wd.hear('the location is far', { heard: 'clear' });
-    check('a half heard reply (one odd word) after "what is the problem?" is asked again, the call is not closed on it; a real reply is answered', !w1.done && /May I know what the problem is|Sorry|క్షమించండి|సమస్య/.test(w1.say) && /./.test(w2.say), { w1, w2 });
-    // a loud "hello" that was heard as noise (the first reply to the greeting) is the person picking up: the call goes on, it does not ask "can you hear me?"
-    const lr = await omni.create({ externalId: 'vac13', toNumber: '9222333313', name: 'Kiran', script: FACTS }, { ...deps, ami: AMI });
-    const ld = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(lr.id)); ld.start();
-    const l1 = await ld.hear('', { heard: 'unclear' });
-    check('the first reply, even when its words were not caught, goes on to the first question (no "can you hear me?")', /one minute/.test(l1.say) && !/Can you hear me/.test(l1.say), l1);
-    // OBJECTIONS by kind, BUSY -> a better time, DISPOSITION codes (the founder's pasted recruiter script, 2026-11-05)
-    const talk = async (ext, num, steps) => {
-      const r0 = await omni.create({ externalId: ext, toNumber: num, name: 'Kiran', script: FACTS + '; Persuasion: this role gives wide exposure to hiring and operations' }, { ...deps, ami: AMI });
-      const dd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(r0.id)); dd.start();
-      const outs = []; for (const t of steps) outs.push(await dd.hear(t)); return { dd, outs };
+    // THE WORDS OF THE CALL, scenario by scenario, are in scripts/ai-call-document-test.js: here, that such a call runs through omni.create and the web talk
+    const talk = async (ext, num, steps, script = FACTS) => {
+      const r0 = await omni.create({ externalId: ext, toNumber: num, name: 'Kiran Rao', script }, { ...deps, ami: AMI });
+      const dd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(r0.id));
+      const first = dd.start().say;
+      const outs = []; for (const t of steps) outs.push(await dd.hear(...[].concat(t))); return { dd, outs, first };
     };
-    const o1 = await talk('obj1', '9111222201', ['hello', 'yes', 'no', 'it is too far for me', 'yes I can relocate']);
-    check('"too far": asked if they can relocate; a yes goes on with their details', /May I know what the problem is/.test(o1.outs[2].say) && /relocating for the right opportunity/.test(o1.outs[3].say) && /currently located/.test(o1.outs[4].say), o1.outs.map((x) => x.say));
-    const o2 = await talk('obj2', '9111222202', ['hello', 'yes', 'no', 'I do not have that much experience']);
-    check('"not enough experience": noted kindly and the call ends (Not Interested, with the reason)', o2.outs[3].done === true && /noted that/.test(o2.outs[3].say) && o2.dd.outcome().outcome === 'Not Interested', o2.outs[3]);
-    const o3 = await talk('obj3', '9111222203', ['hello', 'yes', 'no', 'I am already working in a company', 'no']);
-    check('"already working": think of it as exploring, no cost; a no then closes kindly', /just exploring an option/.test(o3.outs[3].say) && o3.outs[4].done === true, o3.outs.map((x) => x.say));
-    const o4 = await talk('obj4', '9111222204', ['hello', 'yes', 'no', 'is this a real job or fake']);
-    check('"is this real?": a confirmed opening, details on WhatsApp to verify', /confirmed opening with Teamlink Consultants in Kukatpally/.test(o4.outs[3].say) && /WhatsApp/.test(o4.outs[3].say), o4.outs[3]);
-    const o5 = await talk('obj5', '9111222205', ['hello', 'yes', 'no', 'the salary is low']);
-    check('"salary low": the recruiter\'s own upside is said, then the interview and the chance of an increase', /wide exposure to hiring and operations/.test(o5.outs[3].say) && /chance of an increase/.test(o5.outs[3].say), o5.outs[3]);
-    const o6 = await talk('bz1', '9111222206', ['hello', 'call me later I am busy', 'tomorrow at five in the evening']);
-    check('busy: asked for a better time, the answer is kept and the call ends (Call Back Later)', /better time to call you back/.test(o6.outs[1].say) && o6.outs[2].done === true && /I will call you then/.test(o6.outs[2].say) && o6.dd.outcome().outcome === 'Call Back Later' && /Disposition: CB/.test(o6.dd.outcome().summary), { a: o6.outs[1].say, b: o6.outs[2].say, s: o6.dd.outcome().summary });
-    const o7 = await talk('dc1', '9111222207', ['hello', 'yes', 'yes interested']);
-    check('the summary starts with the disposition code (INT / NI / CB / WN / DNC / NR)', /^Disposition: INT/.test(o7.dd.outcome().summary) && /^Disposition: OQ/.test(o2.dd.outcome().summary), { a: o7.dd.outcome().summary.slice(0, 60), b: o2.dd.outcome().summary.slice(0, 60) });
-    // a garbled answer to an OPEN question is kept as the answer; the call is not closed with "network problem"
-    const gq = await talk('gq1', '9111222208', ['hello', 'yes', 'yes interested', 'Kukatpally', 'mm graduation ante B Com', 'ఇ లేదు నాంత']);
-    check('a half-heard answer to "how many years / qualification" is taken as the answer and the call goes on', gq.outs.slice(4).every((x) => !x.done) && /notice period|current salary|qualification|నోటీస్|సాలరీ/.test(gq.outs[5].say), gq.outs.slice(3).map((x) => x.say));
-    const gh = await talk('gq2', '9111222209', ['hello', 'yes', 'yes interested', 'Kukatpally']);
+    const fc1 = await talk('vac1', '9222333301', ['yes speaking', 'English', 'yes tell me', 'what is the salary?', 'yes interested', '3 years', 'B.Com', 'yes', 'one month', 'current ten thousand, expected twelve thousand', 'I stay in Kukatpally', 'no doubts', 'yes correct', 'yes I will send it']);
+    check('the call is built from the facts: the name, the language, who is calling, two minutes?, the vacancy', /^Good (morning|afternoon|evening), am I speaking with Kiran\?$/.test(fc1.first) && /which language/.test(fc1.outs[0].say) && /AI assistant calling from Teamlink Consultants/.test(fc1.outs[1].say) && /two minutes/.test(fc1.outs[1].say) && /We have an opening for HR Recruiter, based in Kukatpally/.test(fc1.outs[2].say) && /The salary is 10 thousand per month/.test(fc1.outs[2].say), fc1.outs.slice(0, 3).map((x) => x.say));
+    check('a question about the salary is answered from the facts, then the question is asked again', /^The salary is 10 thousand per month\. Would this be of interest/.test(fc1.outs[3].say), fc1.outs[3]);
+    check('one question at a time to the resume, then the close; the summary says INT', /relevant experience/.test(fc1.outs[4].say) && /highest qualification/.test(fc1.outs[5].say) && /currently working\?$/.test(fc1.outs[6].say) && /notice period\?$/.test(fc1.outs[7].say) && /current and expected salary/.test(fc1.outs[8].say) && /Kukatpally/.test(fc1.outs[9].say) && /any questions/.test(fc1.outs[10].say) && /confirm what I noted/.test(fc1.outs[11].say) && /resume/.test(fc1.outs[12].say) && fc1.outs[13].done === true && /^Disposition: INT/.test(fc1.dd.outcome().summary), fc1.outs.map((x) => x.say));
+    const fc2 = await talk('vac2', '9222333302', ['అవును', 'తెలుగు', ['అవును చెప్పండి', { heard: 'clear' }]]);
+    check('the language the person picks: the rest of the call is in Telugu, built from the same facts', fc2.dd.language === 'Telugu' && /రెండు నిమిషాలు/.test(fc2.outs[1].say) && /HR Recruiter/.test(fc2.outs[2].say) && /Kukatpally/.test(fc2.outs[2].say) && /10 వేలు/.test(fc2.outs[2].say), fc2.outs.map((x) => x.say));
+    const fc3 = await talk('vac3', '9222333303', [], FACTS.replace('Contact:', 'Language: Hindi; Contact:'));
+    check('"Language: Hindi" starts the call in Hindi', /क्या मेरी बात Kiran जी से/.test(fc3.first), fc3.first);
+    const fc4 = await talk('vac4', '9222333304', ['yes', 'English', 'yes', 'no', 'the salary is low', 'no', 'okay']);
+    check('"not interested": asks for the reason; pay: the budget, never a promise; then may we reach out again, a kind close', /specific reason/.test(fc4.outs[3].say) && /current budget/.test(fc4.outs[4].say) && !/increase/.test(fc4.outs[4].say) && /reach out again/.test(fc4.outs[5].say) && fc4.outs[6].done === true && fc4.dd.outcome().outcome === 'Not Interested', fc4.outs.map((x) => x.say));
+    const fc5 = await talk('vac5', '9222333305', ['yes', 'English', 'yes', 'సచ్చే']);
+    check('a half heard reply to the vacancy does not close the call', !fc5.outs[3].done, fc5.outs[3]);
+    const fc6 = await talk('vac6', '9222333306', [['', { heard: 'unclear' }]]);
+    check('the first reply, even when its words were not caught, goes on to the language (no "can you hear me?")', /which language/.test(fc6.outs[0].say) && !/Can you hear me/.test(fc6.outs[0].say), fc6.outs[0]);
+    const fc7 = await talk('vac7', '9222333307', ['yes', 'English', 'call me later I am busy', 'tomorrow at five in the evening']);
+    check('busy: asked for a better time, the answer is kept and the call ends (Call Back Later)', /better time to call you back/.test(fc7.outs[2].say) && fc7.outs[3].done === true && fc7.dd.outcome().outcome === 'Call Back Later' && /^Disposition: CB/.test(fc7.dd.outcome().summary), fc7.outs.map((x) => x.say));
+    const gq = await talk('gq1', '9111222208', ['yes', 'English', 'yes', 'yes interested', ['mm graduation ante B Com', { heard: 'unclear' }], ['ఇ లేదు నాంత', { heard: 'unclear' }]]);
+    check('a half-heard answer to "how many years / qualification" is taken as the answer and the call goes on', gq.outs.slice(4).every((x) => !x.done) && /qualification/.test(gq.outs[4].say) && /working/.test(gq.outs[5].say), gq.outs.map((x) => x.say));
+    const gh = await talk('gq2', '9111222209', ['yes', 'English', 'yes', 'yes interested']);
     const gh1 = await gh.dd.hear('', { heard: 'unclear' }); const gh2 = await gh.dd.hear('', { heard: 'unclear' }); const gh3 = await gh.dd.hear('', { heard: 'unclear' }); const gh4 = await gh.dd.hear('', { heard: 'unclear' });
     check('nothing at all heard: asked again up to four times before the line is called not clear', !gh1.done && !gh2.done && !gh3.done && !gh4.done, [gh1.say, gh4.say]);
-    // THE TWO DOCUMENTS (AI Voice Calling Agent + Professional AI, 2026-11-05): budget, summary read-back, family / studies / work from home, long notice, company / benefits / interview, language question
-    const pp_full = ['hello', 'yes', 'yes interested', 'Kukatpally', '3 years', 'B.Com', 'I am working, notice period is 30 days'];
-    const pp_b1 = await talk('pro1', '9111222221', [...pp_full, 'current 9000 and expected 14000', 'yes', 'no doubts', 'yes correct']);
-    check('expected pay above the budget: the budget is said kindly, recruiter can discuss, asked if they still want to proceed; a yes goes on to the doubts', /budget for this role is 10 thousand per month/.test(pp_b1.outs[7].say) && /flexibility/.test(pp_b1.outs[7].say) && /still like to proceed\?$/.test(pp_b1.outs[7].say) && /any doubts about this job/.test(pp_b1.outs[8].say) && /Expected pay above the budget/.test(pp_b1.dd.outcome().summary), pp_b1.outs.slice(7).map((x) => x.say));
-    const pp_b2 = await talk('pro2', '9111222222', [...pp_full, 'expecting 40000', 'no']);
-    check('and a no to proceeding closes kindly (Not Interested)', pp_b2.outs[8].done === true && pp_b2.dd.outcome().outcome === 'Not Interested', pp_b2.outs[8]);
-    const pp_b3 = await talk('pro3', '9111222223', [...pp_full, 'current 9000 expected 10000']);
-    check('expected pay within the budget: no budget talk, the call goes on', /any doubts about this job/.test(pp_b3.outs[7].say) && !/budget/.test(pp_b3.outs[7].say), pp_b3.outs[7]);
-    const pp_sm = await talk('pro4', '9111222224', [...pp_full, 'current 9000 expected 10000', 'no doubts', 'no, notice is 45 days']);
-    check('before the last step the details are read back ("is that correct?"); a "no" is noted as a correction for the team and the call goes on', /Let me confirm what I noted\. Location, Kukatpally\. Experience, 3 years\./.test(pp_sm.outs[8].say) && /Is that correct\?$/.test(pp_sm.outs[8].say) && /note the correction/.test(pp_sm.outs[9].say) && /Correction to the details/.test(pp_sm.dd.outcome().summary), { a: pp_sm.outs[8].say, b: pp_sm.outs[9].say });
-    const pp_ln = await talk('pro5', '9111222225', ['hello', 'yes', 'yes interested', 'Kukatpally', '3 years', 'B.Com', 'I am working, my notice period is 90 days']);
-    check('a long notice period (60 days or more): noted and discussed with the hiring team', /discuss it with the hiring team/.test(pp_ln.outs[6].say) && /current salary/.test(pp_ln.outs[6].say), pp_ln.outs[6]);
-    const pp_fm = await talk('pro6', '9111222226', ['hello', 'yes', 'yes interested', 'I need to discuss this with my family first']);
-    check('"discuss with family": details on WhatsApp, follow-up in two days, the call ends as a call back', pp_fm.outs[3].done === true && /review them with your family/.test(pp_fm.outs[3].say) && pp_fm.dd.outcome().outcome === 'Call Back Later' && /^Disposition: CB/.test(pp_fm.dd.outcome().summary), pp_fm.outs[3]);
-    const pp_hs = await talk('pro7', '9111222227', ['hello', 'yes', 'no', 'no, I am preparing for higher studies']);
-    check('"higher studies": a kind wish, records updated, the call ends (Not Interested)', pp_hs.outs[3].done === true && /success in your studies/.test(pp_hs.outs[3].say) && pp_hs.dd.outcome().outcome === 'Not Interested', pp_hs.outs[3]);
-    const pp_wf = await talk('pro8', '9111222228', ['hello', 'yes', 'no', 'I am looking only for work from home']);
-    check('"only work from home": the preference is noted, a remote opening will be told, the call ends', pp_wf.outs[3].done === true && /work from home/.test(pp_wf.outs[3].say), pp_wf.outs[3]);
-    const pp_qa = await talk('pro9', '9111222229', ['hello', 'yes', 'yes interested', 'which company is this?']);
-    const pp_qb = await talk('pro10', '9111222230', ['hello', 'yes', 'yes interested', 'what benefits does the company give?']);
-    const pp_qc = await talk('pro11', '9111222231', ['hello', 'yes', 'yes interested', 'is the interview online or offline?']);
-    check('"which company?" is answered from the facts; benefits not in the facts: the recruiter will confirm; interview mode: decided by the hiring team', /This is for Teamlink Consultants/.test(pp_qa.outs[3].say) && /our recruiter will confirm it with you directly/.test(pp_qb.outs[3].say) && /interview mode will be decided by the hiring team/.test(pp_qc.outs[3].say), [pp_qa.outs[3].say, pp_qb.outs[3].say, pp_qc.outs[3].say]);
-    const pp_lq0 = await omni.create({ externalId: 'pro12', toNumber: '9111222232', name: 'Kiran', script: FACTS + '; Language choice: yes' }, { ...deps, ami: AMI });
-    const pp_lqd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(pp_lq0.id)); pp_lqd.start();
-    const pp_lq1 = await pp_lqd.hear('hello'); const pp_lq2 = await pp_lqd.hear('yes'); const pp_lq3 = await pp_lqd.hear('Telugu please');
-    check('the optional language question: asked after "one minute?"; the answer (Telugu) moves the rest of the call to Telugu', /one minute/.test(pp_lq1.say) && /Which language are you most comfortable with/.test(pp_lq2.say) && pp_lqd.language === 'Telugu' && /HR Recruiter/.test(pp_lq3.say) && /ఇంట్రెస్ట్/.test(pp_lq3.say), { pp_lq2: pp_lq2.say, lang: pp_lqd.language, pp_lq3: pp_lq3.say });
-    const pp_rc = await omni.create({ externalId: 'pro13', toNumber: '9111222233', name: 'Kiran', script: FACTS + '; Channel: 98480 12345 on WhatsApp' }, { ...deps, ami: AMI });
-    const pp_rcd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(pp_rc.id)); pp_rcd.start(); let pp_rcLast = '';
-    for (const t of ['hello', 'yes', 'yes interested', 'Kukatpally', '3 years', 'B.Com', 'working 30 days', 'current 9000 expected 10000', 'no doubts', 'yes']) pp_rcLast = (await pp_rcd.hear(t)).say;
-    check('the resume channel from the facts is used in the next step', /share your updated resume on 98480 12345 on WhatsApp/.test(pp_rcLast), pp_rcLast);
-    const pp_mz = VAC.moneyIn('current 27k, expecting 30-32k');
-    check('money in a sentence is read (27k, 32k, 8 LPA, within / above the budget)', pp_mz.length === 2 && pp_mz[0].v === 27000 && pp_mz[1].v === 32000 && VAC.overBudget({ salary: 'up to 30,000 per month' }, 'current 27k, expecting 30-32k') === true && VAC.overBudget({ salary: '8 LPA' }, 'expected 7 LPA') === false && VAC.overBudget({ salary: '8 LPA' }, 'I expect 10 LPA') === true, pp_mz);
     // a call that was CUT before its conversation ended is marked dropped (Omni-Channel rings again); a finished one is not
     const dr = await omni.create({ externalId: 'drop1', toNumber: '9111222210', name: 'Kiran', script: FACTS }, { ...deps, ami: AMI });
     const ddr = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(dr.id)); ddr.start(); await ddr.hear('hello');
@@ -336,7 +260,7 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     await sip.sweep(Date.now() + 3 * 3600000);
     const rt1 = await omni.status(rs1.id); const rt2 = await omni.status(rs2.id);
     check('a call cut off by a server restart is dropped (rung again); one that never answered is not', rt1.ended && rt1.dropped === true && rt1.status === 'failed' && rt2.status === 'no-answer' && rt2.dropped === false, { rt1: rt1.status + '/' + rt1.dropped, rt2: rt2.status + '/' + rt2.dropped });
-    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 50, { before, now: originated.length });
+    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 29, { before, now: originated.length });
     check('Asterisk refusing the call fails it in words (and leaves a failed row)', await (async () => { const x = await refuse({ toNumber: '9333333333' }, { ...deps, ami: { action: async () => ({ Response: 'Error', Message: 'no trunk' }) } }); return !x.ok && x.code === 'not_dialled'; })());
   } finally {
     await prisma.$disconnect().catch(() => {});
