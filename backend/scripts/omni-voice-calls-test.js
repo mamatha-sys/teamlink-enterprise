@@ -238,7 +238,15 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const nd2 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(nr2.id)); nd2.start(); await nd2.hear('hello'); await nd2.hear('yes'); await nd2.hear('no'); await nd2.hear('the salary is low');
     const n4 = await nd2.hear('yes I will attend');
     check('and if the person agrees to the interview, the call goes on with their details', /^(Okay|Alright|Sure|Right)[^.]*. Where are you currently located/.test(n4.say) || /Where are you currently located/.test(n4.say), n4);
-    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 21, { before, now: originated.length });
+    // TELUGU: "ఉంది" (it is / I am interested) is a yes; "శాలరి ఎంత" (how much salary) is answered from the facts; the question is asked again, not the whole block
+    const te = await omni.create({ externalId: 'vac11', toNumber: '9222333311', name: 'Kiran', script: FACTS }, { ...deps, ami: AMI });
+    const ted = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(te.id)); ted.start();
+    await ted.hear('అవును చెప్పండి', { heard: 'clear', lang: 'Telugu' });
+    const te1 = await ted.hear('చెప్పండి', { heard: 'clear', lang: 'Telugu' });
+    const te2 = await ted.hear('శాలరీ ఎంత', { heard: 'clear', lang: 'Telugu' });
+    const te3 = await ted.hear('ఉంది', { heard: 'clear', lang: 'Telugu' });
+    check('Telugu: the vacancy and the question; the salary question is answered from the facts with only the question again; "ఉంది" is a yes and the details follow', /ఆసక్తిగా ఉందా\?$/.test(te1.say) && /^జీతం 10 వేలు/.test(te2.say) && /ఆసక్తిగా ఉందా\?$/.test(te2.say) && !/పోస్టు ఖాళీగా/.test(te2.say) && /ఎక్కడ/.test(te3.say), { te1: te1.say, te2: te2.say, te3: te3.say });
+    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 22, { before, now: originated.length });
     check('Asterisk refusing the call fails it in words (and leaves a failed row)', await (async () => { const x = await refuse({ toNumber: '9333333333' }, { ...deps, ami: { action: async () => ({ Response: 'Error', Message: 'no trunk' }) } }); return !x.ok && x.code === 'not_dialled'; })());
   } finally {
     await prisma.$disconnect().catch(() => {});

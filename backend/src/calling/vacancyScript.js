@@ -123,11 +123,12 @@ const A = {
   Telugu: { salary: (f) => `జీతం ${f.salary}.`, location: (f) => `స్థలం ${f.location}.`, qualification: (f) => `అర్హత ${f.qualification}.`, role: (f) => `పోస్టు ${f.role}${f.details ? `: ${f.details}` : ''}.`, experience: (f) => `అనుభవం ${f.experience}.` },
   Hindi: { salary: (f) => `वेतन ${f.salary}।`, location: (f) => `स्थान ${f.location}।`, qualification: (f) => `योग्यता ${f.qualification}।`, role: (f) => `पद ${f.role}${f.details ? `: ${f.details}` : ''}।`, experience: (f) => `अनुभव ${f.experience}।` },
 };
-function answer(factsIn, text, lang) {
+// strict: only the pay / place / qualification / experience words count (the plain words of "role" - work, job - are in too many replies)
+function answer(factsIn, text, lang, strict = false) {
   if (!factsIn) return null;
   const facts = sayable(factsIn, lang);
   const a = A[lang] || A.English;
-  const hit = ['salary', 'location', 'qualification', 'experience', 'role'].find((k) => Q[k].test(String(text || '')) && facts[k]);
+  const hit = ['salary', 'location', 'qualification', 'experience', 'role'].filter((k) => !(strict && k === 'role')).find((k) => Q[k].test(String(text || '')) && facts[k]);
   return hit ? a[hit](facts) : null;
 }
 

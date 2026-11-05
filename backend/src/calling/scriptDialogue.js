@@ -221,6 +221,8 @@ class ScriptDialogue extends D.Dialogue {
     }
     let k = D.classify(text);
     if (k.intent === 'unclear' && /\b(not going to|don'?t want|do not want|no interest|not required|not looking|leave me|stop talking)\b|వద్దు|ఇష్టం లేదు|నాకు అక్కర్లేదు|नहीं चाहिए|मुझे नहीं/i.test(text)) k = { ...k, intent: 'no' };
+    const stepNow = this.steps[sc.idx];
+    if (k.intent === 'unclear' && stepNow && (stepNow.kind === 'ask' || stepNow.kind === 'interest') && /ఉంది|ఉన్నాను|ఉన్నాం|చెప్పండి|చెప్పు\b|అలాగే|ఓకే|సరే|हाँ|हां|ठीक है|रुचि है|दिलचस्पी है|बताइए|बताओ/.test(text) && !/లేదు|వద్దు|కాదు|नहीं/.test(text)) k = { ...k, intent: 'yes' };
     turn.understood = k.intent;
     st.lastHeard = text;
     if (k.human) st.human = true;
@@ -241,7 +243,7 @@ class ScriptDialogue extends D.Dialogue {
       st.identity = true;
     } else {
       // a question the script cannot answer from verified facts is noted for the recruiter, never answered from memory
-      if (this.facts && st.pitchAt !== sc.idx && (k.intent === 'info_q' || k.intent === 'salary_q' || k.intent === 'other_cand') && vacancy.answer(this.facts, text, this.language)) {
+      if (this.facts && st.pitchAt !== sc.idx && (k.intent === 'info_q' || k.intent === 'salary_q' || k.intent === 'other_cand' || (k.intent === 'unclear' && vacancy.answer(this.facts, text, this.language, true))) && vacancy.answer(this.facts, text, this.language)) {
         turn.understood = 'question_noted';
         return { say: this.speak(vacancy.answer(this.facts, text, this.language), cur.kind === 'ask' || cur.kind === 'interest' ? this.line(sc.idx) : this.again()), done: false }; // answered from the facts, then the question again
       }
@@ -277,7 +279,7 @@ class ScriptDialogue extends D.Dialogue {
         else if (k.intent === 'maybe') st.interest = 'unsure';
         else { // not a plain yes / no: asked once more, then taken as unsure
           sc.silent += 1;
-          if (sc.silent <= 1) return { say: this.speak(this.again()), done: false };
+          if (sc.silent <= 1) return { say: this.speak(this.line(sc.idx)), done: false };
           st.interest = 'unsure';
         }
       }
