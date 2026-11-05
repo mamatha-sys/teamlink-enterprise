@@ -197,6 +197,7 @@ router.post('/person/:audience/:id/send', require('../channels/rateLimit').limit
     return sendFail(res, 409, outside ? 'OUTSIDE_24H' : 'NOT_SENT', outside && !/More than 24/.test(why) ? `${WC.WORDS.OUTSIDE_24H} (${why})` : why, outside ? { needsTemplate: true } : undefined);
   }
   await WC.markRead(u, a.type, a.id).catch(() => {}); // answering a chat means you have seen it
+  await require('../omniwa/agent').noteHumanSend(a.type, a.id, u.name); // eslint-disable-line global-require
   return res.json({
     ok: true, id: out.jobId || `s${Date.now().toString(36)}`, stillSending: !!out.stillSending, sandbox: !!(out.result && out.result.sandbox),
     sentFrom: sending.label || null, mode: byTemplate && !withResume ? 'template' : (withResume ? 'file' : 'text'),

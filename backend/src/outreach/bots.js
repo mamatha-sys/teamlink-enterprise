@@ -394,6 +394,7 @@ async function handle(m, now) {
   const who = { personType: String(m.personType), personId: String(m.personId) };
   const body = String(m.body || '');
   if (isStop(body)) return optOutFor(who, await personCtx(who.personType, who.personId, m.address), now);
+  if (who.personType === 'CANDIDATE' && await require('../omniwa/agent').ownsChat({ candidateId: who.personId })) return { skipped: 'ai_agent' }; // eslint-disable-line global-require
   const flows = (await rawFlows('AND status = \'on\'')).map((r) => ({ ...viewOf(r), createdById: r.createdById }));
   if (!flows.length) return { skipped: 'no_flows' };
   const ctx = await personCtx(who.personType, who.personId, m.address);

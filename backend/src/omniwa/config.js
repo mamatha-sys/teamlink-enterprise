@@ -1,0 +1,90 @@
+// ---------------------------------------------------------------------------
+// WHATSAPP AI AGENT: the Admin's settings (Omni-Channel > Settings > WhatsApp AI) and the knowledge base. OFF until an Admin switches it on.
+// ---------------------------------------------------------------------------
+const S = require('../outreach/store');
+const { ensure } = require('./schema');
+const { digitsOf } = require('../utils/messageDelivery');
+
+const DEFAULT_PROMPT = 'You are the WhatsApp assistant of a recruitment company. You help candidates who replied to a job message. Be polite and friendly.';
+const DEFAULT_FALLBACK = 'Thanks for your message. Our team will get back to you soon.';
+const DEFAULTS = { enabled: false, model: '', systemPrompt: DEFAULT_PROMPT, hoursOn: false, hoursFrom: '09:30', hoursTo: '18:30', fallbackMessage: DEFAULT_FALLBACK, maxTurns: 12, memoryCount: 12, debounceSeconds: 10, promoDays: 7, testNumbers: [] };
+const HM = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const whole = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
+
+const shape = (r) => (r ? {
+  enabled: !!r.enabled, model: r.model || '', systemPrompt: r.systemPrompt || DEFAULT_PROMPT, hoursOn: !!r.hoursOn, hoursFrom: r.hoursFrom || DEFAULTS.hoursFrom, hoursTo: r.hoursTo || DEFAULTS.hoursTo,
+  fallbackMessage: r.fallbackMessage || DEFAULT_FALLBACK, maxTurns: Number(r.maxTurns) || DEFAULTS.maxTurns, memoryCount: Number(r.memoryCount) || DEFAULTS.memoryCount,
+  debounceSeconds: Number(r.debounceSeconds) || DEFAULTS.debounceSeconds, promoDays: Number(r.promoDays) || DEFAULTS.promoDays,
+  testNumbers: String(r.testNumbers || '').split(',').filter(Boolean), updatedByName: r.updatedByName || null, updatedAt: r.updatedAt ? Number(r.updatedAt) : null,
+} : { ...DEFAULTS });
+
+async function read() {
+  await ensure();
+  return shape((await S.q('SELECT * FROM "OmniWaAiConfig" WHERE id = \'main\''))[0]);
+}
+
+async function save(user, b = {}) {
+  await ensure();
+  const c = await read();
+  const next = {
+    enabled: b.enabled === undefined ? c.enabled : !!b.enabled,
+    model: b.model === undefined ? c.model : S.clip(String(b.model).trim(), 80) || '',
+    systemPrompt: b.systemPrompt === undefined ? c.systemPrompt : S.clip(String(b.systemPrompt).trim(), 6000),
+    hoursOn: b.hoursOn === undefined ? c.hoursOn : !!b.hoursOn,
+    hoursFrom: b.hoursFrom === undefined ? c.hoursFrom : String(b.hoursFrom), hoursTo: b.hoursTo === undefined ? c.hoursTo : String(b.hoursTo),
+    fallbackMessage: b.fallbackMessage === undefined ? c.fallbackMessage : S.clip(String(b.fallbackMessage).trim(), 700),
+    maxTurns: b.maxTurns === undefined ? c.maxTurns : whole(b.maxTurns, 1, 50, c.maxTurns),
+    memoryCount: b.memoryCount === undefined ? c.memoryCount : whole(b.memoryCount, 2, 40, c.memoryCount),
+    debounceSeconds: b.debounceSeconds === undefined ? c.debounceSeconds : whole(b.debounceSeconds, 2, 120, c.debounceSeconds),
+    promoDays: b.promoDays === undefined ? c.promoDays : whole(b.promoDays, 1, 30, c.promoDays),
+    testNumbers: b.testNumbers === undefined ? c.testNumbers : [...new Set((Array.isArray(b.testNumbers) ? b.testNumbers : String(b.testNumbers).split(/[\s,;]+/)).map((n) => digitsOf(n)).filter((n) => n.length >= 10))],
+  };
+  if (!next.systemPrompt) return { error: 'Write the system prompt first.', status: 400 };
+  if (!next.fallbackMessage) return { error: 'Write the fallback message first.', status: 400 };
+  if (next.hoursOn && (!HM.test(next.hoursFrom) || !HM.test(next.hoursTo))) return { error: 'Working hours are written like 09:30.', status: 400 };
+  await S.run(`INSERT INTO "OmniWaAiConfig" (id, enabled, model, systemPrompt, hoursOn, hoursFrom, hoursTo, fallbackMessage, maxTurns, memoryCount, debounceSeconds, promoDays, testNumbers, updatedByName, updatedAt)
+    VALUES ('main',?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled, model=excluded.model, systemPrompt=excluded.systemPrompt, hoursOn=excluded.hoursOn, hoursFrom=excluded.hoursFrom, hoursTo=excluded.hoursTo,
+    fallbackMessage=excluded.fallbackMessage, maxTurns=excluded.maxTurns, memoryCount=excluded.memoryCount, debounceSeconds=excluded.debounceSeconds, promoDays=excluded.promoDays, testNumbers=excluded.testNumbers, updatedByName=excluded.updatedByName, updatedAt=excluded.updatedAt`,
+  next.enabled ? 1 : 0, next.model, next.systemPrompt, next.hoursOn ? 1 : 0, next.hoursFrom, next.hoursTo, next.fallbackMessage, next.maxTurns, next.memoryCount, next.debounceSeconds, next.promoDays, next.testNumbers.join(','), user ? user.name : null, Date.now());
+  return { ok: true, config: await read() };
+}
+
+// ---- knowledge base ------------------------------------------------------------------------------------------------------------------------------
+async function kbList() {
+  await ensure();
+  return (await S.q('SELECT id, question, answer, active, updatedByName, updatedAt FROM "OmniWaKnowledge" ORDER BY updatedAt DESC')).map((r) => ({ ...r, active: !!r.active, updatedAt: Number(r.updatedAt) }));
+}
+async function kbSave(user, id, b = {}) {
+  await ensure();
+  const question = S.clip(String(b.question || '').trim(), 300);
+  const answer = S.clip(String(b.answer || '').trim(), 1500);
+  if (!question || !answer) return { error: 'Write the question and its answer.', status: 400 };
+  const now = Date.now();
+  const active = b.active === false ? 0 : 1;
+  if (id) {
+    const n = await S.run('UPDATE "OmniWaKnowledge" SET question = ?, answer = ?, active = ?, updatedByName = ?, updatedAt = ? WHERE id = ?', question, answer, active, user ? user.name : null, now, String(id));
+    if (!n) return { error: 'This entry is gone.', status: 404 };
+    return { ok: true, id: String(id) };
+  }
+  const newId = S.newId('wak');
+  await S.run('INSERT INTO "OmniWaKnowledge" (id, question, answer, active, updatedByName, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?)', newId, question, answer, active, user ? user.name : null, now, now);
+  return { ok: true, id: newId };
+}
+async function kbRemove(id) {
+  await ensure();
+  await S.run('DELETE FROM "OmniWaKnowledge" WHERE id = ?', String(id));
+  return { ok: true };
+}
+// the entries closest to the question (shared words, longer words count more)
+async function kbSearch(query, limit = 3) {
+  await ensure();
+  const words = [...new Set(String(query || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2))];
+  if (!words.length) return [];
+  const rows = await S.q('SELECT question, answer FROM "OmniWaKnowledge" WHERE active = 1');
+  return rows.map((r) => {
+    const q = String(r.question).toLowerCase(); const a = String(r.answer).toLowerCase();
+    return { ...r, score: words.reduce((n, w) => n + (q.includes(w) ? 2 * w.length : 0) + (a.includes(w) ? w.length : 0), 0) };
+  }).filter((r) => r.score > 0).sort((x, y) => y.score - x.score).slice(0, limit).map(({ question, answer }) => ({ question, answer }));
+}
+
+module.exports = { read, save, kbList, kbSave, kbRemove, kbSearch, DEFAULT_PROMPT, DEFAULT_FALLBACK };

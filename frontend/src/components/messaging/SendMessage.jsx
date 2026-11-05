@@ -63,6 +63,9 @@ export function SendManyDialog({
   const [fin, setFin] = useState(false);
   const [campaignOpen, setCampaignOpen] = useState(false); // "Make it a campaign" (Omni-Channel app campaign)
   const [tick, setTick] = useState(0); // a failed check tries again by itself (the server may be restarting)
+  const [promoJobs, setPromoJobs] = useState([]); // WhatsApp promotion: which job it is about (the AI answers the replies about that job)
+  const [promoJob, setPromoJob] = useState('');
+  const [seenBy, setSeenBy] = useState([]); // another recruiter reached them in the last 7 days
   const tries = useRef(0);
   const refs = useRef({});
   const noun = WHO[audience] || 'person';
@@ -99,6 +102,12 @@ export function SendManyDialog({
   };
   const ready = !tooMany && targets.length && channels.length && purpose !== null && !(writeOwn && channels.some((c) => !(edits[c] && edits[c].body && edits[c].body.trim())));
 
+  const sendsWa = channels.includes('WhatsApp') && audience === 'candidates';
+  useEffect(() => {
+    if (!sendsWa) return;
+    api.get('/omni-wa/promo-jobs').then((r) => setPromoJobs(r.data.jobs || [])).catch(() => setPromoJobs([]));
+    api.post('/omni-wa/already-contacted', { ids: targets }).then((r) => setSeenBy(r.data.people || [])).catch(() => setSeenBy([]));
+  }, [sendsWa]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!ready || !usable || stage !== 'compose') { return undefined; }
     const t = setTimeout(() => {
@@ -116,7 +125,7 @@ export function SendManyDialog({
   async function start() {
     setBusy(true); setErr('');
     try {
-      const r = await api.post('/messaging/bulk', { ...request, confirmPeople: pv.peopleToSend });
+      const r = await api.post('/messaging/bulk', { ...request, confirmPeople: pv.peopleToSend, promoRequirementId: requirementId || promoJob || undefined });
       setJob(r.data); setStage('progress');
       if (onSent) onSent(r.data);
     } catch (e) {
@@ -209,6 +218,16 @@ export function SendManyDialog({
       )}
 
       {channels.includes('WhatsApp') && wa.node}
+      {sendsWa && !requirementId && promoJobs.length > 0 && (
+        <div className="field">
+          <label>Which job is this about?</label>
+          <Combo value={promoJob} onChange={(e) => setPromoJob(e.target.value)} emptyText="No such job">
+            <option value="">No job</option>
+            {promoJobs.map((j) => <option key={j.id} value={j.id}>{j.title}{j.code ? ` (${j.code})` : ''}</option>)}
+          </Combo>
+        </div>
+      )}
+      {sendsWa && seenBy.length > 0 && <div className="msg-box orange" role="status">Already contacted in the last 7 days by another recruiter: {seenBy.length} of these {targets.length} ({[...new Set(seenBy.map((s) => s.byName))].slice(0, 3).join(', ')}).</div>}
       {channels.map((c) => {
         const t = purpose ? templateFor(usable, purpose, c, language) : null;
         const locked = !!(t && t.locked);

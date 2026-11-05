@@ -6,9 +6,12 @@ import { pollDelay } from './waChatLogic.js';
 //   * `fn` may return false to stop for good (for example when the server says this login has no chats)
 //   * coming back to the tab asks again after a moment
 //   * leaving the screen aborts the request in flight and stops the timer
-export default function useVisiblePoll(fn, baseMs, { enabled = true, key = '' } = {}) {
+// `nudge`: a number that changes when the server said "something changed": ask now, do not wait for the timer.
+export default function useVisiblePoll(fn, baseMs, { enabled = true, key = '', nudge = 0 } = {}) {
   const ref = useRef(fn);
   ref.current = fn;
+  const now = useRef(null);
+  useEffect(() => { if (nudge && now.current) now.current(); }, [nudge]);
   useEffect(() => {
     if (!enabled) return undefined;
     let stop = false; let timer = null; let fails = 0;
@@ -27,6 +30,7 @@ export default function useVisiblePoll(fn, baseMs, { enabled = true, key = '' } 
       }
       arm(pollDelay(baseMs, fails));
     }
+    now.current = tick;
     arm(baseMs);
     const onVisible = () => { if (document.visibilityState === 'visible') arm(600); };
     document.addEventListener('visibilitychange', onVisible);

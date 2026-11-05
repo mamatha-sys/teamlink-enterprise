@@ -80,6 +80,7 @@ async function applyStatus(info) {
   let R = null; let sev = null;
   try { R = require('../outreach/omni/replyRouter'); sev = await R.beginStatus(info); } catch { R = null; } // eslint-disable-line global-require
   const done = async (out) => { if (R && sev && !sev.duplicate) await R.endStatus(sev, out && out.matched); return out; };
+  require('../omniwa/promo').onStatus({ providerRef: info.providerRef, status, error: info.error }); // eslint-disable-line global-require
   return done(await applyStatusInner(info, status));
 }
 async function applyStatusInner(info, status) {
@@ -147,7 +148,9 @@ async function applyInbound(info) {
   if (ev && ev.duplicate) return { stored: true, duplicate: true, stop: STOP_WORDS.test(String(info.text || '')) };
   if (ev && ev.id && info.numberId) { try { await require('../outreach/store').run('UPDATE "OmniProviderEvent" SET payload = ? WHERE id = ?', JSON.stringify({ numberId: info.numberId }), ev.id); } catch { /* the tag is a courtesy */ } } // eslint-disable-line global-require
   try {
-    return await processInbound(info, { channel, e164, at, providerId, R, ev });
+    const out = await processInbound(info, { channel, e164, at, providerId, R, ev });
+    if (channel === 'WhatsApp') await require('../omniwa/agent').onInbound(info, out); // Omni-Channel WhatsApp: kept for the inbox and the AI agent; never throws // eslint-disable-line global-require
+    return out;
   } catch (err) {
     if (R && ev) await R.fail(ev, err);
     throw err;

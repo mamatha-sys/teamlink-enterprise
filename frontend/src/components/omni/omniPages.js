@@ -11,6 +11,7 @@
 export const PAGES = {
   overview: { label: 'Overview', icon: '⌂', title: 'Overview' },
   inbox: { label: 'Inbox', icon: '▣', title: 'Inbox' },
+  whatsapp: { label: 'WhatsApp', icon: '✆', title: 'WhatsApp chats with the AI assistant' },
   review: { label: 'Needs review', icon: '❓', title: 'Replies that need a person to check' },
   tplshared: { label: 'Template library', icon: '▤', title: 'Template library' },
   templates: { label: 'Create & channels', icon: '✎', title: 'Templates' },
@@ -39,6 +40,7 @@ export const PAGES = {
   shopify: { label: 'Shopify', icon: '▧', title: 'Shopify' },
   analytics: { label: 'Reports', icon: '⌁', title: 'Analytics & Reports' },
   settings: { label: 'Settings', icon: '⚙', title: 'Settings' },
+  waai: { label: 'WhatsApp AI', icon: '✆', title: 'WhatsApp AI assistant' },
   team: { label: 'Team & roles', icon: '◔', title: 'Team & Roles' },
   billing: { label: 'Billing', icon: '₹', title: 'Billing' },
   superadmin: { label: 'Super Admin', icon: '◇', title: 'Super Admin' },
@@ -47,7 +49,7 @@ export const PAGES = {
 // the ten sections, in the founder's order. `views` = the tabs of the section (first allowed one opens by itself)
 export const SECTIONS = [
   { id: 'overview', label: 'Overview', icon: '⌂', views: ['overview'] },
-  { id: 'inbox', label: 'Inbox & Replies', icon: '▣', views: ['inbox', 'review'] },
+  { id: 'inbox', label: 'Inbox & Replies', icon: '▣', views: ['inbox', 'whatsapp', 'review'] },
   { id: 'templates', label: 'Templates', icon: '▤', views: ['tplshared', 'templates', 'studio'] },
   { id: 'campaigns', label: 'Campaigns', icon: '◉', views: ['campaigns', 'aivoice', 'appcampaigns', 'credituse', 'console'] },
   { id: 'promotions', label: 'Promotions', icon: '✦', views: ['social', 'adsmanager', 'googlecampaigns', 'googleads', 'ganalytics'] },
@@ -55,7 +57,7 @@ export const SECTIONS = [
   { id: 'automation', label: 'Automation', icon: '⟳', views: ['automation', 'botbuilder', 'botdata'] },
   { id: 'connections', label: 'Channel Connections', icon: '⚯', views: ['connections', 'fbchannel', 'igchannel', 'fbcatalogs', 'shopify'] },
   { id: 'reports', label: 'Reports', icon: '⌁', views: ['analytics'] },
-  { id: 'settings', label: 'Settings & Audit Log', icon: '⚙', views: ['settings', 'team', 'billing', 'superadmin', 'audit'] },
+  { id: 'settings', label: 'Settings & Audit Log', icon: '⚙', views: ['settings', 'waai', 'team', 'billing', 'superadmin', 'audit'] },
 ];
 export const SECTION_IDS = SECTIONS.map((s) => s.id);
 export const ALL_IDS = Object.keys(PAGES);

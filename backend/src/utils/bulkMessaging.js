@@ -554,6 +554,7 @@ async function createJob(user, input) {
     entities: plan.entities,
     outOfScope: plan.outOfScope,
     omniNote: plan.omniNote || null,
+    requirementId: input.promoRequirementId ? String(input.promoRequirementId).slice(0, 60) : null, // which job a WhatsApp promotion is about (Omni-Channel: the AI answers replies about it)
     contactKind: plan.contactKind || 'primary',
     masked: !!plan.masked,
     status: queued.length ? 'queued' : 'done',
@@ -604,6 +605,7 @@ async function sendOne(job, r) {
 async function logHistory(job) {
   // A bulk send logs what went or failed; a one-person send also logs why it was blocked.
   const pending = job.recipients.filter((r) => (['sent', 'failed'].includes(r.status) || (job.kind === 'individual' && r.status === 'blocked')) && !r.logged);
+  await require('../omniwa/promo').logBulk(job, pending); // Omni-Channel WhatsApp: job, campaign, template, recruiter, status // eslint-disable-line global-require
   if (job.audience === 'candidates') {
     const rows = pending.map((r) => ({
       candidateId: r.entityId,

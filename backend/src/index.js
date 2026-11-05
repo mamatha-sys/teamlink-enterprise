@@ -356,6 +356,7 @@ app.use('/api/rcs', require('./routes/rcs')); // RCS messaging (rcssms.in): temp
 // Automatic stage messages: rules, scheduled list, approvals (routes/autoMessages.js).
 app.use('/api/auto-messages', require('./routes/autoMessages'));
 app.use('/api/conversations', require('./routes/conversations'));
+app.use('/api/omni-wa', require('./routes/omniWa')); // Omni-Channel > WhatsApp: inbox with the AI agent, promotions, AI settings (omniwa/)
 app.use('/api/wa-chats', require('./routes/waChats')); // the recruiter's WhatsApp chat screen: list, chat, send, follow-up, media, Admin test tools (utils/waChats.js)
 app.use('/api/admin/view-as', require('./routes/viewAs')); // Super Admin read-only View as
 app.use('/api/admin/integration-health', require('./routes/integrationHealth')); // Job Portal / Email / eSSL / AI health (read-only + person-pressed retry)
@@ -522,6 +523,7 @@ const server = app.listen(PORT, () => {
   require('./utils/greenStartSupervisor').start();
   // One set of integrations (2026-10-30): TeamLink's Email / SMS / WhatsApp go to Omni-Channel (Green Start) too, hourly and after every save.
   require('./utils/greenStartIntegrations').start();
+  require('./omniwa/agent').start(); // Omni-Channel WhatsApp: answers the waiting chats (does nothing until an Admin switches the AI on)
   require('./outreach/tplFromMeta').start(); // WhatsApp template approvals from Meta, TeamLink + Omni-Channel, every 15 minutes
   // TEST SANDBOX: no background workers or timers at all (utils/sandbox.js).
   if (sandbox.isSandbox()) { sandbox.banner(PORT); return; }

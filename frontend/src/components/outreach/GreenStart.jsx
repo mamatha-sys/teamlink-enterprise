@@ -248,6 +248,7 @@ function OpenGreenStart({ port, onNote }) {
       <button type="button" className="gs-btn" onClick={open} disabled={busy}>{busy ? 'Opening…' : 'Open Green Start'}</button>
       {/* founder 2026-11-04: credits used by each department / person against the joinings they gave (Campaigns > Credits & joinings) */}
       <p><Link to={sectionPath('campaigns', 'credituse')}>Credits &amp; joinings: who used how many credits, and for how many joinings</Link></p>
+      <p><Link to={sectionPath('inbox', 'whatsapp')}>WhatsApp chats with the AI assistant, and your promotions</Link></p>
     </div>
   );
 }

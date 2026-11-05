@@ -227,6 +227,7 @@ function pagesFor(u) {
   add(h.dashboard, 'overview');
   add(h.inbox, 'inbox');
   add(h.inbox, 'review'); // Inbox & Replies > Needs review (replies that could not be matched with confidence)
+  add(h.inbox, 'whatsapp'); // Inbox & Replies > WhatsApp: the chats with the AI agent's state, promotions (each login within its own people)
   add(h.campaigns && maySendConsole(u), 'console');
   add(h.campaigns, 'aivoice'); // AI Voice: campaigns of the existing AI Calling (the AI Calling roles decide who may start one)
   add(h.campaigns, 'campaigns', 'appcampaigns'); // appcampaigns = campaigns made from the ATS / Job Portal / HRMS / Accounts screens
@@ -240,7 +241,7 @@ function pagesFor(u) {
   add(h.dashboard, 'connections'); // Channel Connections > Connection status + Sync health (reads only; no key is ever shown)
   add(true, 'billing');
   add(['admin', 'depthead', 'teamlead'].includes(l), 'team', 'audit');
-  add(l === 'admin', 'superadmin', 'settings');
+  add(l === 'admin', 'superadmin', 'settings', 'waai'); // waai = Settings > WhatsApp AI
   return out;
 }
 function me(u) {

@@ -1,0 +1,134 @@
+// ---------------------------------------------------------------------------
+// /api/omni-wa - Omni-Channel > Inbox & Replies > WhatsApp and Settings > WhatsApp AI. Logic: omniwa/.
+//
+//   GET  /conversations?filter=all|unread|ai|human&q=&owner=&requirementId=&campaign=     the list, each login within its own people
+//   GET  /conversations/:key                     the strip above a chat: AI state, 24-hour window, already contacted, what the AI collected
+//   POST /conversations/:key/pause | /resume     a person takes over / gives the chat back to the AI
+//   GET  /conversations/:key/messages , POST .../send      a lead's chat (a candidate's chat uses /api/wa-chats as everywhere else)
+//   GET  /promotions                             the promotion log
+//   POST /already-contacted { ids }              who else reached these candidates in the last 7 days
+//   GET  /stream                                 Server-Sent Events: "something changed", no names and no words
+//   Admin: GET|PUT /settings , GET /connection , GET|POST|PUT|DELETE /knowledge , GET /runs
+// ---------------------------------------------------------------------------
+const express = require('express');
+const { requireAuth } = require('../middleware/auth');
+const A = require('../outreach/access');
+const Cfg = require('../omniwa/config');
+const Inbox = require('../omniwa/inbox');
+const Agent = require('../omniwa/agent');
+const Live = require('../omniwa/live');
+const { logAudit } = require('../utils/audit');
+
+const router = express.Router();
+router.use(requireAuth);
+const wrap = (fn) => (req, res, next) => fn(req, res, next).catch(next);
+router.use((req, res, next) => (A.pagesFor(req.user).includes('whatsapp') || A.pagesFor(req.user).includes('waai') ? next() : res.status(403).json({ error: 'Not available to this login' })));
+const adminOnly = (req, res, next) => (A.pagesFor(req.user).includes('waai') ? next() : res.status(403).json({ error: 'Only an Admin can change this.' }));
+const send = (res, out) => (out && out.error ? res.status(out.status || 400).json({ error: out.error }) : res.json(out));
+
+router.get('/conversations', wrap(async (req, res) => res.json(await Inbox.list(req.user, req.query))));
+router.get('/conversations/:key', wrap(async (req, res) => {
+  const out = await Inbox.detail(req.user, req.params.key);
+  return out.error ? send(res, out) : res.json(out.view);
+}));
+
+async function own(req, res) {
+  const out = await Inbox.detail(req.user, req.params.key);
+  if (out.error) { send(res, out); return null; }
+  return out;
+}
+router.post('/conversations/:key/pause', wrap(async (req, res) => {
+  const d = await own(req, res);
+  if (!d) return undefined;
+  if (!d.conv) return res.status(409).json({ error: 'The AI is not in this chat.' });
+  await Agent.pause(d.conv, req.user.name);
+  await logAudit({ userId: req.user.id, action: 'WhatsApp AI paused', entity: 'OmniWaConv', entityId: d.conv.id }).catch(() => {});
+  return res.json((await Inbox.detail(req.user, req.params.key)).view);
+}));
+router.post('/conversations/:key/resume', wrap(async (req, res) => {
+  const d = await own(req, res);
+  if (!d) return undefined;
+  if (!d.conv) return res.status(409).json({ error: 'The AI is not in this chat.' });
+  if (d.conv.state === 'stopped') return res.status(409).json({ error: 'This person asked us to stop. The AI cannot come back.' });
+  await Agent.resume(d.conv);
+  await logAudit({ userId: req.user.id, action: 'WhatsApp AI resumed', entity: 'OmniWaConv', entityId: d.conv.id }).catch(() => {});
+  return res.json((await Inbox.detail(req.user, req.params.key)).view);
+}));
+router.get('/conversations/:key/messages', wrap(async (req, res) => {
+  const d = await own(req, res);
+  if (!d) return undefined;
+  if (!d.conv || d.conv.personType !== 'LEAD') return res.status(409).json({ error: 'Only a lead\'s chat is read here.' });
+  return res.json({ messages: await Inbox.leadMessages(d.conv.id) });
+}));
+router.post('/conversations/:key/send', wrap(async (req, res) => {
+  const d = await own(req, res);
+  if (!d) return undefined;
+  if (!d.conv || d.conv.personType !== 'LEAD') return res.status(409).json({ error: 'A candidate\'s chat is answered in the chat box.' });
+  const text = String((req.body || {}).text || '').trim();
+  if (!text) return res.status(400).json({ error: 'Write a message first.' });
+  if (text.length > 4000) return res.status(400).json({ error: 'This message is too long for WhatsApp (4000 letters at most).' });
+  const out = await Agent.sendText(d.conv, text, { user: req.user, ai: false });
+  if (!out.ok) return res.status(409).json({ error: out.error, code: out.code || 'NOT_SENT' });
+  await Agent.pause(d.conv, req.user.name);
+  return res.json({ ok: true });
+}));
+
+router.get('/promo-jobs', wrap(async (req, res) => {
+  const prisma = require('../db'); // eslint-disable-line global-require
+  const where = await require('../utils/scope').requirementWhere(req.user); // eslint-disable-line global-require
+  const jobs = await prisma.requirement.findMany({ where: { AND: [where, { status: 'OPEN' }] }, orderBy: { createdAt: 'desc' }, take: 300, select: { id: true, title: true, reqCode: true } }).catch(() => []);
+  res.json({ jobs: jobs.map((j) => ({ id: j.id, title: j.title, code: j.reqCode || null })) });
+}));
+router.get('/promotions', wrap(async (req, res) => res.json(await Inbox.promotions(req.user, req.query))));
+router.post('/already-contacted', wrap(async (req, res) => {
+  const ids = Array.isArray((req.body || {}).ids) ? req.body.ids : [];
+  const found = await Inbox.recentContact(req.user, ids);
+  res.json({ people: [...found.entries()].map(([id, v]) => ({ id, ...v })) });
+}));
+
+// Server-Sent Events. The screen reads this with fetch (it sends the login header); nginx must not hold it back.
+router.get('/stream', (req, res) => {
+  res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+  res.flushHeaders();
+  res.write('event: ready\ndata: {}\n\n');
+  let waiting = null;
+  const off = Live.subscribe(() => {
+    if (waiting) return;
+    waiting = setTimeout(() => { waiting = null; res.write(`event: change\ndata: ${Date.now()}\n\n`); }, 400); // many changes in a burst = one question to the server
+  });
+  const beat = setInterval(() => res.write(': alive\n\n'), 25000);
+  req.on('close', () => { off(); clearInterval(beat); if (waiting) clearTimeout(waiting); });
+});
+
+// ---- Admin ------------------------------------------------------------------------------------------------------------------------------------------
+router.get('/settings', adminOnly, wrap(async (req, res) => {
+  const ai = require('../utils/ai'); // eslint-disable-line global-require
+  res.json({ config: await Cfg.read(), model: await ai.checkStatus().catch(() => null) });
+}));
+router.put('/settings', adminOnly, wrap(async (req, res) => {
+  const before = await Cfg.read();
+  const out = await Cfg.save(req.user, req.body || {});
+  if (out.error) return send(res, out);
+  await logAudit({ userId: req.user.id, action: 'WhatsApp AI settings changed', entity: 'OmniWaAiConfig', entityId: 'main', fromValue: before.enabled ? 'On' : 'Off', toValue: out.config.enabled ? 'On' : 'Off' }).catch(() => {});
+  return res.json(out.config);
+}));
+// the WhatsApp connection as it stands: nothing secret leaves the server, the last four of an id at most
+router.get('/connection', adminOnly, wrap(async (req, res) => {
+  const WN = require('../utils/waNumbers'); // eslint-disable-line global-require
+  const delivery = require('../utils/messageDelivery'); // eslint-disable-line global-require
+  const tail = (s) => (s ? `••••${String(s).slice(-4)}` : null);
+  const rows = (await WN.listRows()).filter((r) => !r.removedAt);
+  const numbers = [];
+  for (const r of rows) {
+    const cfg = await WN.configOf(r).catch(() => null); // eslint-disable-line no-await-in-loop
+    numbers.push({ id: r.id, label: r.label, display: r.displayNumber, active: !!r.active, isDefault: !!r.isDefault, phoneNumberId: tail(r.phoneNumberId), hasToken: !!(cfg && cfg.token), hasVerifyToken: !!(cfg && cfg.verifyToken), hasAppSecret: !!(cfg && cfg.appSecret) });
+  }
+  res.json({ numbers, webhook: await delivery.seenOf('whatsapp') });
+}));
+router.get('/knowledge', adminOnly, wrap(async (req, res) => res.json({ entries: await Cfg.kbList() })));
+router.post('/knowledge', adminOnly, wrap(async (req, res) => send(res, await Cfg.kbSave(req.user, null, req.body || {}))));
+router.put('/knowledge/:id', adminOnly, wrap(async (req, res) => send(res, await Cfg.kbSave(req.user, req.params.id, req.body || {}))));
+router.delete('/knowledge/:id', adminOnly, wrap(async (req, res) => send(res, await Cfg.kbRemove(req.params.id))));
+router.get('/runs', adminOnly, wrap(async (req, res) => res.json({ runs: await Inbox.runs(req.query) })));
+
+module.exports = router;

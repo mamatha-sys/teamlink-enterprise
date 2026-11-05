@@ -137,8 +137,8 @@ function postJson(url, payload, timeoutMs) {
   });
 }
 
-async function ollamaChat(systemPrompt, history, { json = false } = {}) {
-  const model = ollamaModel();
+async function ollamaChat(systemPrompt, history, { json = false, model: wanted = null, timeoutMs = null } = {}) {
+  const model = wanted || ollamaModel();
   let res;
   try {
     res = await postJson(`${ollamaBase()}/api/chat`, {
@@ -150,7 +150,7 @@ async function ollamaChat(systemPrompt, history, { json = false } = {}) {
       options: { num_ctx: ollamaNumCtx(), temperature: json ? 0 : 0.2 },
       keep_alive: '30m',
       messages: [{ role: 'system', content: systemPrompt }, ...cleanHistory(history)],
-    }, chatTimeoutMs());
+    }, timeoutMs || chatTimeoutMs());
   } catch (err) {
     if (err && err.name === 'TimeoutError') {
       throw new AiError('The local AI took too long to answer. Try again — a follow-up is much quicker than the first question.', 504, 'timeout');
@@ -228,7 +228,7 @@ async function claudeConfig() {
   return cfg;
 }
 
-async function claudeChat(systemPrompt, history, { json = false } = {}) {
+async function claudeChat(systemPrompt, history, { json = false, model: wanted = null } = {}) {
   const cfg = await claudeConfig();
   const messages = claudeMessages(history);
   if (!messages.length) throw new AiError('Ask a question first.', 400, 'empty');
@@ -238,7 +238,7 @@ async function claudeChat(systemPrompt, history, { json = false } = {}) {
   let response;
   try {
     response = await clientFor(cfg.apiKey).messages.create({
-      model: cfg.model,
+      model: wanted || cfg.model,
       max_tokens: Math.min(cfg.maxTokens || CLAUDE_MAX_TOKENS, 4000),
       system,
       messages,
@@ -311,11 +311,12 @@ async function chat(systemPrompt, history) {
 
 // Parsed JSON. An unreadable reply is a clarify result, never a throw — the
 // agent route validates whatever comes back against its allowlist anyway.
-async function chatJson(systemPrompt, history) {
+// opts: { model, timeoutMs } for one call (the WhatsApp agent's own settings); empty = the app's model and time limit.
+async function chatJson(systemPrompt, history, opts = {}) {
   refuseWhileViewingAs();
   const text = provider() === 'claude'
-    ? await claudeChat(systemPrompt, history, { json: true })
-    : await ollamaChat(systemPrompt, history, { json: true });
+    ? await claudeChat(systemPrompt, history, { json: true, model: opts.model })
+    : await ollamaChat(systemPrompt, history, { json: true, model: opts.model, timeoutMs: opts.timeoutMs });
   const parsed = parseJsonLoose(text);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { ...CLARIFY_UNREADABLE };
   return parsed;

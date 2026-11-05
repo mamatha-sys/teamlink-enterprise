@@ -94,7 +94,7 @@ async function handle(info) {
     } else {
       await bell(camp);
       const st = await S.settings();
-      if (kind === 'interested' && st.autoReply.on && st.master) await autoReply(camp, row, e164);
+      if (kind === 'interested' && st.autoReply.on && st.master && !(await require('../omniwa/agent').ownsChat({ e164 }))) await autoReply(camp, row, e164); // eslint-disable-line global-require
     }
     return { matched: true, intent: kind, campaignId: camp.id };
   } catch (e) { console.error('[broadcast] reply:', e.message); return { matched: false, error: e.message }; } // eslint-disable-line no-console

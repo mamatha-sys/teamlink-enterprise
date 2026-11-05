@@ -132,7 +132,7 @@ function AddNote({ personId, applicationId, onDone }) {
 }
 
 // embedded = inside the candidate's own profile (CandidateConversation.jsx): no name / profile buttons / follow-up strip (the profile has them), just a slim line, the messages and the reply box.
-export default function WaChatPane({ audience, personId, row, cfg, onBack, onRead, onChanged, embedded = false }) {
+export default function WaChatPane({ audience, personId, row, cfg, onBack, onRead, onChanged, embedded = false, nudge = 0 }) {
   const isCand = audience === 'candidates';
   const [chat, setChat] = useState(null);
   const [msgs, setMsgs] = useState([]);
@@ -196,7 +196,7 @@ export default function WaChatPane({ audience, personId, row, cfg, onBack, onRea
     if (shouldMarkRead({ visible: document.visibilityState === 'visible', unread: 0, newIncoming: incoming })) markRead();
     if (incoming && onChanged) onChanged();
     return true;
-  }, 10000, { enabled: !!chat && !lost, key: `${audience}:${personId}` });
+  }, 10000, { enabled: !!chat && !lost, key: `${audience}:${personId}`, nudge });
 
   // keep the newest message in view (unless the person scrolled up to read)
   useEffect(() => {
