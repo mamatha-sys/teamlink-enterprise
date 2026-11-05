@@ -129,6 +129,7 @@ class ScriptDialogue extends D.Dialogue {
   start() {
     if (this.noQuestion) { // nothing to ask: Opening, the Say lines and the Closing are said together, then the call ends
       this.st.step = 'script';
+      this.st.messageOnly = true; // the message was delivered: not an unanswered call (Omni-Channel must not ring this person again)
       return this.endWith('Unclear', 'the message was said (the script has no question)', this.steps.map((_, i) => this.line(i)).join(' '));
     }
     const text = this.speak(this.line(0));

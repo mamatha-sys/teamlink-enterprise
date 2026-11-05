@@ -137,7 +137,7 @@ async function status(id) {
   return {
     id: row.id, status: row.status, ended, outcome: row.outcome || null, summary: row.summary || null, interest: row.interest || null, language: row.language || null,
     durationSec: Number(row.durationSec) || null, failReason: row.failReason || null, humanFollowUp: !!row.humanFollowUp, turns: ended ? turnsOf(row) : [],
-    optOut: row.nextAction === 'do-not-call', callBack: row.nextAction === 'call-back',
+    optOut: row.nextAction === 'do-not-call', callBack: row.nextAction === 'call-back', messageSaid: !!((svc.safeJson(row.botStateJson) || {}).messageOnly),
   };
 }
 

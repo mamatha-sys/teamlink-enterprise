@@ -107,6 +107,8 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const hd = await require('../src/calling/webTalk').dialogueFor(hrow);
     const hs = hd.start();
     check('it is said in one go (opening, the line, the closing) and the call ends', hs.done === true && /Hello Sravanthi, good morning/.test(hs.say) && /Have a nice day/.test(hs.say) && /Thank you\. Goodbye/.test(hs.say), hs);
+    await svc.setRow(hr.id, { botStateJson: JSON.stringify({ ...hd.snapshot(), done: true }), status: 'completed', endedAt: new Date().toISOString() });
+    check('Green Start is told the message was said in full (so the contact is not rung again as "unanswered")', (await omni.status(hr.id)).messageSaid === true);
     const ho = hd.outcome();
     check('the result is written for Green Start: a finished call, not "could not hear you"', !!ho.outcome && !/could not hear|not clear/i.test(ho.summary || ''), ho);
     // talks like a person: an "okay" before the next line, a short "sorry" (not the whole greeting again), "hello, can you hear me?" when nothing was heard at first
