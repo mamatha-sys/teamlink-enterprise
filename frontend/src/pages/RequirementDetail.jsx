@@ -3,6 +3,7 @@ import JobAutoMessages from '../components/automsg/JobAutoMessages.jsx'; // auto
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { rowClickProps } from '../utils/rowClick.js';
 import { useAuth } from '../context/AuthContext.jsx';
+import { assignKinds } from '../components/jobs/reqActions.js';
 import api from '../api';
 import Modal from '../components/Modal.jsx';
 import Combo from '../components/Combo.jsx';
@@ -1156,8 +1157,9 @@ export default function RequirementDetail() {
             </button>
           )}
           {/* Department-wise: only this job's department's people are offered. */}
-          {p.assign && !r.tlId && <button className="btn btn-sm" onClick={() => setBulkAssign('assign-tl')}>Assign TL</button>}
-          {p.assign && <button className="btn btn-sm" onClick={() => setBulkAssign('assign-recruiter')}>Assign recruiter</button>}
+          {/* The BDE side assigns team leads, a team lead assigns recruiters (founder 2026-11-05, reqActions.js assignKinds). */}
+          {p.assign && assignKinds(user).includes('assign-tl') && (!r.tlId || !assignKinds(user).includes('assign-recruiter')) && <button className="btn btn-sm" onClick={() => setBulkAssign('assign-tl')}>{r.tlId ? 'Change team lead' : 'Assign team lead'}</button>}
+          {p.assign && assignKinds(user).includes('assign-recruiter') && <button className="btn btn-sm" onClick={() => setBulkAssign('assign-recruiter')}>Assign recruiter</button>}
           {/* The one main button: add people to this job. */}
           {p.pipelineEdit && <button className={`btn btn-sm${isNewRequest ? '' : ' btn-primary'}`} onClick={() => setTab('candidates')}>Add candidate</button>}
         </div>

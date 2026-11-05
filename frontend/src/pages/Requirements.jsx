@@ -34,7 +34,7 @@ import RequestJobModal from '../components/jobs/RequestJobModal.jsx';
 import PostingTracker from '../components/jobdist/PostingTracker.jsx'; // job distribution: where jobs are posted / pending / expired (quick view)
 import { placeName } from '../components/jobdist/distKit.js';
 import PostedOnChips from '../components/jobs/reqsplit/PostedOnChips.jsx'; // 'Posted on' chips: Posted (link) / Queued / Needs your help / Failed
-import { waitingText, secondaryActions } from '../components/jobs/reqActions.js';
+import { waitingText, secondaryActions, assignKinds } from '../components/jobs/reqActions.js';
 import {
   PriorityChip, priorityLabel, ageText, slaInfo, lastActivityText, fmtDay, fmtWhen, nf,
 } from '../components/jobs/reqFormat.jsx';
@@ -660,8 +660,9 @@ export default function Requirements() {
   // The row's other actions (no "⋯" menu, 2026-10-03): up to 2 small
   // buttons on the row, ALL of them in the quick drawer (row click).
   // A BDE closes (never reopens); Admin may also delete.
+  const kinds = assignKinds(user);
   const menuFor = (r) => {
-    let items = secondaryActions(r, { mayExport });
+    let items = secondaryActions(r, { mayExport, kinds });
     // 2026-10-13: the BDE team has every job option a Super Admin has, except Delete (hold and reopen included)
     // A Manager / Assistant Manager acts in their own scope now (2026-10-03);
     // an Assistant Manager / STL holds and resumes only (r.holdOnly).
@@ -902,7 +903,7 @@ export default function Requirements() {
       case 'nextAction': {
         // ONE main button in plain words; Edit / Pause show on the hovered or
         // selected row (they are always in the Selected panel as well).
-        const act = rowPrimary(r, role);
+        const act = rowPrimary(r, role, kinds);
         const wait = waitingText(r);
         const quick = quickFor(r, menuFor(r), act.key);
         return (
@@ -1253,8 +1254,8 @@ export default function Requirements() {
                   {canPost && <button type="button" className="btn btn-sm btn-primary" title="Send the picked requirements to Naukri, Foundit, Shine and the careers page" onClick={() => setPublishFor(selectedItems.map((x) => x.id))}>Post selected requirements</button>}
                   {canPost && <button type="button" className="btn btn-sm" title="Walk through the boards that wait for a person to post them" onClick={() => openWalk(selectedItems.map((x) => x.id))}>Post by hand, one by one</button>}
                   {/* "Needs a TL" → Assign TL is the one main action; "Needs a recruiter" → Assign recruiter. */}
-                  {bulkActions.assign && view !== 'needstl' && <button type="button" className={`btn btn-sm${view === 'unassigned' ? ' btn-primary' : ''}`} onClick={() => setBulk({ kind: 'assign-recruiter', items: selectedItems })}>Assign recruiter</button>}
-                  {bulkActions.assign && view !== 'unassigned' && <button type="button" className={`btn btn-sm${view === 'needstl' ? ' btn-primary' : ''}`} onClick={() => setBulk({ kind: 'assign-tl', items: selectedItems })}>Assign team lead</button>}
+                  {bulkActions.assign && kinds.includes('assign-recruiter') && view !== 'needstl' && <button type="button" className={`btn btn-sm${view === 'unassigned' ? ' btn-primary' : ''}`} onClick={() => setBulk({ kind: 'assign-recruiter', items: selectedItems })}>Assign recruiter</button>}
+                  {bulkActions.assign && kinds.includes('assign-tl') && view !== 'unassigned' && <button type="button" className={`btn btn-sm${view === 'needstl' ? ' btn-primary' : ''}`} onClick={() => setBulk({ kind: 'assign-tl', items: selectedItems })}>Assign team lead</button>}
                   {bulkActions.priority && <button type="button" className="btn btn-sm" onClick={() => setBulk({ kind: 'priority', items: selectedItems })}>Change priority</button>}
                   {bulkActions.export && (
                     <ExportMenu
@@ -1354,6 +1355,7 @@ export default function Requirements() {
                   onAction={(k) => pickRowAction(current, k)}
                   onQuickView={() => setDrawer(current)}
                   actions={menuFor(current)}
+                  kinds={kinds}
                 />
               </Panel>
             </aside>
@@ -1379,7 +1381,7 @@ export default function Requirements() {
         <RequirementDrawer
           row={drawer}
           onClose={() => setDrawer(null)}
-          onAssign={(r) => setBulk({ kind: 'assign-recruiter', items: [rowItem(r)], fromDrawer: true })}
+          onAssign={kinds.includes('assign-recruiter') ? (r) => setBulk({ kind: 'assign-recruiter', items: [rowItem(r)], fromDrawer: true }) : null}
           actions={menuFor(drawer).filter((a) => a.key !== 'open')}
           onPick={(k) => { const row = drawer; setDrawer(null); pickRowAction(row, k); }}
         />

@@ -91,14 +91,26 @@ export function waitingText(r) {
   return `${r.nextAction}${r.owner ? ` · ${r.owner}` : ''}`;
 }
 
+// WHO ASSIGNS WHOM (founder 2026-11-05: "bde tl ki ... assign teamlead ani raavali. med tl, mfg tl, non it med tl, edu tls vellu, vellaki assign
+// recruiter option raavali. bde ki - assign teamlead ani ravaali"): the BDE side gives a job to team leads, a team lead gives it to recruiters.
+// Admin, Manager and HR keep both. The server refuses a BDE / BDE TL picking recruiters (routes/requirements.js bdeSide).
+const BOTH_ASSIGN = ['assign-tl', 'assign-recruiter'];
+export function assignKinds(user) {
+  if (!user) return [];
+  const role = (user.scopeRoles && user.scopeRoles.ats) || productRole(user, 'ats');
+  if ((user.workflow && user.workflow.bdeTl) || role === 'BDE') return ['assign-tl'];
+  if (['TL', 'STL'].includes(role)) return ['assign-recruiter'];
+  return BOTH_ASSIGN;
+}
+
 // "⋯" — secondary actions, each only when the server said this login may.
 //   kinds: open, edit, assign-recruiter, assign-tl, hold, close, reopen, export
-export function secondaryActions(r, { mayExport = false } = {}) {
+export function secondaryActions(r, { mayExport = false, kinds = BOTH_ASSIGN } = {}) {
   const out = [{ key: 'open', label: 'Open requirement' }];
   if (r.mayEdit) out.push({ key: 'edit', label: 'Edit requirement' });
   if (r.mayAssign) {
-    out.push({ key: 'assign-recruiter', label: 'Assign recruiter' });
-    out.push({ key: 'assign-tl', label: 'Assign team lead' });
+    if (kinds.includes('assign-recruiter')) out.push({ key: 'assign-recruiter', label: 'Assign recruiter' });
+    if (kinds.includes('assign-tl')) out.push({ key: 'assign-tl', label: 'Assign team lead' });
   }
   if (r.mayApprove) {
     if (r.status !== 'CLOSED') out.push({ key: 'close', label: 'Close requirement', danger: true });

@@ -520,6 +520,10 @@ function miniPipeline(stages) {
   };
 }
 
+// WHO ASSIGNS WHOM (founder 2026-11-05: "bde tl ki ... assign teamlead ani raavali ... bde ki - assign teamlead ani ravaali"): the BDE side gives a
+// job to team leads and never picks recruiters; a team lead gives it to recruiters (frontend: reqActions.js assignKinds).
+const bdeSide = (user) => isBdeTlUser(user) || atsViewRole(user) === 'bde';
+
 // §6 — the ONE main row action per role. `key` is what the screen wires up.
 function primaryActionOf(row, policy) {
   switch (policy.role) {
@@ -826,7 +830,7 @@ function roleViewDefs(user, q = {}) {
     // chip renamed; key kept so old links work): open jobs that HAVE a TL but
     // no recruiter — the TL's tool. "NEEDS A TL": open jobs with no TL at all
     // — Admin / Manager / STL assign a department TL first.
-    unassigned: { key: 'unassigned', label: 'Needs a recruiter', hint: 'Open requirements with a TL but no recruiter yet — tick them and press Assign recruiter', where: { AND: [NEEDS_RECRUITER_WHERE, LIVE_WHERE] }, test: (r) => needsRecruiter(r) && live(r) },
+    unassigned: { key: 'unassigned', label: 'Needs a recruiter', hint: bdeSide(user) ? 'Open requirements with a TL but no recruiter yet — the team lead gives them to recruiters' : 'Open requirements with a TL but no recruiter yet — tick them and press Assign recruiter', where: { AND: [NEEDS_RECRUITER_WHERE, LIVE_WHERE] }, test: (r) => needsRecruiter(r) && live(r) },
     needstl: { key: 'needstl', label: 'Needs a TL', hint: 'Open requirements with no TL yet — tick them and press Assign TL', where: { AND: [NEEDS_TL_WHERE, LIVE_WHERE] }, test: (r) => !effectiveTl(r) && live(r) },
     team: { key: 'team', label: 'My Team', hint: "Requirements assigned to you and your team's recruiters", where: team, test: (r) => matches(r, team) },
     myclients: { key: 'myclients', label: 'My Clients', hint: 'Requirements of the clients you own', where: null, test: () => true },
@@ -1071,7 +1075,7 @@ async function enrichRows(found, user, { activity = false } = {}) {
       // An STL runs every job of their section (per-role spec 2026-10-03 —
       // requirementPermissions() `owned`); the row is already in scope.
       const stlLead = sc.atsRole === 'STL';
-      row.mayAssign = !!assignPerm && (sc.global || stlLead || isAssignedTo(user, r) || unclaimed);
+      row.mayAssign = !!assignPerm && (sc.global || stlLead || isAssignedTo(user, r) || unclaimed || (bdeSide(user) && !r.internal));
       // PUT /:id's rule (requirementPermissions().edit): edit + on the chain.
       row.mayEdit = !!editPerm && (sc.global || stlLead || isAssignedTo(user, r));
       // POST /:id/status's rule (requirementPermissions().approve): Hold /
@@ -1831,6 +1835,7 @@ router.post('/bulk', async (req, res, next) => {
       const what = perm === 'assign' ? 'Assigning requirements' : 'Changing requirement priority';
       return res.status(403).json({ error: `${what} isn't included in your role's permissions.` });
     }
+    if (action === 'assign-recruiter' && bdeSide(user)) return res.status(403).json({ error: 'The team lead gives a requirement to recruiters. Assign a team lead instead.' });
 
     let target = null;
     let targets = null; // several recruiters at once
@@ -1906,7 +1911,7 @@ router.post('/bulk', async (req, res, next) => {
       if (!r) { results.push({ ...base, ok: false, error: 'Requirement not found' }); continue; }
       if (!matches(r, scopeW)) { results.push({ ...base, ok: false, error: 'Outside your access' }); continue; }
       const unclaimed = !r.tlId && !r.recruiterId && !r.recruiterIds;
-      const owned = s.global || isAssignedTo(user, r) || (perm === 'assign' && unclaimed);
+      const owned = s.global || isAssignedTo(user, r) || (perm === 'assign' && unclaimed) || (action === 'assign-tl' && bdeSide(user) && !r.internal);
       if (!owned) {
         results.push({ ...base, ok: false, error: 'You can view this requirement, but it is not assigned to you — ask its TL or an Admin.' });
         continue;
@@ -3704,6 +3709,11 @@ router.post('/:id/assign', requirePerm('ats', 'requirements', 'Requirement Detai
   }
 
   const before = req.requirement;
+  // The BDE side does not pick recruiters: the team lead does (founder 2026-11-05).
+  if (bdeSide(req.user) && ((req.body.recruiterId !== undefined && (req.body.recruiterId || null) !== (before.recruiterId || null))
+    || (req.body.recruiterIds !== undefined && csv(Array.isArray(req.body.recruiterIds) ? req.body.recruiterIds.join(',') : req.body.recruiterIds).join(',') !== csv(before.recruiterIds).join(',')))) {
+    return res.status(403).json({ error: 'The team lead gives a requirement to recruiters. Assign a team lead instead.' });
+  }
   const data = {};
   ['tlId', 'stlId', 'recruiterId', 'bdeId'].forEach((k) => {
     if (req.body[k] !== undefined) data[k] = req.body[k] || null;

@@ -32,7 +32,7 @@ const SECONDARY = {
 };
 
 export default function SelectedRequirement({
-  row: r, onAction, onQuickView, role, actions = [],
+  row: r, onAction, onQuickView, role, actions = [], kinds,
 }) {
   const [activity, setActivity] = useState(null);
   useEffect(() => {
@@ -49,7 +49,7 @@ export default function SelectedRequirement({
     return <div className="ak-empty">Click a requirement in the list to see it here.</div>;
   }
   const sla = slaInfo(r.sla);
-  const primary = rowPrimary(r, role);
+  const primary = rowPrimary(r, role, kinds);
   const wait = role === 'accounts' ? '' : waitingText(r);
   const live = isOpenJob(r); // Open = not Closed (2026-10-30)
   const kv = (k, v) => (

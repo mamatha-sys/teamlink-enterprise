@@ -2264,7 +2264,9 @@ async function jobsList(user, b, q) {
 async function assignRights(user) {
   try {
     const { can } = require('../middleware/auth'); // eslint-disable-line global-require
-    const allowed = !!(await can(user, 'ats', 'requirements', 'Requirement Detail', 'assign'));
+    const { isBdeTl, atsViewRole } = require('./scope'); // eslint-disable-line global-require
+    // the BDE side assigns team leads, not recruiters (founder 2026-11-05)
+    const allowed = !!(await can(user, 'ats', 'requirements', 'Requirement Detail', 'assign')) && !isBdeTl(user) && atsViewRole(user) !== 'bde';
     const s = scopeOf(user);
     const asTl = String(user.atsRole || user.role || '') === 'TL' || !!(user.scopeRoles && user.scopeRoles.ats === 'TL');
     return { allowed, global: !!s.global, asTl, meId: user.id };

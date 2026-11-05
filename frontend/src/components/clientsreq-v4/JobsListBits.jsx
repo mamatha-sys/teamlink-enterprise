@@ -73,12 +73,12 @@ export function ageSlaLine(r, sla, ageText, nf) {
 // otherwise what the server named for this role (Add candidate, Send to
 // client, Create invoice ...) and, when that is only "Edit" / "View", "Open job".
 // `mayAssign` is the server's answer for this row; the API enforces it anyway.
-// A Recruiter, BDE or Accounts login never gets the assign buttons promoted to the main one.
-export function rowPrimary(r, role = '') {
+// A Recruiter or Accounts login never gets the assign buttons promoted to the main one. kinds = what this login assigns (reqActions.js assignKinds).
+export function rowPrimary(r, role = '', kinds = ['assign-tl', 'assign-recruiter']) {
   const server = r.primaryAction || { key: 'open', label: 'View' };
-  const promote = !r.mayAssign || ['bde', 'recruiter', 'accounts'].includes(role) ? false : isOpenJob(r);
-  if (promote && r.needs === 'tl') return { key: 'assign-tl', label: 'Assign a team lead', strong: true };
-  if (promote && r.needs === 'recruiter') return { key: 'assign-recruiter', label: 'Assign a recruiter', strong: true };
+  const promote = !r.mayAssign || ['recruiter', 'accounts'].includes(role) ? false : isOpenJob(r);
+  if (promote && r.needs === 'tl' && kinds.includes('assign-tl')) return { key: 'assign-tl', label: 'Assign a team lead', strong: true };
+  if (promote && r.needs === 'recruiter' && kinds.includes('assign-recruiter')) return { key: 'assign-recruiter', label: 'Assign a recruiter', strong: true };
   if (['open', 'edit', 'assign-recruiter', 'assign-tl'].includes(server.key)) return { key: 'open', label: 'Open requirement', strong: false };
   const words = {
     'add-candidate': 'Add a person', 'view-candidates': 'See people', 'submit-client': 'Send to client', 'generate-invoice': 'Create invoice',
@@ -88,8 +88,8 @@ export function rowPrimary(r, role = '') {
 
 // One sentence for the NEXT STEP box.
 export function nextStepSentence(r, primary, waiting) {
-  if (isOpenJob(r) && r.needs === 'tl') return 'This requirement has no team lead yet. Pick one so work can start.';
-  if (isOpenJob(r) && r.needs === 'recruiter') return 'This requirement has a team lead but no recruiter yet. Pick one to find people.';
+  if (isOpenJob(r) && r.needs === 'tl') return primary.key === 'assign-tl' ? 'This requirement has no team lead yet. Pick one so work can start.' : 'This requirement has no team lead yet.';
+  if (isOpenJob(r) && r.needs === 'recruiter') return primary.key === 'assign-recruiter' ? 'This requirement has a team lead but no recruiter yet. Pick one to find people.' : 'This requirement has a team lead but no recruiter yet. The team lead gives it to recruiters.';
   if (waiting) return `${waiting}.`;
   switch (primary.key) {
     case 'add-candidate': return 'Add people for this requirement.';

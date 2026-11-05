@@ -1040,9 +1040,9 @@ export default function RequirementForm({
                   onChange={setTeamLeads}
                 />
               </div>
-              {/* A client manager (BDE) does not pick recruiters (founder, 2026-10-23): the requirement goes to the team lead, and the team lead
+              {/* A client manager (BDE) or the BDE TL does not pick recruiters (founder, 2026-10-23, 2026-11-05): the requirement goes to the team lead, and the team lead
                   gives it to the right recruiters. Everybody else (team leads, managers, admins) keeps this field. */}
-              {user?.atsRole !== 'BDE' && (
+              {user?.atsRole !== 'BDE' && !user?.workflow?.bdeTl && (
                 <div className="field">
                   <span>Recruiters<Help text="Each recruiter sees the requirement and its people. The first one is the main recruiter. Least busy people are marked." /></span>
                   <RecruiterMulti

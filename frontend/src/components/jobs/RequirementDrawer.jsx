@@ -86,7 +86,7 @@ export default function RequirementDrawer({ row: r, onClose, onAssign, actions, 
               <button key={a.key} type="button" className="btn" onClick={() => onPick(a.key)}>{a.label}</button>
             )) : (
               <>
-                {r.mayAssign && <button type="button" className="btn" onClick={() => onAssign(r)}>Assign recruiter</button>}
+                {r.mayAssign && onAssign && <button type="button" className="btn" onClick={() => onAssign(r)}>Assign recruiter</button>}
                 {r.mayEdit && <button type="button" className="btn" onClick={() => navigate(`/requirements/${r.id}?action=edit`)}>Edit</button>}
               </>
             )}
