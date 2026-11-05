@@ -354,6 +354,8 @@ async function resolveIdentity(userId, preloaded = null) {
   // the BDE's desk that have NO BDE assigned (no Owner BDE, no second BDE) count
   // as theirs too, until somebody is named on them.
   let atsBdeUnownedClientIds = null;
+  // BDE-EDU-1 and BDE-EDU-2 both filled: each seat its own requirements and its own sheet's lines (utils/bdeSplit.js); null until then
+  let atsBdeSplit = null;
   if (named(atsScopeRole) === 'BDE' && user.name) {
     // Owner BDE is typed free text: match it trimmed and case-blind (SQLite
     // LIKE narrows, the exact compare decides).
@@ -370,6 +372,7 @@ async function resolveIdentity(userId, preloaded = null) {
       where: { employeeId: employee.id, toDate: null },
       select: { position: { select: { code: true, name: true, team: true, department: true } } },
     }).catch(() => []) : [];
+    atsBdeSplit = await require('./bdeSplit').viewOf(seats.map((a) => a.position.code)).catch(() => null); // eslint-disable-line global-require
     const desks = bdeDesks({
       departments: departments,
       texts: [
@@ -473,6 +476,7 @@ async function resolveIdentity(userId, preloaded = null) {
     atsBdeDeskDepartments,
     atsBdeDeskRequirementDepartments,
     atsBdeUnownedClientIds,
+    atsBdeSplit,
     atsDeptClientDepartments,
     atsJoinedRequirementIds,
     landingWorkspace: user.landingWorkspace || (mapping ? mapping.landing : null) || null,

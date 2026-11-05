@@ -99,7 +99,9 @@ const newestFirst = (a, b) => String(b.onDate).localeCompare(String(a.onDate)) |
 async function list(user, q) {
   const found = await clientFor(user, q);
   if (!found) return { status: 404, body: { error: 'This client is outside your area.' } };
-  const all = (await entriesOf(found.client.id)).sort(newestFirst);
+  // Both Education BDE seats filled: a sheet's lines show to its own seat (utils/bdeSplit.js)
+  const { seesLine } = require('./bdeSplit'); // eslint-disable-line global-require
+  const all = (await entriesOf(found.client.id)).filter((e) => seesLine(user, e)).sort(newestFirst);
   const reqIds = [...new Set(all.map((e) => e.requirementId).filter(Boolean))];
   const reqs = reqIds.length ? await prisma.requirement.findMany({ where: { id: { in: reqIds } }, select: { id: true, title: true, reqCode: true } }) : [];
   const reqNames = Object.fromEntries(reqs.map((r) => [r.id, [r.reqCode, r.title].filter(Boolean).join(' · ')]));

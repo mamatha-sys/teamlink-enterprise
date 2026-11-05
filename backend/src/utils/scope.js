@@ -297,6 +297,8 @@ function requirementWhereBase(user, opts = {}) {
   // THE BDE TL (user, 2026-10-09): every client's jobs: the whole BDE book.
   // Never TeamLink's own internal openings.
   if (isBdeTl(user)) return { internal: false };
+  // Both Education BDE seats filled: each seat its own requirements (utils/bdeSplit.js). Until then the rules below stand.
+  if (user && user.atsBdeSplit) return { internal: false, OR: [{ bdeId: user.id }, { bdeId: null, clientId: { in: user.atsBdeSplit.clientIds } }] };
   // A TL / STL / Recruiter who holds a seat is scoped by the seat structure.
   if (s.positions) return seatRequirementWhere(s, { pool: withPool });
   switch (s.atsRole) {
@@ -407,7 +409,9 @@ function isAssignedTo(user, requirement) {
     || requirement.bdeId === s.userId
     // A BDE owns the requirements of THEIR clients (role spec 2026-09-29:
     // "full access to own clients"), not only the ones naming them as BDE.
-    || (s.atsRole === 'BDE' && !!requirement.clientId && s.bdeOwnClientIds.includes(requirement.clientId))
+    || (s.atsRole === 'BDE' && !user.atsBdeSplit && !!requirement.clientId && s.bdeOwnClientIds.includes(requirement.clientId))
+    // both Education BDE seats filled: the jobs of this seat (utils/bdeSplit.js)
+    || (!!user.atsBdeSplit && matches(requirement, requirementWhereBase(user)))
     // THE BDE TL (user, 2026-10-09) works EVERY client's job request: open it,
     // complete it, post it — never TeamLink's own internal hiring.
     || (!requirement.internal && isBdeTl(user));
@@ -595,7 +599,7 @@ const BDE_CANDIDATE_STAGES = [
 // Non IT MFG + Non IT Medical, BDE-MED <- Medical), not only the BDE named on the client.
 // The stage rule (bdeStageWhere) still applies: with the BDE or later, never before.
 function bdeDeskShareWhere(user, s) {
-  if (s.atsRole !== 'BDE' || isBdeTl(user)) return null;
+  if (s.atsRole !== 'BDE' || isBdeTl(user) || user.atsBdeSplit) return null;
   const depts = s.bdeDeskRequirementDepartments || [];
   return depts.length ? { requirement: { department: { in: depts } } } : null;
 }
@@ -670,7 +674,7 @@ const APP_SCOPE_FIELDS = [
   'atsScopeDepartments', 'department', 'atsScopeTeams', 'team', 'scopeRoles', 'atsRole', 'hrmsRole', 'accountsRole', 'role',
   'products', 'id', 'clientId', 'atsScopeClients', 'atsOwnedClientIds', 'atsBdeDeskDepartments', 'atsBdeDeskRequirementDepartments',
   'atsBdeUnownedClientIds', 'atsDeptClientDepartments', 'atsJoinedRequirementIds', 'candidateId', 'employeeId', 'atsTeamUserIds',
-  'hrmsTeamScope', 'atsPositionScope',
+  'hrmsTeamScope', 'atsPositionScope', 'atsBdeSplit',
 ];
 const APP_SCOPE_MEMO = new WeakMap();
 function appScopeCtx(user) {
