@@ -24,7 +24,7 @@
 const S = require('./scripts');
 const D = require('./dialogue');
 
-const KINDS = { opening: 'opening', say: 'say', ask: 'ask', interest: 'interest', closing: 'closing' };
+const KINDS = { opening: 'opening', say: 'say', ask: 'ask', interest: 'interest', closing: 'closing', decline: 'decline' };
 const MAX_STEPS = 14;
 const MAX_LINE = 300;
 
@@ -38,7 +38,7 @@ function parseScript(raw, lim = {}) {
   if (lines.length > maxSteps) return { ok: false, steps: [], error: `A script can have at most ${maxSteps} lines.` };
   const steps = [];
   for (let i = 0; i < lines.length; i += 1) {
-    const m = /^(opening|say|ask|interest|closing)\s*[:\-–]\s*(.*)$/i.exec(lines[i]);
+    const m = /^(opening|say|ask|interest|closing|decline)\s*[:\-–]\s*(.*)$/i.exec(lines[i]);
     const kind = m ? KINDS[m[1].toLowerCase()] : (i === 0 ? 'opening' : 'ask');
     const text = (m ? m[2] : lines[i]).trim();
     if (!text) return { ok: false, steps: [], error: `Line ${i + 1} has a label but no words.` };
@@ -91,22 +91,30 @@ class ScriptDialogue extends D.Dialogue {
     const main = parseScript(opts.script, opts.limits);
     if (!main.ok) throw new Error(`The agent's script cannot be used: ${main.error}`);
     const first = S.LANGS.includes(opts.scriptLanguage) ? opts.scriptLanguage : (S.LANGS.includes(opts.language) ? opts.language : 'English');
-    this.byLang = { [first]: main.steps };
+    // a "Decline:" line is what is said when the person is not interested (instead of the Closing); it is not one of the steps
+    const split = (steps) => ({ steps: steps.filter((s) => s.kind !== 'decline'), decline: (steps.find((s) => s.kind === 'decline') || {}).text || null });
+    const mainSplit = split(main.steps);
+    this.byLang = { [first]: mainSplit.steps };
+    this.declines = { [first]: mainSplit.decline };
     const sameShape = (a, b) => a.length === b.length && a.every((x, i) => x.kind === b[i].kind);
     Object.entries(opts.scripts || {}).forEach(([lang, text]) => {
       if (!S.LANGS.includes(lang) || lang === first || !text) return;
       const p = parseScript(text, opts.limits);
-      if (p.ok && sameShape(p.steps, main.steps)) this.byLang[lang] = p.steps; // a version that does not match line for line is not used
+      const ps = p.ok ? split(p.steps) : null;
+      if (ps && sameShape(ps.steps, mainSplit.steps)) { this.byLang[lang] = ps.steps; this.declines[lang] = ps.decline; } // a version that does not match line for line is not used
     });
     this.scriptLanguage = first;
     // no question in the script (only what the AI says): the call says all of it and ends
-    this.noQuestion = !main.steps.some((s) => s.kind === 'ask' || s.kind === 'interest');
+    this.noQuestion = !mainSplit.steps.some((s) => s.kind === 'ask' || s.kind === 'interest');
     this.autoLanguage = Object.keys(this.byLang).length > 1; // follow the person's language only when there is another version to speak
     // the language the call starts in: the call's own if the script has it, else the script's
     if (!this.byLang[this.language]) this.setLanguage(first);
     this.scriptName = String(opts.scriptName || 'script');
     this.st.script = { idx: 0, got: [], silent: 0 };
   }
+
+  // what is said when the person is not interested (the script's own "Decline" line, in the language of the call)
+  get declineLine() { const t = this.declines[this.language] || this.declines[this.scriptLanguage]; return t ? fillWith(t, this.data) : null; }
 
   get steps() { return this.byLang[this.language] || this.byLang[this.scriptLanguage]; }
 
@@ -200,7 +208,9 @@ class ScriptDialogue extends D.Dialogue {
     if (k.intent === 'stop') { st.stop = true; return this.endWith('Not Interested', 'asked not to be called again', this.P.closeNotInterested); }
     if (k.intent === 'cant_hear') return { say: this.speak(this.again()), done: false };
     if (k.intent === 'repeat') return { say: this.speak(this.again()), done: false };
-    if (k.intent === 'later') { st.callback = true; st.callbackWhen = S.clean(text, 120); return this.endWith('Call Back Later', 'asked for a call back', this.P.laterClose); }
+    // (when the script itself asks what time suits the person, "tomorrow at five" is the answer to that, not a request to be called later)
+    const asksTime = cur.kind === 'ask' && /\b(time|when|convenient|available|slot|which day|what day)\b|సమయం|समय|कब/i.test(cur.text);
+    if (k.intent === 'later' && !asksTime) { st.callback = true; st.callbackWhen = S.clean(text, 120); return this.endWith('Call Back Later', 'asked for a call back', this.P.laterClose); }
     if (k.human || k.intent === 'human') return this.endWith('Call Back Later', 'asked for a recruiter', this.P.humanNoted);
 
     // the opening: the person's name is confirmed (or it is a wrong number)
@@ -216,7 +226,7 @@ class ScriptDialogue extends D.Dialogue {
         return { say: this.speak(this.again()), done: false }; // the question again; the person's own question is for the team
       }
       if (cur.kind === 'interest') {
-        if (k.intent === 'no') { st.interest = 'no'; st.declineReason = S.clean(text, 120); sc.got.push({ q: this.line(sc.idx), a: S.clean(text, 160) }); return this.endWith('Not Interested', 'not interested', this.ackText(k, cur) + (this.steps[this.steps.length - 1].kind === 'closing' ? ` ${this.line(this.steps.length - 1)}` : '')); }
+        if (k.intent === 'no') { st.interest = 'no'; st.declineReason = S.clean(text, 120); sc.got.push({ q: this.line(sc.idx), a: S.clean(text, 160) }); return this.endWith('Not Interested', 'not interested', this.declineLine || (this.ackText(k, cur) + (this.steps[this.steps.length - 1].kind === 'closing' ? ` ${this.line(this.steps.length - 1)}` : ''))); }
         if (k.intent === 'yes') st.interest = 'yes';
         else if (k.intent === 'maybe') st.interest = 'unsure';
         else { // not a plain yes / no: asked once more, then taken as unsure

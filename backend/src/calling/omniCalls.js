@@ -84,13 +84,54 @@ async function versionsFor(text, lang, given, tdeps) {
 }
 
 /** Ask for the other-language versions of a script to be made now (Green Start does it when an agent is saved and when a campaign starts). */
-async function prepare(text, tdeps) {
-  const err = checkScript(String(text || ''), {});
+async function prepare(textIn, tdeps) {
+  let text = textIn;
+  text = normalizeScript(text);
+  const err = checkScript(text, {});
   if (err) return { ok: false, error: err };
   const lang = detectLang(text);
   const out = await versionsFor(text, lang, {}, tdeps);
   const ready = Object.keys(out);
   return { ok: true, language: lang, ready, pending: ['Telugu', 'Hindi', 'English'].filter((l) => l !== lang && !out[l]) };
+}
+
+// ---- A SCRIPT PASTED AS ONE BLOCK (founder 2026-11-04: the whole sample script - "Opening", "If yes: Vacancy details", "Interest check", "If interested", "If not interested /
+// busy", "Closing", each with its words in quotes - was pasted into one step and the AI said all of it in one breath). Such a block is laid out as the lines of a call:
+// the quoted words are the lines, the label before each says what it is. A line with fewer than two quoted pieces is left exactly as written.
+const cleanSeg = (t) => String(t).replace(/\[\s*(candidate'?s?\s*name|candidate|name)\s*\]/gi, '{name}').replace(/\s+/g, ' ').trim();
+function kindOfLabel(label, text, state) {
+  const L = String(label || '').toLowerCase();
+  if (/closing|goodbye|farewell|end of (the )?call/.test(L)) return 'Closing';
+  if (/not interested|declin|refus|busy|not available|\bno\b/.test(L)) return 'Decline';
+  if (/opening|greeting|intro/.test(L) || (!L && !state.seen)) return state.hasOpening ? (/[?？]/.test(text) ? 'Ask' : 'Say') : 'Opening';
+  if (/^(if\s+)?(interested|yes)\b/.test(L) && !/check|question/.test(L)) return /[?？]/.test(text) ? 'Ask' : 'Say';
+  if (/interest/.test(L) && /check|question|ask/.test(L)) return 'Interest';
+  return /[?？]/.test(text) ? 'Ask' : 'Say';
+}
+function normalizeScript(raw) {
+  const lines = String(raw == null ? '' : raw).replace(/\r/g, '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const out = [];
+  lines.forEach((l) => {
+    const m = /^(opening|say|ask|interest|closing|decline)\s*[:\-–]\s*(.*)$/i.exec(l);
+    const body = m ? m[2] : l;
+    const segs = [...body.matchAll(/[“"]([^”"]{2,})[”"]/g)];
+    if (segs.length < 2) { out.push(l); return; }
+    const state = { hasOpening: out.some((x) => /^opening\s*[:\-–]/i.test(x)), seen: false };
+    let prevEnd = 0;
+    segs.forEach((s) => {
+      const label = body.slice(prevEnd, s.index).replace(/[:\-–\s]+$/, '').trim();
+      prevEnd = s.index + s[0].length;
+      const text = cleanSeg(s[1]);
+      const kind = kindOfLabel(label, text, state);
+      if (kind === 'Opening') state.hasOpening = true;
+      state.seen = true;
+      out.push(`${kind}: ${text}`);
+    });
+  });
+  // one closing, at the end: the first one the script gives (the pasted block's own), not a generic one added after it
+  const closings = out.filter((x) => /^closing\s*[:\-–]/i.test(x));
+  if (closings.length > 1) return [...out.filter((x) => !/^closing\s*[:\-–]/i.test(x)), closings[0]].join('\n');
+  return out.join('\n');
 }
 
 const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || '';
@@ -113,7 +154,7 @@ function turnsOf(row) {
 async function create(input, deps = {}) {
   const externalId = String(input.externalId || '').slice(0, 120);
   if (!externalId) return { ok: false, status: 400, code: 'externalId', reason: 'externalId is needed.' };
-  const text = String(input.script || '');
+  const text = normalizeScript(input.script);
   const err = checkScript(text, input.scripts);
   if (err) return { ok: false, status: 422, code: 'script', reason: err };
   const scriptLang = detectLang(text);
@@ -165,4 +206,4 @@ async function applyResult(rowId, result, turns) {
   });
 }
 
-module.exports = { configured, verify, create, status, dialogueFor, applyResult, checkScript, prepare, detectLang, versionsFor, cachedVersion, trKey };
+module.exports = { normalizeScript, configured, verify, create, status, dialogueFor, applyResult, checkScript, prepare, detectLang, versionsFor, cachedVersion, trKey };

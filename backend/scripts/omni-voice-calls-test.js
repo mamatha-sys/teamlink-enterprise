@@ -144,6 +144,26 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const s2 = await swd2.hear('నేను హిందీ లో మాట్లాడతా', { heard: 'clear', lang: 'Hindi' });
     check('a language with no version made (Hindi here) is never switched to: the call stays as it is', swd2.language === 'English', swd2.language);
     check('a translation that is asked for in the background never stops the call', sw.ok && sw2.ok);
+
+    // A SCRIPT PASTED AS ONE BLOCK (the founder's HR Recruiter script): laid out as a conversation, not said in one breath
+    const BLOB = 'Opening: Hello {name}, this is an automated call from Teamlink.\nInterest: “Hello, am I speaking with [Candidate Name]? Do you have one minute to talk about a job opportunity?” If yes: Vacancy details “We currently have an opening for HR Recruiter. Location: Kukatpally. Salary: 10K per month.” Interest check “Are you interested in this opportunity?” If interested “Great. Can you confirm a good time for the call?” If not interested / busy “No problem. If you know any graduate who is looking for a job, please share this opportunity.” Closing “Thank you, [Candidate Name]. Have a nice day.”\nClosing: Thank you. Goodbye.';
+    const norm = omni.normalizeScript(BLOB).split('\n');
+    check('the block is laid out as lines: opening, ask, say, interest, ask, decline, and the pasted closing (not the generic one)', norm.map((l) => l.split(':')[0]).join(',') === 'Opening,Ask,Say,Interest,Ask,Decline,Closing' && /Thank you, \{name\}\. Have a nice day/.test(norm[6]), norm);
+    check('a script that is already lines is not touched', omni.normalizeScript(SCRIPT) === SCRIPT);
+    const b1 = await omni.create({ externalId: 'blob1', toNumber: '9999999991', name: 'Sravanthi Rao', script: BLOB }, { ...deps, ami: AMI });
+    const bd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(b1.id));
+    const bs0 = bd.start().say;
+    const bs1 = (await bd.hear('hello')).say;
+    const bs2 = (await bd.hear('yes tell me')).say;
+    const bs3 = (await bd.hear('yes interested')).say;
+    const bs4 = await bd.hear('tomorrow at five');
+    check('the call goes step by step: it waits for an answer between the parts', /^Hello Sravanthi, this is an automated call/.test(bs0) && /^Hello, am I speaking with Sravanthi\?/.test(bs1) && /We currently have an opening/.test(bs2) && /Are you interested in this opportunity\?$/.test(bs2) && /^(Okay|Alright|Sure|Right)[^.]*\. Great\. Can you confirm a good time/.test(bs3), { bs0, bs1, bs2, bs3 });
+    check('it ends with the pasted closing after the last answer', bs4.done === true && /Thank you, Sravanthi\. Have a nice day/.test(bs4.say) && !/Goodbye/.test(bs4.say), bs4);
+    const b2 = await omni.create({ externalId: 'blob2', toNumber: '9999999992', name: 'Ravi Kumar', script: BLOB }, { ...deps, ami: AMI });
+    const bd2 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(b2.id));
+    bd2.start(); await bd2.hear('hello'); await bd2.hear('yes');
+    const no = await bd2.hear('no');
+    check('"not interested" gets the script\'s own message for it, not the pasted closing', no.done === true && /^No problem\. If you know any graduate/.test(no.say) && !/Have a nice day/.test(no.say), no);
     check('a version in another language is taken as written too', (await refuse({ scripts: { Telugu: 'నమస్కారం' }, toNumber: '9666666665' })).ok === true);
     check('the line not being ready is said in words', await (async () => { const x = await refuse({}, { ...deps, config: LINE({ ready: false, problems: ['The Asterisk manager login is missing.'] }) }); return !x.ok && /not ready/.test(x.reason); })());
     check('in Test mode only the saved test numbers are called', await (async () => { const x = await refuse({ toNumber: '9111111111' }, { ...deps, config: LINE({ mode: 'Test', testNumbers: ['+919030048228'] }) }); return !x.ok && x.code === 'test_number'; })());
@@ -155,7 +175,7 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     svc.setClock(() => new Date('2026-11-04T20:30:00Z')); // 02:00 India time
     check('outside the calling hours nothing is dialled', await (async () => { const x = await refuse({}); return !x.ok && x.code === 'outside_hours'; })());
     svc.setClock(() => new Date('2026-11-04T06:30:00Z'));
-    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 9, { before, now: originated.length });
+    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 11, { before, now: originated.length });
     check('Asterisk refusing the call fails it in words (and leaves a failed row)', await (async () => { const x = await refuse({ toNumber: '9333333333' }, { ...deps, ami: { action: async () => ({ Response: 'Error', Message: 'no trunk' }) } }); return !x.ok && x.code === 'not_dialled'; })());
   } finally {
     await prisma.$disconnect().catch(() => {});

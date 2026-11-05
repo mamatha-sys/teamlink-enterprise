@@ -60,7 +60,7 @@ async function translateScript(text, to, deps = {}) {
     if (typeof lines[i] !== 'string' || !lines[i].trim()) return { ok: false, error: `Line ${i + 1} of the draft is empty.` };
     if (slots(lines[i]) !== slots(parsed.steps[i].text)) return { ok: false, error: `Line ${i + 1} of the draft lost or changed a {name} / {job} slot. Try again or write the lines yourself.` };
   }
-  const label = { opening: 'Opening', say: 'Say', ask: 'Ask', interest: 'Interest', closing: 'Closing' };
+  const label = { opening: 'Opening', say: 'Say', ask: 'Ask', interest: 'Interest', closing: 'Closing', decline: 'Decline' };
   const draft = parsed.steps.map((s, i) => `${label[s.kind]}: ${String(lines[i]).replace(/\s+/g, ' ').trim()}`).join('\n');
   const check = SD.parseScript(draft, deps.limits);
   if (!check.ok) return { ok: false, error: `The draft cannot be used: ${check.error}` };
