@@ -6,7 +6,8 @@
 // PRIVACY - the rules this file keeps:
 //   * only the app name, the window title, active / idle time and the day's first / last activity are stored - never
 //     keystrokes, passwords, the clipboard, screenshots or chat content. Chat apps (WhatsApp, Telegram ...) keep their name
-//     only, never the title (it can name a person or show a message); a title that mentions a password is dropped.
+//     only, never the title (it can name a person or show a message); a title that mentions a password is dropped. Mail is the
+//     same (a title can show the subject): a mail app keeps its name only, a mail website only the service's name (Gmail).
 //   * nothing is stored before the employee accepts the current policy (monitoring_consents, policy_version). A new policy
 //     text is a new version: everyone accepts it again before anything more is recorded.
 //   * only work hours are kept (monitoring_settings work_start .. work_end, India time); the rest is thrown away on arrival.
@@ -27,6 +28,9 @@ const MAX_BATCH = 500;
 const BROWSERS = ['chrome', 'msedge', 'firefox', 'opera', 'brave', 'iexplore', 'vivaldi', 'safari'];
 const CHAT = /whatsapp|telegram|signal|messenger|discord|wechat|viber|skype|snapchat|instagram/i;
 const SECRET = /password|passcode|\bpin\b|otp|cvv|net ?banking/i;
+const MAIL_APP = /^(outlook|olk|hxoutlook|hxmail|thunderbird|mailbird|foxmail|mailclient)$/i;
+const MAIL_SITE = /\b(gmail|outlook|yahoo ?mail|zoho ?mail|rediff ?mail|proton ?mail)\b/i;
+const MAIL_NAMES = { gmail: 'Gmail', outlook: 'Outlook', yahoomail: 'Yahoo Mail', zohomail: 'Zoho Mail', rediffmail: 'Rediffmail', protonmail: 'Proton Mail' };
 
 const WHO_OLD = 'Who can see it: HR and Admin, and you yourself (HRMS -> Employee Monitoring -> My activity).';
 const WHO_NEW = 'Who can see it: HR and Admin, your team lead or manager (their own team only), and you yourself (HRMS -> Employee Monitoring -> My activity). Every look at your activity by someone else is written in an audit log.';
@@ -282,6 +286,8 @@ function cleanTitle(app, title) {
   if (!t) return null;
   if (CHAT.test(app) || CHAT.test(t)) return null; // chat apps: the name only, never who or what
   if (SECRET.test(t)) return null;
+  if (MAIL_APP.test(app)) return null;
+  if (BROWSERS.includes(String(app).toLowerCase())) { const m = MAIL_SITE.exec(t); if (m) return MAIL_NAMES[m[1].toLowerCase().replace(/\s/g, '')]; } // the service, so the website's rule still applies
   return t;
 }
 // -> { saved, skipped, reasons }
@@ -484,7 +490,9 @@ async function employeeDetail(employeeId, from, to) {
     const c = catOf(l.appName, l.windowTitle, dept);
     const u = usage.get(c.key) || { key: c.key, name: c.label, kind: c.kind, category: c.category, seconds: 0, titles: new Map() };
     u.seconds += l.durationSeconds;
-    if (l.windowTitle) u.titles.set(l.windowTitle, (u.titles.get(l.windowTitle) || 0) + l.durationSeconds);
+    // the same cleaning on the way out: records kept before a rule changed never show more than it allows
+    const shown = cleanTitle(l.appName, l.windowTitle);
+    if (shown) u.titles.set(shown, (u.titles.get(shown) || 0) + l.durationSeconds);
     usage.set(c.key, u);
   });
   const apps = [...usage.values()].sort((x, y) => y.seconds - x.seconds).map((u) => ({
