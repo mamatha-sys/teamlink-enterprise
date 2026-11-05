@@ -250,6 +250,9 @@ const cellText = (v) => String(v == null ? '' : v).trim();
 //   a tab named after a client (a calling list: Candidate Name, Status)  -> Schedule of that client
 //   a note tab      one column, the first line names the client          -> Notes
 //   anything else (Promotion Data: no client in it)                      -> left out, and named in the preview
+// THE EDU PROFILE SCREENING FILE (founder 2026-11-05: "edu interview sheet tab lo - profile scrrening sheet matrmey import cheyyu"): a
+// workbook with a ProfileScreening tab gives only that tab, one line per candidate under the college's Interviews sub tab.
+const SCREENING_TAB = /^profile\s*screening$/i;
 function parseSheet(buf, fileName) {
   const XLSX = require('xlsx'); // eslint-disable-line global-require
   const wb = XLSX.read(buf, { type: 'buffer', cellDates: false });
@@ -310,16 +313,17 @@ function parseSheet(buf, fileName) {
   }
 
   // one candidate per row: never their pay or phone (PRIVATE_HEAD)
-  function candidateRows(rows, head, tab, fixedClient = null) {
+  function candidateRows(rows, head, tab, fixedClient = null, screening = false) {
     const col = (re) => head.findIndex((h) => re.test(h));
-    const clientCol = col(/^client\s*name$/i);
+    const clientCol = col(/^(client|college)\s*name$/i);
     const nameCol = col(/^(candidate\s*)?name$/i);
     const dateCol = col(/^date$/i) >= 0 ? col(/^date$/i) : (!head[0] ? 0 : -1);
-    const facts = [/^requirement$/i, /qualification/i, /branch|speciali[sz]ation/i, /designation/i, /experience/i, /current\s*location/i].map(col);
+    const facts = [/^requirement$/i, /qualification/i, /branch|speciali[sz]ation/i, /designation/i, /experience/i, /(current|present)\s*location/i].map(col);
     const interviewDay = col(/interview\s*date/i);
     const interviewState = col(/interviews?\s*status/i);
-    const recruiter = col(/recruiter/i);
-    const used = new Set([clientCol, nameCol, dateCol, ...facts, interviewDay, interviewState, recruiter]);
+    const interviewMode = col(/interview\s*mode/i);
+    const recruiter = col(screening ? /^position$/i : /recruiter/i); // on the screening sheet "Position" is the person who handled the candidate
+    const used = new Set([clientCol, nameCol, dateCol, ...facts, interviewDay, interviewState, interviewMode, recruiter]);
     // the status columns: named Status..., and the unnamed ones after the headers
     const width = Math.max(...rows.map((r) => r.length), head.length);
     const statusCols = [];
@@ -331,10 +335,12 @@ function parseSheet(buf, fileName) {
       if (!who || !clientName) return;
       const notes = statusCols.map((i) => cellText(r[i])).filter(Boolean);
       let on = dateCol >= 0 ? (leadingDate(cellText(r[dateCol])) || {}).on : null;
+      const interviewOn = interviewDay >= 0 ? (leadingDate(cellText(r[interviewDay])) || {}).on : null;
+      if (interviewOn && interviewOn <= today && (!on || on > today)) on = interviewOn; // no Date, or a typo year in it (28-03-2028 for an interview on 28-03-2026)
       if (!on) { const first = notes.map((t) => leadingDate(t)).find(Boolean); on = first ? first.on : ''; }
       const shortest = [...notes].reverse().find((t) => t.length <= 30 && !leadingDate(t));
       const line1 = [who, facts.map((i) => (i >= 0 ? cellText(r[i]) : '')).filter(Boolean).join(' · ')].filter(Boolean).join(' — ');
-      const line2 = [interviewDay >= 0 && cellText(r[interviewDay]) ? `Interview ${cellText(r[interviewDay])}` : '', interviewState >= 0 ? cellText(r[interviewState]) : ''].filter(Boolean).join(' · ');
+      const line2 = [interviewDay >= 0 && cellText(r[interviewDay]) ? `Interview ${cellText(r[interviewDay])}` : '', interviewMode >= 0 ? cellText(r[interviewMode]) : '', interviewState >= 0 ? cellText(r[interviewState]) : ''].filter(Boolean).join(' · ');
       n += put(clientOf(clientName), {
         onDate: on, note: [line1, line2, ...notes.filter((t) => t !== shortest)].filter(Boolean).join('\n'),
         topic: shortest || (interviewState >= 0 ? cellText(r[interviewState]) : '') || null, tab, candidate: who.slice(0, 80), recruiter: recruiter >= 0 ? cellText(r[recruiter]).slice(0, 60) || null : null,
@@ -343,17 +349,19 @@ function parseSheet(buf, fileName) {
     return n;
   }
 
+  const onlyTab = wb.SheetNames.find((n) => SCREENING_TAB.test(n.trim()));
   wb.SheetNames.forEach((tabName) => {
+    if (onlyTab && tabName !== onlyTab) { tabs.push({ name: tabName.trim(), kind: '', lines: 0, rows: 0 }); return; }
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[tabName], { header: 1, defval: '', raw: false }).filter((r) => r.some((c) => cellText(c)));
     if (!rows.length) return;
     const head = (rows[0] || []).map(cellText);
     const has = (re) => head.some((h) => re.test(h));
     const named = head.filter(Boolean).length;
     let kind; let n = 0;
-    if (has(/^client\s*name$/i) && has(/^(candidate\s*)?name$/i)) {
-      const tab = /interview/i.test(tabName) ? 'interview' : 'schedule';
+    if (has(/^(client|college)\s*name$/i) && has(/^(candidate\s*)?name$/i)) {
+      const tab = /interview/i.test(tabName) || tabName === onlyTab ? 'interview' : 'schedule';
       kind = tab === 'interview' ? 'Interviews' : 'Schedule';
-      n = candidateRows(rows, head, tab);
+      n = candidateRows(rows, head, tab, null, tabName === onlyTab);
     } else if (has(/^candidate\s*name$/i)) {
       kind = `Schedule of ${tabName.trim()}`;
       n = candidateRows(rows, head, 'schedule', tabName);
