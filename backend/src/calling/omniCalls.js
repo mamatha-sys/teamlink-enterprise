@@ -194,7 +194,7 @@ async function status(id) {
   return {
     id: row.id, status: row.status, ended, outcome: row.outcome || null, summary: row.summary || null, interest: row.interest || null, language: row.language || null,
     durationSec: Number(row.durationSec) || null, failReason: row.failReason || null, humanFollowUp: !!row.humanFollowUp, turns: ended ? turnsOf(row) : [],
-    optOut: row.nextAction === 'do-not-call', callBack: row.nextAction === 'call-back', messageSaid: !!((svc.safeJson(row.botStateJson) || {}).messageOnly),
+    optOut: row.nextAction === 'do-not-call', callBack: row.nextAction === 'call-back', dropped: row.nextAction === 'dropped', messageSaid: !!((svc.safeJson(row.botStateJson) || {}).messageOnly),
   };
 }
 
@@ -213,12 +213,13 @@ function dialogueFor(row, s) {
 }
 
 /** The end of the call: the result is only written on the row (no ATS candidate to tell). */
-async function applyResult(rowId, result, turns) {
+// opts.dropped: the line was cut (the person hung up or the line fell) before the conversation reached its own end: Omni-Channel rings again
+async function applyResult(rowId, result, turns, opts = {}) {
   const history = (turns || []).slice(0, 80).map((x) => ({ who: x.who === 'assistant' ? 'assistant' : 'candidate', text: String(x.text || '').slice(0, 400) }));
   await svc.setRow(rowId, {
     outcome: result.outcome || 'Unclear', summary: String(result.summary || '').slice(0, 600), interest: result.interest || null,
     answersJson: JSON.stringify(result.answers || {}), transcript: JSON.stringify(history), humanFollowUp: result.humanFollowUpRequested ? 1 : 0, outcomePending: 0,
-    nextAction: result.doNotCallRequested ? 'do-not-call' : (result.callbackRequested ? 'call-back' : null),
+    nextAction: result.doNotCallRequested ? 'do-not-call' : (result.callbackRequested ? 'call-back' : (opts.dropped ? 'dropped' : null)),
   });
 }
 

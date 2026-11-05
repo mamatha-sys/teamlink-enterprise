@@ -284,7 +284,20 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const gh = await talk('gq2', '9111222209', ['hello', 'yes', 'yes interested', 'Kukatpally']);
     const gh1 = await gh.dd.hear('', { heard: 'unclear' }); const gh2 = await gh.dd.hear('', { heard: 'unclear' }); const gh3 = await gh.dd.hear('', { heard: 'unclear' }); const gh4 = await gh.dd.hear('', { heard: 'unclear' });
     check('nothing at all heard: asked again up to four times before the line is called not clear', !gh1.done && !gh2.done && !gh3.done && !gh4.done, [gh1.say, gh4.say]);
-    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 33, { before, now: originated.length });
+    // a call that was CUT before its conversation ended is marked dropped (Omni-Channel rings again); a finished one is not
+    const dr = await omni.create({ externalId: 'drop1', toNumber: '9111222210', name: 'Kiran', script: FACTS }, { ...deps, ami: AMI });
+    const ddr = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(dr.id)); ddr.start(); await ddr.hear('hello');
+    const cutResult = ddr.hangup('the person hung up');
+    await omni.applyResult(dr.id, cutResult, ddr.transcript(), { dropped: true });
+    await svc.setRow(dr.id, { status: 'completed', endedAt: new Date().toISOString() });
+    const ds1 = await omni.status(dr.id);
+    check('a call cut before its conversation ended is reported as dropped (so it is rung again)', ds1.dropped === true && ds1.ended === true && ds1.optOut === false, ds1);
+    const dr2 = await omni.create({ externalId: 'drop2', toNumber: '9111222211', name: 'Kiran', script: FACTS }, { ...deps, ami: AMI });
+    const ddr2 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(dr2.id)); ddr2.start();
+    await omni.applyResult(dr2.id, ddr2.outcome(), ddr2.transcript(), {});
+    await svc.setRow(dr2.id, { status: 'completed', endedAt: new Date().toISOString() });
+    check('a call that finished by itself is not dropped', (await omni.status(dr2.id)).dropped === false);
+    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 35, { before, now: originated.length });
     check('Asterisk refusing the call fails it in words (and leaves a failed row)', await (async () => { const x = await refuse({ toNumber: '9333333333' }, { ...deps, ami: { action: async () => ({ Response: 'Error', Message: 'no trunk' }) } }); return !x.ok && x.code === 'not_dialled'; })());
   } finally {
     await prisma.$disconnect().catch(() => {});
