@@ -60,7 +60,7 @@ router.post('/devices/register', wrap(async (req, res) => {
   }
   const idn = await resolveIdentity(user.id);
   if (!idn || (idn.status && idn.status !== 'Active') || require('../utils/leftLogin').hasLeft(idn)) return fail(res, 403, 'This login is not active.'); // eslint-disable-line global-require
-  if (!idn.employeeId) return fail(res, 403, 'This login has no employee record, so there is nothing to record against.');
+  if (!idn.employeeId) return fail(res, 403, 'This is a service login with no employee record. Sign in with the TeamLink login of the employee who uses this PC.');
   const s = await M.settings();
   // NO HIDDEN MODE: the employee accepts the notice (this version) before the PC is registered
   if (!(await M.hasConsent(idn.employeeId, s.policyVersion))) {

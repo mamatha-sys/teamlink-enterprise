@@ -19,7 +19,7 @@ param(
   [string]$Server = 'https://teamlink.teamlinks.in'
 )
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '1.2'
+$AgentVersion = '1.3'
 # older Windows would otherwise try an old, refused kind of secure connection
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, System.Security
@@ -97,8 +97,8 @@ function Call-Api($method, $path, $body, $token) {
   } catch [System.Net.WebException] {
     $resp = $_.Exception.Response
     if ($resp) {
-      $txt = (New-Object IO.StreamReader($resp.GetResponseStream())).ReadToEnd()
-      $data = $null; try { $data = $txt | ConvertFrom-Json } catch {}
+      # Windows PowerShell has already read the answer by now: its text is here, not in the response stream
+      $data = $null; try { $data = $_.ErrorDetails.Message | ConvertFrom-Json } catch {}
       return @{ status = [int]$resp.StatusCode; data = $data }
     }
     return @{ status = 0; data = $null }
