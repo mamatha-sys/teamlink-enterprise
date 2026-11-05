@@ -27,6 +27,7 @@ const MAX_RECORD_MS = 60 * 60000; // one record covers at most an hour
 const MAX_BATCH = 500;
 const BROWSERS = ['chrome', 'msedge', 'firefox', 'opera', 'brave', 'iexplore', 'vivaldi', 'safari'];
 const CHAT = /whatsapp|telegram|signal|messenger|discord|wechat|viber|skype|snapchat|instagram/i;
+const CHAT_NAMES = { whatsapp: 'WhatsApp', telegram: 'Telegram', signal: 'Signal', messenger: 'Messenger', discord: 'Discord', wechat: 'WeChat', viber: 'Viber', skype: 'Skype', snapchat: 'Snapchat', instagram: 'Instagram' };
 const SECRET = /password|passcode|\bpin\b|otp|cvv|net ?banking/i;
 const MAIL_APP = /^(outlook|olk|hxoutlook|hxmail|thunderbird|mailbird|foxmail|mailclient)$/i;
 const MAIL_SITE = /\b(gmail|outlook|yahoo ?mail|zoho ?mail|rediff ?mail|proton ?mail)\b/i;
@@ -284,7 +285,9 @@ const cleanApp = (s) => String(s || '').trim().replace(/\.exe$/i, '').replace(/[
 function cleanTitle(app, title) {
   const t = String(title || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 300);
   if (!t) return null;
-  if (CHAT.test(app) || CHAT.test(t)) return null; // chat apps: the name only, never who or what
+  if (CHAT.test(app)) return null; // chat apps: the name only, never who or what
+  const chat = CHAT.exec(t);
+  if (chat) return BROWSERS.includes(String(app).toLowerCase()) ? CHAT_NAMES[chat[0].toLowerCase()] || null : null; // the same in a browser: which service, nothing more
   if (SECRET.test(t)) return null;
   if (MAIL_APP.test(app)) return null;
   if (BROWSERS.includes(String(app).toLowerCase())) { const m = MAIL_SITE.exec(t); if (m) return MAIL_NAMES[m[1].toLowerCase().replace(/\s/g, '')]; } // the service, so the website's rule still applies

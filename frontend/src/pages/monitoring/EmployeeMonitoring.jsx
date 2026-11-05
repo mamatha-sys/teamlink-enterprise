@@ -94,6 +94,16 @@ export default function EmployeeMonitoring() {
   );
 }
 
+// Which website, out of a browser's window title: "Some video - YouTube - Google Chrome" -> YouTube, "Some video"
+// (founder 2026-11-05: "just chrome antey telidhu kadha").
+const BROWSER_APPS = ['chrome', 'msedge', 'firefox', 'opera', 'brave', 'iexplore', 'vivaldi', 'safari'];
+function siteOf(app, title) {
+  if (!title || !BROWSER_APPS.includes(String(app || '').toLowerCase())) return { site: null, page: title || null };
+  const parts = title.replace(/\s+[-–|]\s+(Google Chrome|Microsoft.*Edge|Mozilla Firefox|Brave|Opera|Vivaldi)$/i, '').split(/\s+[-–|]\s+/).filter(Boolean);
+  const site = parts.pop() || null;
+  return { site, page: parts.join(' - ') || null };
+}
+
 // ------------------------------------------------------------------------------------------------ Overview
 function Overview({ onOpen }) {
   const [date, setDate] = useState(todayIst());
@@ -157,7 +167,10 @@ function Overview({ onOpen }) {
                 <td><b>{r.name}</b>{r.code && <div className="small-muted">{r.code}</div>}</td>
                 <td>{r.department || '—'}{r.team && <div className="small-muted">{r.team}</div>}</td>
                 {live && <td><Pill tone={STATUS_TONE[r.status] || 'slate'}>{r.status || '—'}</Pill></td>}
-                {live && <td className="mon-now">{r.currentApp || <span className="small-muted">—</span>}{r.currentTitle && <div className="small-muted" title={r.currentTitle}>{r.currentTitle}</div>}</td>}
+                {live && (() => {
+                  const { site, page } = siteOf(r.currentApp, r.currentTitle);
+                  return <td className="mon-now">{r.currentApp || <span className="small-muted">—</span>}{site && <> · <b>{site}</b></>}{page && <div className="small-muted" title={r.currentTitle}>{page}</div>}</td>;
+                })()}
                 <td>{tm(r.firstSeen)}</td>
                 <td>{live && r.lastHeartbeat ? dt(r.lastHeartbeat) : tm(r.lastSeen)}</td>
                 <td className="num">{h(r.activeHours)}</td>
