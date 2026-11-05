@@ -287,20 +287,25 @@ async function log(conv, row) {
 async function askModel(conv, cfg, input) {
   const ctx = { links: [], handoff: null, notInterested: false, facts: [] };
   const calls = [];
-  const job = await T.jobFacts(conv.requirementId).catch(() => ({ available: false }));
+  let job = await T.jobFacts(conv.requirementId).catch(() => ({ available: false }));
   ctx.facts.push(JSON.stringify(job));
-  // first live test 2026-11-05: the model called itself by the candidate's name, and with no job it said positions were "filled"
+  // first live test 2026-11-05: the model called itself by the candidate's name
   const name = conv.name ? `You are talking TO ${conv.name}. That is the candidate, not you. You are the assistant of the company.` : '';
-  let jobLine = `The job they replied to: ${JSON.stringify(job)}`;
-  if (!job.available) {
-    // the search runs here, not only as a tool: a small local model does not always ask for it
-    const found = await T.offerJobs(conv, input).catch(() => ({ searched: false, jobs: [] }));
-    ctx.noJob = !found.searched;
-    ctx.facts.push(JSON.stringify(found));
-    if (found.jobs.length) jobLine = `No job is linked to this chat yet. Open jobs that match what they asked: ${JSON.stringify(found.jobs)}. Tell them only about these, never another job. When they pick one, use select_job with its number, then collect what is missing and use send_apply_link.`;
-    else if (found.searched) jobLine = 'No open job matches what they asked. Say so kindly, ask what other work they want, and offer a recruiter.';
-    else jobLine = 'NO JOB is linked to this chat: you do not know which jobs are open. Never say a job or position is available, open, filled or closed. Ask what job they want, or use search_open_jobs.';
+  // WHICH JOBS ARE OPEN is never the model's to say: it invented jobs in the first live chats. The list, the "nothing found" and the choice of a job are done here, from the database.
+  const offered = (JSON.parse(conv.collected || '{}').jobChoices || []).length > 0;
+  const picked = offered ? T.pickedNumber(input) : null;
+  if (picked) {
+    const sel = await T.selectJob(conv, { number: picked }, ctx);
+    if (sel.selected) { job = sel.job; ctx.facts.push(JSON.stringify(job)); }
   }
+  const asksOther = job.available && !picked && T.askedAboutJob(input) && !T.titleHas(job.title, input);
+  if ((!job.available && !picked) || asksOther) {
+    const found = await T.offerJobs(conv, input).catch(() => ({ searched: false, jobs: [] }));
+    if (found.jobs.length) return { ctx, calls, reply: T.jobListText(found.jobs), written: true };
+    if (found.searched) return { ctx, calls, reply: T.NO_MATCH_TEXT, written: true };
+  }
+  ctx.jobTitle = job.available ? job.title : null;
+  const jobLine = job.available ? `The job this chat is about: ${JSON.stringify(job)}. Talk only about this job, never another one. Collect what is missing, then use send_apply_link.` : 'NO JOB is linked to this chat. Never name a job and never say a job is available, open, filled or closed. Ask what work they want.';
   const system = `${cfg.systemPrompt}\n\n${RULES}\n\n${T.TOOL_HELP}\n\n${name}\n${jobLine}\nWhat you already collected: ${JSON.stringify(T.collectedView(conv))}`;
   const history = await memory(conv, cfg.memoryCount);
   if (!history.length) history.push({ role: 'user', content: clip(input, 1500) });
@@ -391,7 +396,8 @@ async function runTurn(row, defaults, now = Date.now()) {
   // the tools did their work and the model gave no words: the plain sentence, never silence
   const noWords = !got.reply && (ctx.handoff || ctx.links.length);
   let reply = G.clipReply(G.stripLinks(got.reply || (noWords ? cfg.fallbackMessage : ''), ctx.links));
-  const broken = !reply ? 'The AI gave no usable answer' : (G.promiseProblem(reply, `${ctx.facts.join('\n')}`) || (ctx.noJob ? G.jobClaim(reply) : null));
+  // a list TeamLink wrote from the database needs no check; the model's own words do
+  const broken = got.written ? null : (!reply ? 'The AI gave no usable answer' : (G.promiseProblem(reply, `${ctx.facts.join('\n')}`) || G.jobClaim(reply, ctx.jobTitle)));
   if (broken) {
     const s = await sayFallback();
     await handoff(conv, reply ? 'The AI wanted to say something that is not in the job data' : broken, now);

@@ -13,8 +13,6 @@ const TOOL_HELP = `Tools (each is {"tool":"name","args":{...}}):
 - get_job_details {}: the job they replied to.
 - search_knowledge_base {"query":"..."}: company and process FAQs.
 - save_candidate_data {"availability":"","expected_salary":"","notice_period":"","location":"","interested":true|false}: send only what the person told you.
-- search_open_jobs {"query":"staff nurse"}: open jobs by what they want. Numbers in the answer are for select_job.
-- select_job {"number":1}: this chat is now about that job.
 - send_apply_link {}: adds the job's apply and registration link to your reply.
 - send_interview_link {}: adds the AI interview link to your reply.
 - handoff_to_recruiter {"reason":"..."}: a recruiter takes over.`;
@@ -38,15 +36,20 @@ async function jobFacts(requirementId) {
 }
 
 // ---- open jobs -------------------------------------------------------------------------------------------------------------------------------------
-const NOISE = new Set('i am im looking for a an the new job jobs position positions vacancy vacancies opening openings role roles interested intrested also want need any please hi hello yes no ok okay is are there do you have in at of to and or my me work this that one'.split(' '));
+const NOISE = new Set('i am im looking for a an the new job jobs position positions vacancy vacancies vaccancy vacancey opening openings role roles interested intrested also want need any please hi hello yes no ok okay is are there do you have in at of to and or my me work this that one tell about know field details more give show list available'.split(' '));
 const wordsOf = (t) => [...new Set(String(t || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2 && !NOISE.has(w)))].slice(0, 6);
+// "nurseing" must find "Nursing": the start of a word is enough
+const stemOf = (w) => (w.length > 5 ? w.slice(0, Math.max(4, w.length - 4)) : w);
+// at the START of a word in the title: "astronaut" must not find "Gastroenterologist"
+const wordStarts = (title, stem) => String(title || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).some((t) => t.startsWith(stem));
 
 // the open client jobs whose title carries the words: the same safe facts as get_job_details, the client's name never. id stays on this side.
 async function searchJobs(text, limit = 5) {
   const words = wordsOf(text);
   if (!words.length) return { searched: false, jobs: [] };
-  const rows = await prisma.requirement.findMany({ where: { status: 'OPEN', internal: false, OR: words.map((w) => ({ title: { contains: w } })) }, orderBy: { createdAt: 'desc' }, take: 60, select: { id: true, title: true } });
-  const scored = rows.map((r) => ({ id: r.id, n: words.filter((w) => String(r.title).toLowerCase().includes(w)).length })).sort((a, b) => b.n - a.n);
+  const stems = words.map(stemOf);
+  const rows = await prisma.requirement.findMany({ where: { status: 'OPEN', internal: false, OR: stems.map((w) => ({ title: { contains: w } })) }, orderBy: { createdAt: 'desc' }, take: 60, select: { id: true, title: true } });
+  const scored = rows.map((r) => ({ id: r.id, n: stems.filter((w) => wordStarts(r.title, w)).length })).filter((r) => r.n > 0).sort((a, b) => b.n - a.n);
   const jobs = [];
   for (const r of scored) {
     if (jobs.length >= limit) break;
@@ -59,17 +62,12 @@ async function searchJobs(text, limit = 5) {
 async function offerJobs(conv, text) {
   const out = await searchJobs(text);
   const collected = JSON.parse(conv.collected || '{}');
-  // "yes this one" finds nothing new: the jobs just offered stay on the table, so their numbers still mean the same
-  if (!out.jobs.length && (collected.jobChoices || []).length) {
-    for (const id of collected.jobChoices) {
-      const f = await jobFacts(id); // eslint-disable-line no-await-in-loop
-      out.jobs.push({ id, title: f.title, location: f.location, experience: f.experience, salary: f.salary });
-    }
-    out.searched = true;
+  // nothing found: the jobs offered before keep their numbers
+  if (out.jobs.length) {
+    collected.jobChoices = out.jobs.map((j) => j.id);
+    conv.collected = JSON.stringify(collected);
+    await S.run('UPDATE "OmniWaConv" SET collected = ? WHERE id = ?', conv.collected, conv.id);
   }
-  collected.jobChoices = out.jobs.map((j) => j.id);
-  conv.collected = JSON.stringify(collected);
-  await S.run('UPDATE "OmniWaConv" SET collected = ? WHERE id = ?', conv.collected, conv.id);
   return { searched: out.searched, jobs: out.jobs.map(({ id, ...j }, i) => ({ number: i + 1, ...j })) };
 }
 async function selectJob(conv, args, ctx) {
@@ -82,6 +80,16 @@ async function selectJob(conv, args, ctx) {
   ctx.noJob = false;
   return { selected: true, job };
 }
+// the list a person gets. Written HERE, from the database: the first live chats showed the local model inventing jobs it was never given
+function jobListText(jobs) {
+  const lines = jobs.map((j) => `${j.number}. ${j.title}${j.location ? ` - ${j.location}` : ''}${j.experience ? ` - ${j.experience}` : ''}${j.salary ? ` - ${j.salary}` : ''}`);
+  return `These jobs are open now:\n${lines.join('\n')}\nReply with the number of the job you want.`;
+}
+const NO_MATCH_TEXT = 'I could not find an open job for that right now. Tell me another kind of work you want, or write "recruiter" and someone from our team will help you.';
+const askedAboutJob = (text) => wordsOf(text).length > 0 && /\b(jobs?|positions?|posts?|vacanc\w*|vaccanc\w*|openings?|hiring|work)\b/i.test(String(text || ''));
+const pickedNumber = (text) => { const m = /^\D*([1-5])\D*$/.exec(String(text || '').trim()); return m ? Number(m[1]) : null; };
+const titleHas = (title, text) => wordsOf(text).some((w) => wordStarts(title, stemOf(w)));
+
 // what the model may read of the chat's memory
 function collectedView(conv) {
   const { jobChoices, applyLinkSentAt, ...rest } = JSON.parse(conv.collected || '{}');
@@ -157,8 +165,6 @@ async function run(name, args, conv, ctx) {
     case 'get_candidate_profile': return profileFacts(conv);
     case 'get_job_details': return jobFacts(conv.requirementId);
     case 'search_knowledge_base': { const hits = await Cfg.kbSearch(a.query, 3, conv.numberId); return hits.length ? { found: hits } : { found: [], note: 'Nothing in the knowledge base: hand off to a recruiter.' }; }
-    case 'search_open_jobs': ctx.noJob = false; return offerJobs(conv, a.query);
-    case 'select_job': return selectJob(conv, a, ctx);
     case 'save_candidate_data': return saveData(conv, a, ctx);
     case 'send_apply_link': return applyLink(conv, ctx);
     case 'send_interview_link': return interviewLink(conv, ctx);
@@ -167,5 +173,5 @@ async function run(name, args, conv, ctx) {
   }
 }
 
-const NAMES = ['get_candidate_profile', 'get_job_details', 'search_open_jobs', 'select_job', 'search_knowledge_base', 'save_candidate_data', 'send_apply_link', 'send_interview_link', 'handoff_to_recruiter'];
-module.exports = { run, jobFacts, searchJobs, offerJobs, collectedView, NAMES, TOOL_HELP };
+const NAMES = ['get_candidate_profile', 'get_job_details', 'search_knowledge_base', 'save_candidate_data', 'send_apply_link', 'send_interview_link', 'handoff_to_recruiter'];
+module.exports = { run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };
