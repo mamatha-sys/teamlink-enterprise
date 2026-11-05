@@ -125,6 +125,8 @@ router.get('/connection', adminOnly, wrap(async (req, res) => {
   }
   res.json({ numbers, webhook: await delivery.seenOf('whatsapp') });
 }));
+router.get('/questions', adminOnly, wrap(async (req, res) => res.json(await Cfg.questions())));
+router.put('/questions', adminOnly, wrap(async (req, res) => send(res, await Cfg.saveQuestions(req.body || {}))));
 router.get('/profiles', adminOnly, wrap(async (req, res) => res.json({ profiles: await Cfg.profiles() })));
 router.put('/profiles/:numberId', adminOnly, wrap(async (req, res) => {
   const out = await Cfg.saveProfile(req.user, req.params.numberId, req.body || {});

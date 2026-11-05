@@ -1,6 +1,7 @@
 // ---------------------------------------------------------------------------
 // WHATSAPP AI AGENT: the Admin's settings (Omni-Channel > Settings > WhatsApp AI) and the knowledge base. OFF until an Admin switches it on.
 // ---------------------------------------------------------------------------
+const prisma = require('../db');
 const S = require('../outreach/store');
 const { ensure } = require('./schema');
 const { digitsOf } = require('../utils/messageDelivery');
@@ -58,6 +59,46 @@ async function save(user, b = {}) {
     fallbackMessage=excluded.fallbackMessage, maxTurns=excluded.maxTurns, memoryCount=excluded.memoryCount, debounceSeconds=excluded.debounceSeconds, promoDays=excluded.promoDays, testNumbers=excluded.testNumbers, updatedByName=excluded.updatedByName, updatedAt=excluded.updatedAt`,
   next.enabled ? 1 : 0, next.model, next.systemPrompt, next.hoursOn ? 1 : 0, next.hoursFrom, next.hoursTo, next.fallbackMessage, next.maxTurns, next.memoryCount, next.debounceSeconds, next.promoDays, next.testNumbers.join(','), user ? user.name : null, Date.now());
   return { ok: true, config: await read() };
+}
+
+// ---- the questions after a YES (founder 2026-11-05, his screening script). One line = one question. [Job Role], [Location], [Salary], [Work Mode] come from the ATS
+// requirement, and a line whose value the requirement does not have is skipped. A line that starts "If working," is skipped for a person who is not working.
+const DEFAULT_QUESTIONS = [
+  'Are you currently looking for a job change or a new job opportunity?',
+  'Are you interested in the [Job Role] position?',
+  'Have you already applied for this position, or are you exploring new opportunities?',
+  'Are you currently working or not working?',
+  'If working, which company are you currently working with?',
+  'If working, what is your current designation?',
+  'What is your total work experience?',
+  'What is your relevant experience in this particular role?',
+  'Are you comfortable with the job location - [Location]?',
+  'Are you comfortable with the offered salary/package of [Salary]?',
+  'Are you comfortable with the work mode - [Work Mode]?',
+  'Are you comfortable with the job shift and working hours?',
+  'If selected, how soon can you join?',
+  'What is your current notice period?',
+  'Are you available to attend the next interview round?',
+  'Which date and time would be convenient for you?',
+  'Would you like to proceed with this job opportunity?',
+  'Is there anything you would like to know about this position?',
+];
+const DEFAULT_CLOSING = 'Thank you for your time. I have recorded your responses. Our recruitment team will review your details and contact you regarding the next steps. Have a great day!';
+const Q_KEY = 'omni.wa.questions';
+async function questions() {
+  const row = await prisma.appSetting.findUnique({ where: { key: Q_KEY } }).catch(() => null);
+  let v = {};
+  try { v = row ? JSON.parse(row.value) : {}; } catch { v = {}; }
+  return { list: Array.isArray(v.list) && v.list.length ? v.list : DEFAULT_QUESTIONS, closing: v.closing || DEFAULT_CLOSING };
+}
+async function saveQuestions(b = {}) {
+  const list = (Array.isArray(b.list) ? b.list : String(b.list || '').split('\n')).map((l) => S.clip(String(l).replace(/^\s*\d+[.)]\s*/, ''), 300)).filter(Boolean);
+  if (!list.length) return { error: 'Write at least one question.', status: 400 };
+  if (list.length > 40) return { error: 'At most 40 questions.', status: 400 };
+  const closing = S.clip(String(b.closing || '').trim(), 500) || DEFAULT_CLOSING;
+  const value = JSON.stringify({ list, closing });
+  await prisma.appSetting.upsert({ where: { key: Q_KEY }, update: { value }, create: { key: Q_KEY, value } });
+  return { ok: true, list, closing };
 }
 
 // ---- one WhatsApp number's own settings (founder 2026-11-05: each number its own instructions) ----------------------------------------------------------
@@ -130,4 +171,4 @@ async function kbSearch(query, limit = 3, numberId = null) {
   }).filter((r) => r.score > 0).sort((x, y) => y.score - x.score).slice(0, limit).map(({ question, answer }) => ({ question, answer }));
 }
 
-module.exports = { oneFallback, profiles, saveProfile, removeProfile, forNumber, read, save, kbList, kbSave, kbRemove, kbSearch, DEFAULT_PROMPT, DEFAULT_FALLBACK };
+module.exports = { questions, saveQuestions, oneFallback, profiles, saveProfile, removeProfile, forNumber, read, save, kbList, kbSave, kbRemove, kbSearch, DEFAULT_PROMPT, DEFAULT_FALLBACK };

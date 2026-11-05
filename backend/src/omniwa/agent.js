@@ -323,24 +323,35 @@ async function askModel(conv, cfg, input) {
   }
   // YES to a promotion: TeamLink asks for the details itself, one at a time. A question in between is answered first, then the next detail is asked again with the next answer.
   const now2 = JSON.parse(conv.collected || '{}');
-  if (T.isNo(input) && !now2.intakeDone) {
+  if (T.isNo(input) && !now2.intakeDone && !now2.intakeOn) { // inside the questions NO is just an answer
     await T.run('save_candidate_data', { interested: false }, conv, ctx);
     await remember({ intakeOn: false, intakeDone: true });
     return { ctx, calls, reply: 'No problem. Thank you for your time.', written: true };
   }
   const startIntake = !now2.intakeOn && !now2.intakeDone && T.isYes(input) && (!job.available || !promoJob || now2.cardShown);
-  if (startIntake || (now2.intakeOn && !/\?/.test(input))) {
-    if (startIntake) { await T.run('save_candidate_data', { interested: true }, conv, ctx); await remember({ intakeOn: true, cardShown: false }); } else {
-      const asked = T.intakeNext(now2);
-      if (asked) await T.run('save_candidate_data', { [asked[0]]: input }, conv, ctx);
+  if (startIntake || (now2.intakeOn && !/\?\s*$/.test(input))) {
+    const { list, closing } = await Cfg.questions();
+    const answers = { ...(now2.answers || {}) };
+    let from = 0;
+    if (startIntake) await T.run('save_candidate_data', { interested: true }, conv, ctx);
+    else {
+      const q = String(list[now2.intakeAt] || '');
+      answers[q.replace(/^if working,?\s*/i, '')] = clip(input, 300);
+      const field = T.fieldOf(q);
+      if (field) await T.run('save_candidate_data', { [field]: input }, conv, ctx);
+      from = Number(now2.intakeAt) + 1;
     }
-    const next = T.intakeNext(JSON.parse(conv.collected || '{}'));
-    if (next) return { ctx, calls, reply: `${startIntake ? 'Thank you for your interest. I need a few details.\n' : ''}${next[1]}`, written: true };
-    await remember({ intakeOn: false, intakeDone: true });
-    ctx.handoff = 'Interested: their details are collected';
+    const next = T.nextQuestion(list, from, job.available ? { ...job, candidate: conv.name } : { candidate: conv.name }, answers);
+    if (next) {
+      await remember({ intakeOn: true, intakeAt: next.index, answers, cardShown: false });
+      const hello = startIntake ? `Thank you for your interest. I have a few questions${job.available ? ` about the ${job.title} position` : ''}.\n` : '';
+      return { ctx, calls, reply: `${hello}${next.text}`, written: true };
+    }
+    await remember({ intakeOn: false, intakeDone: true, answers, cardShown: false });
+    ctx.handoff = 'Interested: their answers are in the chat';
     const link = job.available ? await T.run('send_apply_link', {}, conv, ctx) : null;
     if (link) calls.push({ tool: 'send_apply_link', args: {}, result: link });
-    return { ctx, calls, reply: link && link.sent ? 'Thank you. I have noted your details. Please apply here, and our recruiter will contact you soon:' : 'Thank you. I have noted your details. Our recruiter will contact you soon.', written: true };
+    return { ctx, calls, reply: link && link.sent ? `${closing}\nYou can also apply here:` : closing, written: true };
   }
   // a question about this chat's job: answered from the ATS requirement, the model is not asked
   if (job.available) {
@@ -416,7 +427,7 @@ async function runTurn(row, defaults, now = Date.now()) {
     if (gs && gs.campaignId !== conv.campaignId) {
       const promoJob = await T.jobOfCampaign(gs.campaignName);
       Object.assign(conv, { promoAt: gs.at, campaignId: gs.campaignId, campaignName: gs.campaignName, requirementId: promoJob || conv.requirementId });
-      const { promoCardSent, cardShown, intakeOn, intakeDone, ...keep } = JSON.parse(conv.collected || '{}');
+      const { promoCardSent, cardShown, intakeOn, intakeDone, intakeAt, answers, ...keep } = JSON.parse(conv.collected || '{}');
       conv.collected = JSON.stringify({ ...keep, promoJob: promoJob || null });
       conv.aiTurns = 0;
       await S.run('UPDATE "OmniWaConv" SET promoAt = ?, campaignId = ?, campaignName = ?, requirementId = ?, collected = ?, aiTurns = 0, updatedAt = ? WHERE id = ?', gs.at, gs.campaignId, gs.campaignName, conv.requirementId, conv.collected, now, conv.id);

@@ -432,16 +432,28 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     stub.calls.length = 0;
     await run();
     let qSent = await aiMsgs(q.id);
-    check('YES: thanks and the first question, the model is not asked', stub.calls.length === 0 && /Which city/.test(qSent[qSent.length - 1].body), qSent.map((x) => x.body));
-    for (const a of ['Hyderabad', 'B.Sc Nursing', '3 years', 'immediate', '30000', 'tomorrow 10 am']) {
-      await inbound(phoneOf(41), a);
-      await run();
-    }
+    check('YES: thanks and the first question of the list, the model is not asked', stub.calls.length === 0 && /looking for a job change/.test(qSent[qSent.length - 1].body), qSent.map((x) => x.body));
+    const say = async (t) => { await inbound(phoneOf(41), t); await run(); };
+    await say('yes');
+    await say('Yes interested');
+    await say('exploring');
+    await say('Not working');
+    qSent = await aiMsgs(q.id);
+    check('someone not working is not asked which company', !qSent.some((m) => /which company/i.test(m.body) || /designation/.test(m.body)) && /total work experience/.test(qSent[qSent.length - 1].body), qSent.slice(-1).map((x) => x.body));
+    await say('3 years');
+    await say('2 years');
+    qSent = await aiMsgs(q.id);
+    check('a line with a value the requirement has shows it from the ATS', /Hyderabad/.test(qSent[qSent.length - 1].body), qSent.slice(-1).map((x) => x.body));
+    for (const a of ['yes', 'yes', 'yes', 'yes', '15 days', '30 days', 'yes', 'tomorrow 10 am', 'yes', 'no']) await say(a);
     conv = await convAt(phoneOf(41));
     const got = JSON.parse(conv.collected);
     qSent = await aiMsgs(q.id);
-    check('each answer is saved under its question, then thanks, and a recruiter is told', got.location === 'Hyderabad' && got.qualification === 'B.Sc Nursing' && got.experience === '3 years' && got.notice_period === 'immediate' && got.expected_salary === '30000' && got.availability === 'tomorrow 10 am' && conv.state === 'needs_human' && /recruiter will contact you/.test(qSent[qSent.length - 1].body) && stub.calls.length === 0, [got, conv.state]);
+    check('each answer is kept under its question, the closing message goes, a recruiter is told', got.answers['What is your current notice period?'] === '30 days' && got.notice_period === '30 days' && got.experience === '3 years' && conv.state === 'needs_human' && /Thank you for your time/.test(qSent[qSent.length - 1].body), [Object.keys(got.answers).length, conv.state, qSent.slice(-1).map((x) => x.body)]);
     check('questions from TeamLink do not use up the AI replies', Number(conv.aiTurns) === 0, conv.aiTurns);
+    const edited = await Cfg.saveQuestions({ list: '1. Are you a nurse?\n2) Which city?', closing: 'Bye.' });
+    const T5 = require(path.join(BACK, 'src/omniwa/tools'));
+    check('an Admin can change the list; numbers typed in front are taken off; [Salary] with no value is skipped', edited.list[0] === 'Are you a nurse?' && edited.list.length === 2 && T5.nextQuestion(['The pay is [Salary]', 'Next?'], 0, { title: 'X' }).text === 'Next?');
+    await prisma.appSetting.deleteMany({ where: { key: 'omni.wa.questions' } });
     const nope = await mkCandidate(42, 'Nope');
     await promote(nope, 42);
     await inbound(phoneOf(42), 'No');

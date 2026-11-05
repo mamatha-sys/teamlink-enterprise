@@ -122,6 +122,29 @@ function ByNumber() {
   return numbers.map((n) => <NumberCard key={`${n.id}${saved[n.id] ? saved[n.id].updatedAt : ''}`} n={n} saved={saved[n.id]} onChanged={load} />);
 }
 
+// what is asked after a candidate says YES: one question on each line
+function Questions() {
+  const { toast } = useOmni();
+  const [text, setText] = useState(null);
+  const [closing, setClosing] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => { api.get(`${BASE}/questions`).then((r) => { setText(r.data.list.join('\n')); setClosing(r.data.closing); }).catch((e) => setErr(errOf(e, 'The questions could not be read.'))); }, []);
+  const save = async () => {
+    setBusy(true); setErr('');
+    try { const r = await api.put(`${BASE}/questions`, { list: text, closing }); setText(r.data.list.join('\n')); toast('Saved.'); } catch (e) { setErr(errOf(e, 'The questions could not be saved.')); } finally { setBusy(false); }
+  };
+  if (text === null) return err ? <Banner tone="warn">{err}</Banner> : <div className="small-muted">Loading…</div>;
+  return (
+    <Panel title="Questions after YES" sub="When a candidate replies YES, these are asked one at a time and saved on the chat. One question on each line.">
+      {err && <Banner tone="warn">{err}</Banner>}
+      <Field label="Questions" hint="[Job Role], [Location], [Salary] and [Work Mode] come from the requirement; a line is skipped when the requirement has no value. A line starting 'If working,' is skipped for someone not working."><textarea className="input" rows={20} value={text} onChange={(e) => setText(e.target.value)} /></Field>
+      <Field label="Closing message"><textarea className="input" rows={3} value={closing} onChange={(e) => setClosing(e.target.value)} /></Field>
+      <Btn primary onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</Btn>
+    </Panel>
+  );
+}
+
 function Knowledge() {
   const { toast } = useOmni();
   const [numbers, setNumbers] = useState([]);
@@ -238,9 +261,10 @@ export default function WaAiSettingsPage() {
   return (
     <>
       <PageHead title="WhatsApp AI" lead="The AI assistant that answers replies to your promotions." />
-      <Tabs tabs={[['ai', 'AI settings'], ['numbers', 'By number'], ['kb', 'Knowledge base'], ['runs', 'What the AI did'], ['blocked', 'Blocked numbers'], ['conn', 'Connection']]} value={tab} onChange={setTab} />
+      <Tabs tabs={[['ai', 'AI settings'], ['numbers', 'By number'], ['questions', 'Questions'], ['kb', 'Knowledge base'], ['runs', 'What the AI did'], ['blocked', 'Blocked numbers'], ['conn', 'Connection']]} value={tab} onChange={setTab} />
       {tab === 'ai' && <AiForm />}
       {tab === 'numbers' && <ByNumber />}
+      {tab === 'questions' && <Questions />}
       {tab === 'kb' && <Knowledge />}
       {tab === 'runs' && <Runs />}
       {tab === 'blocked' && <Blocked />}

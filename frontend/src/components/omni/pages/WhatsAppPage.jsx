@@ -109,6 +109,9 @@ function AiStrip({ chatKey, tick, onChanged }) {
       {d.ai.pausedBy && <div className="small-muted">AI paused by {d.ai.pausedBy}</div>}
       {d.alreadyContacted && <Banner tone="warn">Already contacted: {d.alreadyContacted.byName} reached this candidate on {d.alreadyContacted.channel}, {fmtDateTime(d.alreadyContacted.at)}.</Banner>}
       {facts.length > 0 && <div className="small-muted">The candidate told the AI: {facts.map(([k, v]) => `${COLLECTED[k]}: ${v === true ? 'Yes' : v === false ? 'No' : v}`).join(' · ')}</div>}
+      {d.collected && d.collected.answers && (
+        <details className="small-muted"><summary>Answers to the questions ({Object.keys(d.collected.answers).length})</summary>{Object.entries(d.collected.answers).map(([q, a]) => <div key={q}><b>{q}</b> {a}</div>)}</details>
+      )}
     </div>
   );
 }

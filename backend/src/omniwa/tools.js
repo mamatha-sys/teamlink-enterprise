@@ -113,17 +113,35 @@ const pickedNumber = (text) => { const m = /^\D*([1-5])\D*$/.exec(String(text ||
 const titleHas = (title, text) => wordsOf(text).some((w) => wordStarts(title, stemOf(w)));
 
 // YES to a promotion: the details are asked here, one question at a time, and saved. No model: on the live server it was too slow and could not hold the order (founder 2026-11-05)
-const INTAKE = [
-  ['location', 'Which city are you in now?'],
-  ['qualification', 'What is your qualification?'],
-  ['experience', 'How many years of experience do you have?'],
-  ['notice_period', 'What is your notice period? If you can join now, write "immediate".'],
-  ['expected_salary', 'What is your expected salary?'],
-  ['availability', 'When are you free for an interview?'],
-];
 const isYes = (t) => /^\W*(yes|yeah|yep|y|ok|okay|sure|interested|i am interested|im interested|i'm interested|avunu|haan|ha)\W*$/i.test(String(t || ''));
 const isNo = (t) => /^\W*(no|nope|no thanks|no thank you|not interested|vaddu|nahi)\W*$/i.test(String(t || ''));
-const intakeNext = (collected) => INTAKE.find(([k]) => !collected[k]) || null;
+// the next line of the list to ask from position i: { index, text } or null when the list is done. Placeholders come from the job; a line with no value is skipped.
+function nextQuestion(list, i, job, answers = {}) {
+  const notWorking = Object.entries(answers).some(([q, v]) => /currently working/i.test(q) && /\b(not|no|nope|fresher|unemployed)\b/i.test(String(v)));
+  const vals = { 'job role': job && job.title, location: job && job.location, salary: job && job.salary, 'work mode': job && job.workMode, 'candidate name': job && job.candidate };
+  for (let n = i; n < list.length; n += 1) {
+    const line = String(list[n]);
+    const skipForWork = /^if working\b/i.test(line) && notWorking;
+    const holes = [...line.matchAll(/\[([^\]]+)\]/g)].map((m) => m[1].toLowerCase());
+    if (!skipForWork && holes.every((h) => vals[h])) {
+      let text = line.replace(/\[([^\]]+)\]/g, (m, h) => vals[h.toLowerCase()]);
+      if (/^if working\b/i.test(text)) { text = text.replace(/^if working,?\s*/i, ''); text = text.charAt(0).toUpperCase() + text.slice(1); }
+      return { index: n, text };
+    }
+  }
+  return null;
+}
+// which saved field of the person an answer also fills
+function fieldOf(question) {
+  const q = String(question).toLowerCase();
+  if (/notice period/.test(q)) return 'notice_period';
+  if (/total work experience|years of experience/.test(q)) return 'experience';
+  if (/how soon|date and time|free for an interview/.test(q)) return 'availability';
+  if (/expected salary/.test(q)) return 'expected_salary';
+  if (/which city|current location/.test(q)) return 'location';
+  if (/qualification/.test(q)) return 'qualification';
+  return null;
+}
 
 // a Green Start campaign has no job field: "Nurses REQ-0620" in its name says which job it promotes
 async function jobOfCampaign(name) {
@@ -173,7 +191,7 @@ function quickAnswer(job, text, { justShown = false } = {}) {
 
 // what the model may read of the chat's memory
 function collectedView(conv) {
-  const { jobChoices, applyLinkSentAt, cardShown, promoJob, promoCardSent, intakeOn, intakeDone, ...rest } = JSON.parse(conv.collected || '{}');
+  const { jobChoices, applyLinkSentAt, cardShown, promoJob, promoCardSent, intakeOn, intakeDone, intakeAt, ...rest } = JSON.parse(conv.collected || '{}');
   return rest;
 }
 
@@ -255,4 +273,4 @@ async function run(name, args, conv, ctx) {
 }
 
 const NAMES = ['get_candidate_profile', 'get_job_details', 'search_knowledge_base', 'save_candidate_data', 'send_apply_link', 'send_interview_link', 'handoff_to_recruiter'];
-module.exports = { isYes, isNo, intakeNext, jobOfCampaign, onlyThisJobText, jobCardText, quickAnswer, run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };
+module.exports = { isYes, isNo, nextQuestion, fieldOf, jobOfCampaign, onlyThisJobText, jobCardText, quickAnswer, run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };
