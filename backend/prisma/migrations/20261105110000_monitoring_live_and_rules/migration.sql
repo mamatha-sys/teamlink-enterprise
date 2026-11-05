@@ -1,0 +1,27 @@
+-- Employee Monitoring, part 2 (2026-11-05): the live status of a PC, breaks, department-wise rules and the default rules
+ALTER TABLE "monitoring_devices" ADD COLUMN "agent_version" TEXT;
+ALTER TABLE "monitoring_devices" ADD COLUMN "current_app" TEXT;
+ALTER TABLE "monitoring_devices" ADD COLUMN "current_idle" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "monitoring_devices" ADD COLUMN "paused_state" TEXT;
+ALTER TABLE "activity_logs" ADD COLUMN "is_break" BOOLEAN NOT NULL DEFAULT false;
+DROP INDEX "app_categories_app_name_key";
+ALTER TABLE "app_categories" ADD COLUMN "department" TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX "app_categories_app_name_department_key" ON "app_categories"("app_name", "department");
+INSERT OR IGNORE INTO "app_categories" ("id", "app_name", "department", "kind", "category", "set_by", "updated_at") VALUES ('seed-excel', 'excel', '', 'app', 'productive', 'TeamLink default', CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO "app_categories" ("id", "app_name", "department", "kind", "category", "set_by", "updated_at") VALUES ('seed-winword', 'winword', '', 'app', 'productive', 'TeamLink default', CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO "app_categories" ("id", "app_name", "department", "kind", "category", "set_by", "updated_at") VALUES ('seed-powerpnt', 'powerpnt', '', 'app', 'productive', 'TeamLink default', CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO "app_categories" ("id", "app_name", "department", "kind", "category", "set_by", "updated_at") VALUES ('seed-outlook', 'outlook', '', 'app', 'productive', 'TeamLink default', CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO "app_categories" ("id", "app_name", "department", "kind", "category", "set_by", "updated_at") VALUES ('seed-teams', 'teams', '', 'app', 'productive', 'TeamLink default', CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO "app_categories" ("id", "app_name", "department", "kind", "category", "set_by", "updated_at") VALUES ('seed-tally', 'tally', '', 'app', 'productive', 'TeamLink default', CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO "app_categories" ("id", "app_name", "department", "kind", "category", "set_by", "updated_at") VALUES ('seed-acrobat', 'acrobat', '', 'app', 'neutral', 'TeamLink default', CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO "app_categories" ("id", "app_name", "department", "kind", "category", "set_by", "updated_at") VALUES ('seed-explorer', 'explorer', '', 'app', 'neutral', 'TeamLink default', CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO "app_categories" ("id", "app_name", "department", "kind", "category", "set_by", "updated_at") VALUES ('seed-teamlink', 'teamlink', '', 'site', 'productive', 'TeamLink default', CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO "app_categories" ("id", "app_name", "department", "kind", "category", "set_by", "updated_at") VALUES ('seed-naukri', 'naukri', '', 'site', 'productive', 'TeamLink default', CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO "app_categories" ("id", "app_name", "department", "kind", "category", "set_by", "updated_at") VALUES ('seed-linkedin', 'linkedin', '', 'site', 'productive', 'TeamLink default', CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO "app_categories" ("id", "app_name", "department", "kind", "category", "set_by", "updated_at") VALUES ('seed-gmail', 'gmail', '', 'site', 'productive', 'TeamLink default', CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO "app_categories" ("id", "app_name", "department", "kind", "category", "set_by", "updated_at") VALUES ('seed-youtube', 'youtube', '', 'site', 'unproductive', 'TeamLink default', CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO "app_categories" ("id", "app_name", "department", "kind", "category", "set_by", "updated_at") VALUES ('seed-facebook', 'facebook', '', 'site', 'unproductive', 'TeamLink default', CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO "app_categories" ("id", "app_name", "department", "kind", "category", "set_by", "updated_at") VALUES ('seed-instagram', 'instagram', '', 'site', 'unproductive', 'TeamLink default', CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO "app_categories" ("id", "app_name", "department", "kind", "category", "set_by", "updated_at") VALUES ('seed-netflix', 'netflix', '', 'site', 'unproductive', 'TeamLink default', CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO "app_categories" ("id", "app_name", "department", "kind", "category", "set_by", "updated_at") VALUES ('seed-hotstar', 'hotstar', '', 'site', 'unproductive', 'TeamLink default', CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO "app_categories" ("id", "app_name", "department", "kind", "category", "set_by", "updated_at") VALUES ('seed-amazon', 'amazon', '', 'site', 'neutral', 'TeamLink default', CURRENT_TIMESTAMP);

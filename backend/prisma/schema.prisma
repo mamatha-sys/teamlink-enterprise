@@ -5212,6 +5212,11 @@ model MonitoringDevice {
   registeredAt DateTime      @default(now()) @map("registered_at")
   lastSeenAt   DateTime?     @map("last_seen_at")
   isActive     Boolean       @default(true) @map("is_active")
+  // what the last heartbeat said (the Live Dashboard): the app in front (name only), idle, break / clocked out, the agent's version
+  agentVersion String?       @map("agent_version")
+  currentApp   String?       @map("current_app")
+  currentIdle  Boolean       @default(false) @map("current_idle")
+  pausedState  String?       @map("paused_state") // break | clockout
   activity     ActivityLog[]
 
   @@index([employeeId])
@@ -5243,6 +5248,7 @@ model ActivityLog {
   endTime         DateTime          @map("end_time")
   durationSeconds Int               @map("duration_seconds")
   isIdle          Boolean           @default(false) @map("is_idle")
+  isBreak         Boolean           @default(false) @map("is_break") // the employee pressed Pause
   day             String // YYYY-MM-DD, India time: the work day the record belongs to
 
   @@index([employeeId, day])
@@ -5253,12 +5259,14 @@ model ActivityLog {
 
 model AppCategory {
   id        String   @id @default(cuid())
-  appName   String   @unique @map("app_name") // an app (chrome.exe -> "chrome") or a website word in the window title ("youtube")
-  kind      String   @default("app") // app | site
-  category  String // productive | neutral | unproductive
-  setBy     String?  @map("set_by")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  appName    String   @map("app_name") // an app (chrome.exe -> "chrome") or a website word in the window title ("youtube")
+  department String   @default("") // "" = every department; a department's own rule wins over it
+  kind       String   @default("app") // app | site
+  category   String // productive | neutral | unproductive
+  setBy      String?  @map("set_by")
+  updatedAt  DateTime @updatedAt @map("updated_at")
 
+  @@unique([appName, department])
   @@map("app_categories")
 }
 

@@ -11,7 +11,9 @@
 //     text is a new version: everyone accepts it again before anything more is recorded.
 //   * only work hours are kept (monitoring_settings work_start .. work_end, India time); the rest is thrown away on arrival.
 //   * activity older than retention_days (default 90) is deleted every few hours (startSweep).
-//   * HR / Admin (Super Admin, Admin, HR) see everyone; anybody else sees only themselves.
+//   * HR / Admin (Super Admin, Admin, HR) see everyone; a team lead, STL or manager their own team; anybody else only themselves.
+//     Clients, candidates and vendors have no monitoring at all. Who looked at whose data is in the audit log.
+//   * the employee can pause it for a break, or clock out for the day, from the icon; nothing is recorded while paused.
 // ---------------------------------------------------------------------------
 const crypto = require('crypto');
 const prisma = require('../db');
@@ -19,22 +21,29 @@ const prisma = require('../db');
 const IST = 330 * 60000;
 const HM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const CATEGORIES = ['productive', 'neutral', 'unproductive'];
-const ONLINE_MS = 6 * 60000; // a PC that sent a heartbeat in the last 6 minutes is online
+const ONLINE_MS = 3 * 60000; // a PC that sent a heartbeat in the last 3 minutes is online (the agent sends one every minute)
 const MAX_RECORD_MS = 60 * 60000; // one record covers at most an hour
 const MAX_BATCH = 500;
 const BROWSERS = ['chrome', 'msedge', 'firefox', 'opera', 'brave', 'iexplore', 'vivaldi', 'safari'];
 const CHAT = /whatsapp|telegram|signal|messenger|discord|wechat|viber|skype|snapchat|instagram/i;
 const SECRET = /password|passcode|\bpin\b|otp|cvv|net ?banking/i;
 
-const DEFAULT_POLICY = [
+const WHO_OLD = 'Who can see it: HR and Admin, and you yourself (HRMS -> Employee Monitoring -> My activity).';
+const WHO_NEW = 'Who can see it: HR and Admin, your team lead or manager (their own team only), and you yourself (HRMS -> Employee Monitoring -> My activity). Every look at your activity by someone else is written in an audit log.';
+const PAUSE_LINE = 'You can pause it for a break, or clock out for the day, from the TeamLink icon next to the clock. Nothing is recorded while it is paused.';
+const POLICY_LINES = [
   'TeamLink records how this office PC is used during work hours, so that HR can see working time and idle time.',
   '',
   'What is recorded: the name of the app in front (for example Chrome or Excel), its window title, when the PC is in use or idle, and the first and last activity of the day.',
   'What is never recorded: what you type, passwords, the clipboard, screenshots, files, or the content of chats and mails. Chat apps are recorded by their name only.',
   'Only work hours are recorded. Records are deleted after the number of days HR has set (90 days unless changed).',
-  'Who can see it: HR and Admin, and you yourself (HRMS -> Employee Monitoring -> My activity).',
+  WHO_NEW,
+  PAUSE_LINE,
   'Nothing is recorded until you accept this notice. You can ask HR about it at any time.',
-].join('\n');
+];
+const DEFAULT_POLICY = POLICY_LINES.join('\n');
+// the notice as first shipped: still the words in use -> replaced by the new one, as a new version everybody accepts again
+const FIRST_POLICY = POLICY_LINES.filter((l) => l !== PAUSE_LINE).map((l) => (l === WHO_NEW ? WHO_OLD : l)).join('\n');
 
 // --- time ------------------------------------------------------------------------------------------------------
 const istDay = (d) => new Date(new Date(d).getTime() + IST).toISOString().slice(0, 10);
@@ -49,10 +58,23 @@ function isMonitorAdmin(user) {
   return !!user && require('./exitDate').isHrDesk(user); // eslint-disable-line global-require
 }
 
+// What this login may see: { admin, lead, ids } - ids = the employees (null = everyone).
+const LEAD_ROLES = ['TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER'];
+async function accessOf(user) {
+  if (isMonitorAdmin(user)) return { admin: true, lead: false, ids: null };
+  const S = require('./scope'); // eslint-disable-line global-require
+  if (LEAD_ROLES.includes(S.scopeOf(user).hrmsRole)) {
+    const rows = await prisma.employee.findMany({ where: S.employeeWhere(user), select: { id: true } });
+    return { admin: false, lead: true, ids: [...new Set([...rows.map((r) => r.id), user.employeeId].filter(Boolean))] };
+  }
+  return { admin: false, lead: false, ids: user && user.employeeId ? [user.employeeId] : [] };
+}
+
 // --- settings ----------------------------------------------------------------------------------------------------
 async function settings() {
   let row = await prisma.monitoringSetting.findUnique({ where: { id: 'default' } });
   if (!row) row = await prisma.monitoringSetting.create({ data: { id: 'default', policyText: DEFAULT_POLICY } }).catch(() => null);
+  if (row && row.policyText === FIRST_POLICY) row = await prisma.monitoringSetting.update({ where: { id: 'default' }, data: { policyText: DEFAULT_POLICY, policyVersion: (row.policyVersion || 1) + 1 } }).catch(() => row);
   const s = row || { workStart: '09:30', workEnd: '18:30', idleThresholdMinutes: 5, retentionDays: 90, screenshotsEnabled: false, policyVersion: 1, policyText: DEFAULT_POLICY };
   return { ...s, policyText: s.policyText || DEFAULT_POLICY, screenshotsEnabled: false };
 }
@@ -144,7 +166,7 @@ async function ingest(device, records) {
     if (b - a < 1000) { skipped += 1; continue; } // eslint-disable-line no-continue
     rows.push({
       deviceId: device.id, employeeId: device.employeeId, appName: app, windowTitle: cleanTitle(app, r.windowTitle),
-      startTime: new Date(a), endTime: new Date(b), durationSeconds: Math.round((b - a) / 1000), isIdle: r.isIdle === true || r.idle === true, day,
+      startTime: new Date(a), endTime: new Date(b), durationSeconds: Math.round((b - a) / 1000), isIdle: r.isBreak !== true && (r.isIdle === true || r.idle === true), isBreak: r.isBreak === true, day,
     });
   }
   for (let i = 0; i < rows.length; i += 200) {
@@ -155,31 +177,48 @@ async function ingest(device, records) {
   return { status: 200, saved: rows.length, skipped };
 }
 
-// --- categories ----------------------------------------------------------------------------------------------------------
+// A heartbeat: what the PC is doing now, for the Live Dashboard (the app's name only, never a title).
+async function heartbeat(device, body = {}) {
+  const paused = ['break', 'clockout'].includes(body.paused) ? body.paused : null;
+  await prisma.monitoringDevice.update({
+    where: { id: device.id },
+    data: {
+      lastSeenAt: new Date(), currentApp: body.currentApp ? cleanApp(body.currentApp) || null : null, currentIdle: body.idle === true, pausedState: paused,
+      ...(body.agentVersion ? { agentVersion: String(body.agentVersion).slice(0, 20) } : {}),
+    },
+  });
+}
+
+// --- categories (a department's own rule wins over the rule for everyone) --------------------------------------------------
 async function categoryIndex() {
   const rows = await prisma.appCategory.findMany();
   const apps = new Map(); const sites = [];
-  rows.forEach((c) => { if (c.kind === 'site') sites.push(c); else apps.set(c.appName.toLowerCase(), c); });
-  return (app, title) => {
+  rows.forEach((c) => {
+    if (c.kind === 'site') sites.push(c); else apps.set(`${c.department || ''}|${c.appName.toLowerCase()}`, c);
+  });
+  return (app, title, department = '') => {
     const a = String(app || '').toLowerCase();
     if (BROWSERS.includes(a) && title) {
       const t = String(title).toLowerCase();
-      const site = sites.find((x) => t.includes(x.appName.toLowerCase()));
+      const hits = sites.filter((x) => t.includes(x.appName.toLowerCase()) && (!x.department || x.department === department));
+      const site = hits.find((x) => x.department) || hits[0];
       if (site) return { key: site.appName, label: site.appName, kind: 'site', category: site.category };
     }
-    const c = apps.get(a);
+    const c = apps.get(`${department || ''}|${a}`) || apps.get(`|${a}`);
     return { key: a, label: app, kind: 'app', category: c ? c.category : null };
   };
 }
 
 // --- the numbers ----------------------------------------------------------------------------------------------------------
 const hrs = (sec) => Math.round((sec / 3600) * 100) / 100;
-function totalsOf(logs, catOf) {
-  let active = 0; let idle = 0; let productive = 0; let unproductive = 0; let first = null; let last = null;
+function totalsOf(logs, catOf, department = '') {
+  let active = 0; let idle = 0; let breaks = 0; let productive = 0; let unproductive = 0; let first = null; let last = null;
   logs.forEach((l) => {
-    if (l.isIdle) idle += l.durationSeconds; else {
+    if (l.isBreak) breaks += l.durationSeconds;
+    else if (l.isIdle) idle += l.durationSeconds;
+    else {
       active += l.durationSeconds;
-      const c = catOf(l.appName, l.windowTitle).category;
+      const c = catOf(l.appName, l.windowTitle, department).category;
       if (c === 'productive') productive += l.durationSeconds;
       if (c === 'unproductive') unproductive += l.durationSeconds;
     }
@@ -187,46 +226,70 @@ function totalsOf(logs, catOf) {
     if (!last || l.endTime > last) last = l.endTime;
   });
   return {
-    activeSeconds: active, idleSeconds: idle, productiveSeconds: productive, unproductiveSeconds: unproductive,
-    activeHours: hrs(active), idleHours: hrs(idle), productivity: active ? Math.round((productive / active) * 100) : null, first, last,
+    activeSeconds: active, idleSeconds: idle, breakSeconds: breaks, productiveSeconds: productive, unproductiveSeconds: unproductive,
+    activeHours: hrs(active), idleHours: hrs(idle), breakHours: hrs(breaks), productivity: active ? Math.round((productive / active) * 100) : null, first, last,
   };
 }
 async function employeesById(ids) {
-  const rows = ids.length ? await prisma.employee.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, employeeCode: true, department: true, designation: true } }) : [];
+  const rows = ids.length ? await prisma.employee.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, employeeCode: true, department: true, team: true, designation: true } }) : [];
   return new Map(rows.map((e) => [e.id, e]));
 }
+const LOG_SELECT = { employeeId: true, appName: true, windowTitle: true, startTime: true, endTime: true, durationSeconds: true, isIdle: true, isBreak: true, day: true };
+const within = (access) => (access && access.ids ? { employeeId: { in: access.ids } } : {});
 
-// Overview of one day: every employee with a registered PC, and what they did.
-async function overview(day) {
+// What a PC is doing now, from its last heartbeat (a heartbeat comes every minute).
+function liveStatus(dev, onLeave, now) {
+  const fresh = dev && dev.lastSeenAt && now - new Date(dev.lastSeenAt).getTime() < ONLINE_MS;
+  if (fresh) {
+    if (dev.pausedState === 'break') return 'On break';
+    if (dev.pausedState === 'clockout') return 'Clocked out';
+    return dev.currentIdle ? 'Idle' : 'Online';
+  }
+  return onLeave ? 'On leave' : 'Offline';
+}
+
+// The Live Dashboard / Overview of one day: every employee this login may see who has a registered PC.
+async function overview(day, access = null) {
   const d = validDay(day) ? day : todayIst();
-  const [devices, logs, catOf] = await Promise.all([
-    prisma.monitoringDevice.findMany({ where: { isActive: true }, select: { employeeId: true, lastSeenAt: true } }),
-    prisma.activityLog.findMany({ where: { day: d }, select: { employeeId: true, appName: true, windowTitle: true, startTime: true, endTime: true, durationSeconds: true, isIdle: true } }),
+  const live = d === todayIst();
+  const [devices, logs, catOf, leaves] = await Promise.all([
+    prisma.monitoringDevice.findMany({ where: { isActive: true, ...within(access) }, select: { employeeId: true, lastSeenAt: true, currentApp: true, currentIdle: true, pausedState: true } }),
+    prisma.activityLog.findMany({ where: { day: d, ...within(access) }, select: LOG_SELECT }),
     categoryIndex(),
+    prisma.leaveRequest.findMany({ where: { status: 'Approved', fromDate: { lte: d }, toDate: { gte: d }, ...within(access) }, select: { employeeId: true } }),
   ]);
+  const onLeave = new Set(leaves.map((l) => l.employeeId));
   const ids = [...new Set([...devices.map((x) => x.employeeId), ...logs.map((l) => l.employeeId)])];
   const emps = await employeesById(ids);
   const byEmp = new Map(ids.map((id) => [id, []]));
   logs.forEach((l) => byEmp.get(l.employeeId).push(l));
-  const seen = new Map();
-  devices.forEach((x) => { const t = x.lastSeenAt ? new Date(x.lastSeenAt).getTime() : 0; if (!seen.has(x.employeeId) || t > seen.get(x.employeeId)) seen.set(x.employeeId, t); });
+  const latest = new Map();
+  devices.forEach((x) => { const cur = latest.get(x.employeeId); if (!cur || new Date(x.lastSeenAt || 0) > new Date(cur.lastSeenAt || 0)) latest.set(x.employeeId, x); });
   const now = Date.now();
   const rows = ids.map((id) => {
     const e = emps.get(id) || { id, name: 'Employee', department: null };
-    const t = totalsOf(byEmp.get(id), catOf);
+    const t = totalsOf(byEmp.get(id), catOf, e.department || '');
+    const dev = latest.get(id) || null;
+    const status = live ? liveStatus(dev, onLeave.has(id), now) : (onLeave.has(id) ? 'On leave' : null);
     return {
-      employeeId: id, name: e.name, code: e.employeeCode || null, department: e.department || null,
-      firstSeen: t.first, lastSeen: t.last, activeHours: t.activeHours, idleHours: t.idleHours, productivity: t.productivity,
-      online: d === todayIst() && seen.has(id) && now - seen.get(id) < ONLINE_MS,
+      employeeId: id, name: e.name, code: e.employeeCode || null, department: e.department || null, team: e.team || null,
+      firstSeen: t.first, lastSeen: t.last, activeHours: t.activeHours, idleHours: t.idleHours, breakHours: t.breakHours, productivity: t.productivity,
+      status, currentApp: live && dev && ['Online', 'Idle'].includes(status) ? dev.currentApp || null : null,
+      lastHeartbeat: dev ? dev.lastSeenAt : null, online: status === 'Online' || status === 'Idle',
     };
   }).sort((a, b) => b.activeHours - a.activeHours || String(a.name).localeCompare(String(b.name)));
   const withData = rows.filter((r) => r.activeHours || r.idleHours);
   const avg = (k) => (withData.length ? Math.round((withData.reduce((n, r) => n + r[k], 0) / withData.length) * 100) / 100 : 0);
+  const count = (s) => rows.filter((r) => r.status === s).length;
   return {
-    day: d,
-    cards: { tracked: new Set(devices.map((x) => x.employeeId)).size, online: rows.filter((r) => r.online).length, avgActiveHours: avg('activeHours'), avgIdleHours: avg('idleHours') },
+    day: d, live,
+    cards: {
+      tracked: new Set(devices.map((x) => x.employeeId)).size, online: count('Online'), idle: count('Idle'), offline: count('Offline'), onLeave: count('On leave'),
+      onBreak: count('On break') + count('Clocked out'), avgActiveHours: avg('activeHours'), avgIdleHours: avg('idleHours'),
+    },
     rows,
     departments: [...new Set(rows.map((r) => r.department).filter(Boolean))].sort(),
+    teams: [...new Set(rows.map((r) => r.team).filter(Boolean))].sort(),
   };
 }
 
@@ -239,14 +302,15 @@ async function employeeDetail(employeeId, from, to) {
   if (addDays(a, 92) < b) a = addDays(b, -92);
   const [emp, logs, catOf] = await Promise.all([
     prisma.employee.findUnique({ where: { id: employeeId }, select: { id: true, name: true, employeeCode: true, department: true, designation: true } }),
-    prisma.activityLog.findMany({ where: { employeeId, day: { gte: a, lte: b } }, orderBy: { startTime: 'asc' }, select: { appName: true, windowTitle: true, startTime: true, endTime: true, durationSeconds: true, isIdle: true, day: true } }),
+    prisma.activityLog.findMany({ where: { employeeId, day: { gte: a, lte: b } }, orderBy: { startTime: 'asc' }, select: LOG_SELECT }),
     categoryIndex(),
   ]);
   if (!emp) return null;
-  const totals = totalsOf(logs, catOf);
+  const dept = emp.department || '';
+  const totals = totalsOf(logs, catOf, dept);
   const usage = new Map();
-  logs.filter((l) => !l.isIdle).forEach((l) => {
-    const c = catOf(l.appName, l.windowTitle);
+  logs.filter((l) => !l.isIdle && !l.isBreak).forEach((l) => {
+    const c = catOf(l.appName, l.windowTitle, dept);
     const u = usage.get(c.key) || { key: c.key, name: c.label, kind: c.kind, category: c.category, seconds: 0, titles: new Map() };
     u.seconds += l.durationSeconds;
     if (l.windowTitle) u.titles.set(l.windowTitle, (u.titles.get(l.windowTitle) || 0) + l.durationSeconds);
@@ -257,48 +321,117 @@ async function employeeDetail(employeeId, from, to) {
     topTitles: [...u.titles.entries()].sort((x, y) => y[1] - x[1]).slice(0, 3).map(([title, sec]) => ({ title, minutes: Math.round(sec / 60) })),
   }));
   const days = [...new Set(logs.map((l) => l.day))].sort();
-  const perDay = days.map((d) => ({ day: d, ...totalsOf(logs.filter((l) => l.day === d), catOf) }));
+  const perDay = days.map((d) => ({ day: d, ...totalsOf(logs.filter((l) => l.day === d), catOf, dept) }));
   const s = await settings();
   return {
     employee: emp, from: a, to: b, totals, apps, top10: apps.slice(0, 10), perDay,
-    // the timeline of one day (the last day in the range): one bar, active / idle
-    timeline: a === b ? logs.map((l) => ({ start: l.startTime, end: l.endTime, idle: l.isIdle, app: l.appName })) : null,
+    // the timeline of one day: one bar, active / idle / break
+    timeline: a === b ? logs.map((l) => ({ start: l.startTime, end: l.endTime, idle: l.isIdle, break: l.isBreak, app: l.appName })) : null,
     workStart: s.workStart, workEnd: s.workEnd,
   };
 }
 
-// The report: one row per employee over the days, by department.
-async function reportRows(from, to, department) {
+function rangeOf(from, to, days) {
   const t = todayIst();
   let a = validDay(from) ? from : addDays(t, -6);
   let b = validDay(to) ? to : t;
   if (b < a) [a, b] = [b, a];
-  if (addDays(a, 366) < b) a = addDays(b, -366);
-  const logs = await prisma.activityLog.findMany({ where: { day: { gte: a, lte: b } }, select: { employeeId: true, appName: true, windowTitle: true, startTime: true, endTime: true, durationSeconds: true, isIdle: true, day: true } });
+  if (addDays(a, days) < b) a = addDays(b, -days);
+  return [a, b];
+}
+// The reports. view: employee (one row per person), daily (one row per person per day, with login and logout), team (per department).
+async function reportRows(from, to, department, access = null, view = 'employee') {
+  const [a, b] = rangeOf(from, to, 366);
+  const logs = await prisma.activityLog.findMany({ where: { day: { gte: a, lte: b }, ...within(access) }, select: LOG_SELECT });
   const catOf = await categoryIndex();
   const ids = [...new Set(logs.map((l) => l.employeeId))];
   const emps = await employeesById(ids);
-  const rows = ids.map((id) => {
-    const mine = logs.filter((l) => l.employeeId === id);
-    const x = totalsOf(mine, catOf);
-    const e = emps.get(id) || {};
+  const deptOf = (id) => (emps.get(id) || {}).department || '';
+  const kept = logs.filter((l) => !department || deptOf(l.employeeId) === department);
+  const group = (keyOf) => { const m = new Map(); kept.forEach((l) => { const k = keyOf(l); if (!m.has(k)) m.set(k, []); m.get(k).push(l); }); return m; };
+  const base = (list, dept) => {
+    const x = totalsOf(list, catOf, dept);
     return {
-      employeeId: id, name: e.name || 'Employee', code: e.employeeCode || null, department: e.department || null,
-      days: new Set(mine.map((l) => l.day)).size, activeHours: x.activeHours, idleHours: x.idleHours,
+      days: new Set(list.map((l) => l.day)).size, login: x.first, logout: x.last, activeHours: x.activeHours, idleHours: x.idleHours, breakHours: x.breakHours,
       productiveHours: hrs(x.productiveSeconds), unproductiveHours: hrs(x.unproductiveSeconds), productivity: x.productivity,
     };
-  }).filter((r) => !department || r.department === department).sort((p, q) => String(p.name).localeCompare(String(q.name)));
-  return { from: a, to: b, rows, departments: [...new Set([...emps.values()].map((e) => e.department).filter(Boolean))].sort() };
+  };
+  let rows;
+  if (view === 'team') {
+    rows = [...group((l) => deptOf(l.employeeId) || 'No department').entries()].map(([name, list]) => {
+      // each person is scored by their own department's rules
+      const parts = [...new Set(list.map((l) => l.employeeId))].map((id) => base(list.filter((l) => l.employeeId === id), deptOf(id)));
+      const sum = (k) => Math.round(parts.reduce((n, p) => n + p[k], 0) * 100) / 100;
+      const active = sum('activeHours'); const productive = sum('productiveHours');
+      return {
+        key: name, name, employees: parts.length, activeHours: active, idleHours: sum('idleHours'), breakHours: sum('breakHours'),
+        productiveHours: productive, unproductiveHours: sum('unproductiveHours'), productivity: active ? Math.round((productive / active) * 100) : null,
+      };
+    }).sort((p, q) => String(p.name).localeCompare(String(q.name)));
+  } else if (view === 'daily') {
+    rows = [...group((l) => `${l.employeeId}|${l.day}`).entries()].map(([k, list]) => {
+      const [id, day] = k.split('|');
+      const e = emps.get(id) || {};
+      return { key: k, employeeId: id, day, name: e.name || 'Employee', code: e.employeeCode || null, department: e.department || null, ...base(list, e.department || '') };
+    }).sort((p, q) => q.day.localeCompare(p.day) || String(p.name).localeCompare(String(q.name)));
+  } else {
+    rows = [...group((l) => l.employeeId).entries()].map(([id, list]) => {
+      const e = emps.get(id) || {};
+      return { key: id, employeeId: id, name: e.name || 'Employee', code: e.employeeCode || null, department: e.department || null, ...base(list, e.department || '') };
+    }).sort((p, q) => String(p.name).localeCompare(String(q.name)));
+  }
+  return { from: a, to: b, view, rows, departments: [...new Set([...emps.values()].map((e) => e.department).filter(Boolean))].sort() };
 }
 
-// Apps / sites seen in the last 30 days that have no category yet (to mark them).
+// App & website usage over a period: top apps, top websites, the split, per department.
+async function usage(from, to, department, access = null) {
+  const [a, b] = rangeOf(from, to, 366);
+  const logs = await prisma.activityLog.findMany({ where: { day: { gte: a, lte: b }, isIdle: false, isBreak: false, ...within(access) }, select: LOG_SELECT });
+  const catOf = await categoryIndex();
+  const emps = await employeesById([...new Set(logs.map((l) => l.employeeId))]);
+  const deptOf = (id) => (emps.get(id) || {}).department || '';
+  const apps = new Map(); const split = { productive: 0, neutral: 0, unproductive: 0, unset: 0 }; const teams = new Map();
+  logs.filter((l) => !department || deptOf(l.employeeId) === department).forEach((l) => {
+    const dept = deptOf(l.employeeId);
+    const c = catOf(l.appName, l.windowTitle, dept);
+    const u = apps.get(c.key) || { key: c.key, name: c.label, kind: c.kind, category: c.category, seconds: 0, people: new Set() };
+    u.seconds += l.durationSeconds; u.people.add(l.employeeId);
+    apps.set(c.key, u);
+    const cat = c.category || 'unset';
+    split[cat] += l.durationSeconds;
+    const t = teams.get(dept || 'No department') || { name: dept || 'No department', productive: 0, neutral: 0, unproductive: 0, unset: 0 };
+    t[cat] += l.durationSeconds;
+    teams.set(t.name, t);
+  });
+  const list = [...apps.values()].sort((x, y) => y.seconds - x.seconds).map((u) => ({ key: u.key, name: u.name, kind: u.kind, category: u.category, hours: hrs(u.seconds), minutes: Math.round(u.seconds / 60), people: u.people.size }));
+  const inHours = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, typeof v === 'number' ? hrs(v) : v]));
+  return {
+    from: a, to: b, topApps: list.filter((x) => x.kind === 'app').slice(0, 20), topSites: list.filter((x) => x.kind === 'site').slice(0, 20),
+    split: inHours(split), byDepartment: [...teams.values()].map(inHours).sort((p, q) => String(p.name).localeCompare(String(q.name))),
+    departments: [...new Set([...emps.values()].map((e) => e.department).filter(Boolean))].sort(),
+  };
+}
+
+// Apps seen in the last 30 days that have no rule yet (to mark them).
 async function uncategorised() {
   const since = addDays(todayIst(), -30);
-  const logs = await prisma.activityLog.groupBy({ by: ['appName'], where: { day: { gte: since }, isIdle: false }, _sum: { durationSeconds: true } });
-  const known = new Set((await prisma.appCategory.findMany({ select: { appName: true } })).map((c) => c.appName.toLowerCase()));
-  return logs.filter((g) => !known.has(String(g.appName).toLowerCase()))
+  const logs = await prisma.activityLog.groupBy({ by: ['appName'], where: { day: { gte: since }, isIdle: false, isBreak: false }, _sum: { durationSeconds: true } });
+  const known = new Set((await prisma.appCategory.findMany({ where: { kind: 'app', department: '' }, select: { appName: true } })).map((c) => c.appName.toLowerCase()));
+  return logs.filter((g) => !known.has(String(g.appName).toLowerCase()) && g.appName !== 'Break')
     .map((g) => ({ appName: g.appName, hours: hrs(g._sum.durationSeconds || 0) }))
     .sort((x, y) => y.hours - x.hours).slice(0, 100);
+}
+
+// The audit log of this module: who looked at whose data, what was exported, settings, PCs.
+const AUDIT_ENTITIES = ['Monitoring', 'MonitoringDevice', 'MonitoringSetting', 'ActivityLog'];
+async function auditRows(from, to) {
+  const [a, b] = rangeOf(from, to, 366);
+  const rows = await prisma.auditLog.findMany({
+    where: { entity: { in: AUDIT_ENTITIES }, createdAt: { gte: atIst(a, '00:00'), lte: new Date(atIst(b, '23:59').getTime() + 60000) } },
+    orderBy: { createdAt: 'desc' }, take: 1000,
+    select: { id: true, createdAt: true, action: true, toValue: true, actorName: true, user: { select: { name: true } } },
+  });
+  return { from: a, to: b, rows: rows.map((r) => ({ id: r.id, at: r.createdAt, who: r.actorName || (r.user && r.user.name) || 'TeamLink', action: r.action, detail: r.toValue || null })) };
 }
 
 // ATTENDANCE: the first and last PC activity of each day (shown as "PC activity"; it never changes the marked attendance).
@@ -331,6 +464,6 @@ function startSweep() {
 }
 
 module.exports = {
-  CATEGORIES, DEFAULT_POLICY, isMonitorAdmin, settings, saveSettings, hasConsent, recordConsent, hashToken, deviceOf, registerDevice,
+  CATEGORIES, DEFAULT_POLICY, AUDIT_ENTITIES, isMonitorAdmin, accessOf, heartbeat, usage, auditRows, settings, saveSettings, hasConsent, recordConsent, hashToken, deviceOf, registerDevice,
   ingest, categoryIndex, overview, employeeDetail, reportRows, uncategorised, pcActivity, purge, startSweep, todayIst, istDay, cleanTitle,
 };

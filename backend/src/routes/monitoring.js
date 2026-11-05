@@ -8,9 +8,11 @@
 //   POST /activity           { records: [{ appName, windowTitle, start, end, isIdle }] }   every 1-5 minutes
 //   POST /heartbeat          -> { settings, consentRequired }   updates last seen
 // THE SCREENS (a TeamLink login; HR / Admin see everyone, anybody else only themselves):
-//   GET  /overview?date=                         HR / Admin
-//   GET  /employee/:id?from=&to=                 HR / Admin, or :id = me / their own employee id
-//   GET  /reports?from=&to=&department=&format=  HR / Admin (format=xlsx|csv|pdf: the file)
+//   GET  /overview?date=                         the Live Dashboard: HR / Admin everyone, a TL / STL / Manager their team
+//   GET  /employee/:id?from=&to=                 the same reach, or :id = me (a look at someone else is audited)
+//   GET  /reports?from=&to=&department=&view=employee|daily|team&format=   the same reach (format=xlsx|csv|pdf: the file)
+//   GET  /usage?from=&to=&department=            top apps, top websites, the productive split
+//   GET  /audit?from=&to=                        HR / Admin: who looked at what, exports, settings, PCs
 //   GET/POST/PUT/DELETE /app-categories          HR / Admin (GET: + apps seen with no category)
 //   GET/PUT /settings                            HR / Admin (GET is open to everyone: work hours and the notice)
 //   GET  /devices, PUT /devices/:id/deactivate   HR / Admin all; an employee their own PCs
@@ -83,7 +85,7 @@ router.post('/activity', agent, wrap(async (req, res) => {
   return res.json({ saved: out.saved, skipped: out.skipped });
 }));
 router.post('/heartbeat', agent, wrap(async (req, res) => {
-  await prisma.monitoringDevice.update({ where: { id: req.device.id }, data: { lastSeenAt: new Date() } });
+  await M.heartbeat(req.device, req.body || {});
   const s = await M.settings();
   const consent = await M.hasConsent(req.device.employeeId, s.policyVersion);
   return res.json({ settings: publicSettings(s), consentRequired: !consent, ...(consent ? {} : { policyText: s.policyText }) });
@@ -98,49 +100,75 @@ router.post('/consent', agent, wrap(async (req, res) => {
 
 // =============================================================== the screens
 router.use(requireAuth);
+// clients, candidates and other outside logins have no monitoring at all
+router.use((req, res, next) => (['CLIENT', 'CANDIDATE'].includes(req.user.role) ? fail(res, 403, 'This is not part of your login.') : next()));
+const teamOnly = wrap(async (req, res, next) => {
+  req.access = await M.accessOf(req.user);
+  if (!req.access.admin && !req.access.lead) return fail(res, 403, 'You can see your own activity under My activity.');
+  return next();
+});
 const adminOnly = (req, res, next) => (M.isMonitorAdmin(req.user) ? next() : fail(res, 403, 'Employee monitoring is for HR and Admin. You can see your own activity under My activity.'));
 
-router.get('/overview', adminOnly, wrap(async (req, res) => res.json(await M.overview(req.query.date))));
+router.get('/overview', teamOnly, wrap(async (req, res) => res.json(await M.overview(req.query.date, req.access))));
 
 router.get('/employee/:id', wrap(async (req, res) => {
   const id = req.params.id === 'me' ? req.user.employeeId : req.params.id;
   if (!id) return fail(res, 404, 'Your login has no employee record.');
-  if (!M.isMonitorAdmin(req.user) && id !== req.user.employeeId) return fail(res, 403, 'You can see only your own activity.');
+  const access = await M.accessOf(req.user);
+  if (access.ids && !access.ids.includes(id)) return fail(res, 403, 'You can see only your own activity.');
   const out = await M.employeeDetail(id, req.query.from, req.query.to);
-  return out ? res.json(out) : fail(res, 404, 'Employee not found.');
+  if (!out) return fail(res, 404, 'Employee not found.');
+  if (id !== req.user.employeeId) await logAudit({ userId: req.user.id, actorName: req.user.name, action: 'Monitoring: looked at the activity of', entity: 'Monitoring', entityId: id, toValue: `${out.employee.name} · ${out.from} to ${out.to}` }).catch(() => {});
+  return res.json(out);
 }));
 
-router.get('/reports', adminOnly, wrap(async (req, res) => {
-  const out = await M.reportRows(req.query.from, req.query.to, req.query.department || '');
+router.get('/reports', teamOnly, wrap(async (req, res) => {
+  const view = ['daily', 'team'].includes(req.query.view) ? req.query.view : 'employee';
+  const out = await M.reportRows(req.query.from, req.query.to, req.query.department || '', req.access, view);
   const KIT = require('../utils/exportKit'); // eslint-disable-line global-require
   const format = req.query.format ? KIT.formatOf(req.query) : null;
   if (!format) return res.json(out);
   const pct = (v) => (v == null ? '' : `${v}%`);
+  const tm = (d) => (d ? new Date(d).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true }) : '');
+  const nums = (r) => [r.activeHours, r.idleHours, r.breakHours, r.productiveHours, r.unproductiveHours, pct(r.productivity)];
+  const tail = ['Active hours', 'Idle hours', 'Break hours', 'Productive hours', 'Unproductive hours', 'Productivity'];
+  const table = {
+    employee: [['Employee', 'Code', 'Department', 'Days', ...tail], (r) => [r.name, r.code || '', r.department || '', r.days, ...nums(r)]],
+    daily: [['Date', 'Employee', 'Code', 'Department', 'Login', 'Logout', ...tail], (r) => [r.day, r.name, r.code || '', r.department || '', tm(r.login), tm(r.logout), ...nums(r)]],
+    team: [['Department', 'Employees', ...tail], (r) => [r.name, r.employees, ...nums(r)]],
+  }[view];
   return KIT.sendTable(req, res, {
-    format, name: `employee-monitoring-${out.from}-to-${out.to}`, title: `Employee monitoring ${out.from} to ${out.to}${req.query.department ? ` · ${req.query.department}` : ''}`,
-    headers: ['Employee', 'Code', 'Department', 'Days', 'Active hours', 'Idle hours', 'Productive hours', 'Unproductive hours', 'Productivity'],
-    rows: out.rows.map((r) => [r.name, r.code || '', r.department || '', r.days, r.activeHours, r.idleHours, r.productiveHours, r.unproductiveHours, pct(r.productivity)]),
+    format, name: `employee-monitoring-${view}-${out.from}-to-${out.to}`, title: `Employee monitoring ${out.from} to ${out.to}${req.query.department ? ` · ${req.query.department}` : ''}`,
+    headers: table[0], rows: out.rows.map(table[1]),
     sheet: 'Monitoring', entity: 'ActivityLog', what: 'Employee monitoring report', scope: req.query.department || 'All departments', period: { from: out.from, to: out.to }, screen: 'Employee Monitoring',
   });
 }));
 
+router.get('/usage', teamOnly, wrap(async (req, res) => res.json(await M.usage(req.query.from, req.query.to, req.query.department || '', req.access))));
+
+router.get('/audit', adminOnly, wrap(async (req, res) => res.json(await M.auditRows(req.query.from, req.query.to))));
+
 // --- app categories
 router.get('/app-categories', adminOnly, wrap(async (req, res) => {
-  const [rows, unset] = await Promise.all([prisma.appCategory.findMany({ orderBy: { appName: 'asc' } }), M.uncategorised()]);
-  res.json({ rows, uncategorised: unset, categories: M.CATEGORIES });
+  const [rows, unset, depts] = await Promise.all([
+    prisma.appCategory.findMany({ orderBy: [{ department: 'asc' }, { appName: 'asc' }] }), M.uncategorised(),
+    prisma.employee.findMany({ where: { department: { not: null } }, select: { department: true }, distinct: ['department'] }),
+  ]);
+  res.json({ rows, uncategorised: unset, categories: M.CATEGORIES, departments: depts.map((d) => d.department).filter(Boolean).sort() });
 }));
 const catBody = (b) => {
   const appName = String(b.appName || '').trim().toLowerCase().replace(/\.exe$/, '').slice(0, 80);
   const kind = b.kind === 'site' ? 'site' : 'app';
+  const department = String(b.department || '').trim().slice(0, 80);
   const category = String(b.category || '').toLowerCase();
   if (!appName) return { error: 'Write the app (like chrome or excel) or a website word (like youtube).' };
   if (!M.CATEGORIES.includes(category)) return { error: 'Pick productive, neutral or unproductive.' };
-  return { appName, kind, category };
+  return { appName, kind, category, department };
 };
 router.post('/app-categories', adminOnly, wrap(async (req, res) => {
   const c = catBody(req.body || {});
   if (c.error) return fail(res, 400, c.error);
-  const row = await prisma.appCategory.upsert({ where: { appName: c.appName }, create: { ...c, setBy: req.user.name || null }, update: { kind: c.kind, category: c.category, setBy: req.user.name || null } });
+  const row = await prisma.appCategory.upsert({ where: { appName_department: { appName: c.appName, department: c.department } }, create: { ...c, setBy: req.user.name || null }, update: { kind: c.kind, category: c.category, setBy: req.user.name || null } });
   return res.status(201).json(row);
 }));
 router.put('/app-categories/:id', adminOnly, wrap(async (req, res) => {
@@ -170,13 +198,14 @@ router.put('/settings', adminOnly, wrap(async (req, res) => {
 router.get('/devices', wrap(async (req, res) => {
   const admin = M.isMonitorAdmin(req.user);
   if (!admin && !req.user.employeeId) return res.json({ rows: [] });
+  // a lead looks at people on the Live Dashboard; Devices is HR / Admin's, and each employee's own PCs
   const rows = await prisma.monitoringDevice.findMany({
     where: admin ? {} : { employeeId: req.user.employeeId },
     orderBy: [{ isActive: 'desc' }, { lastSeenAt: 'desc' }],
-    select: { id: true, deviceName: true, os: true, registeredAt: true, lastSeenAt: true, isActive: true, employee: { select: { id: true, name: true, employeeCode: true, department: true } } },
+    select: { id: true, deviceName: true, os: true, agentVersion: true, registeredAt: true, lastSeenAt: true, isActive: true, employee: { select: { id: true, name: true, employeeCode: true, department: true } } },
   });
   const now = Date.now();
-  res.json({ rows: rows.map((d) => ({ ...d, online: d.isActive && d.lastSeenAt && now - new Date(d.lastSeenAt).getTime() < 6 * 60000 })), canManage: admin });
+  res.json({ rows: rows.map((d) => ({ ...d, online: d.isActive && d.lastSeenAt && now - new Date(d.lastSeenAt).getTime() < 3 * 60000 })), canManage: admin });
 }));
 router.put('/devices/:id/deactivate', wrap(async (req, res) => {
   const d = await prisma.monitoringDevice.findUnique({ where: { id: req.params.id } });
@@ -193,9 +222,8 @@ router.get('/pc-activity', wrap(async (req, res) => {
   const day = /^\d{4}-\d{2}-\d{2}$/;
   const from = day.test(String(req.query.from || '')) ? String(req.query.from) : M.todayIst();
   const to = day.test(String(req.query.to || '')) ? String(req.query.to) : from;
-  let ids;
-  if (M.isMonitorAdmin(req.user)) ids = [...new Set((await prisma.activityLog.findMany({ where: { day: { gte: from, lte: to } }, select: { employeeId: true }, distinct: ['employeeId'] })).map((x) => x.employeeId))];
-  else ids = req.user.employeeId ? [req.user.employeeId] : [];
+  const access = await M.accessOf(req.user);
+  const ids = access.ids || [...new Set((await prisma.activityLog.findMany({ where: { day: { gte: from, lte: to } }, select: { employeeId: true }, distinct: ['employeeId'] })).map((x) => x.employeeId))];
   const map = await M.pcActivity(ids, from, to);
   res.json({ rows: Object.fromEntries(map) });
 }));
@@ -209,7 +237,7 @@ router.get('/me', wrap(async (req, res) => {
   const id = req.user.employeeId;
   const consents = id ? await prisma.monitoringConsent.findMany({ where: { employeeId: id }, orderBy: { acceptedAt: 'desc' } }) : [];
   res.json({
-    hasEmployee: !!id, isAdmin: M.isMonitorAdmin(req.user), settings: publicSettings(s), policyText: s.policyText,
+    hasEmployee: !!id, isAdmin: M.isMonitorAdmin(req.user), isLead: (await M.accessOf(req.user)).lead, settings: publicSettings(s), policyText: s.policyText,
     accepted: consents.some((c) => c.policyVersion === s.policyVersion), consents,
   });
 }));

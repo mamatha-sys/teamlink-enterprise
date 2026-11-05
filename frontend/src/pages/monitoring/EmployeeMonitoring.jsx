@@ -12,7 +12,8 @@ import './monitoring.css';
 // ---------------------------------------------------------------------------
 // HRMS -> EMPLOYEE MONITORING (2026-11-04). How office PCs are used in work hours, from the TeamLink desktop agent the
 // employee installs and agrees to (backend: routes/monitoring.js, utils/monitoring.js; the agent: backend/agent/TeamLinkMonitor.ps1).
-//   HR / Admin  Overview · Employee (opened from a row) · App categories · Reports · Devices · Settings · My activity
+//   HR / Admin  Live Dashboard · Reports · App usage · Productivity rules · Devices · Audit log · Settings · My activity
+//   TL / STL / Manager  Live Dashboard · Reports · App usage (their own team) · My activity
 //   everyone    My activity: their own day, their PCs and the notice they accepted
 // Only the app name, window title and active / idle time are recorded - never keystrokes, passwords, the clipboard,
 // screenshots or chat content - and only after the employee accepts the notice.
@@ -26,6 +27,7 @@ const h = (v) => (v == null ? '—' : `${Number(v).toFixed(1)} h`);
 const pct = (v) => (v == null ? '—' : `${v}%`);
 const CAT_TONE = { productive: 'green', neutral: 'slate', unproductive: 'red' };
 const CAT_WORD = { productive: 'Productive', neutral: 'Neutral', unproductive: 'Unproductive' };
+const STATUS_TONE = { Online: 'green', Idle: 'amber', 'On break': 'teal', 'Clocked out': 'slate', 'On leave': 'violet', Offline: 'slate' };
 
 function useGet(url, params, deps = []) {
   const [st, setSt] = useState({ data: null, error: '', loading: true });
@@ -44,9 +46,10 @@ export default function EmployeeMonitoring() {
   const [params, setParams] = useSearchParams();
   const me = useGet('/monitoring/me');
   const admin = !!(me.data && me.data.isAdmin);
+  const lead = !!(me.data && me.data.isLead);
   const tabs = admin
-    ? [['overview', 'Overview'], ['categories', 'App categories'], ['reports', 'Reports'], ['devices', 'Devices'], ['settings', 'Settings'], ['mine', 'My activity']]
-    : [['mine', 'My activity']];
+    ? [['overview', 'Live Dashboard'], ['reports', 'Reports'], ['usage', 'App usage'], ['categories', 'Productivity rules'], ['devices', 'Devices'], ['audit', 'Audit log'], ['settings', 'Settings'], ['mine', 'My activity']]
+    : lead ? [['overview', 'Live Dashboard'], ['reports', 'Reports'], ['usage', 'App usage'], ['mine', 'My activity']] : [['mine', 'My activity']];
   const tab = tabs.some(([k]) => k === params.get('tab')) ? params.get('tab') : tabs[0][0];
   const employee = params.get('employee');
   const go = (t, extra = {}) => setParams({ tab: t, ...extra });
@@ -57,7 +60,7 @@ export default function EmployeeMonitoring() {
     <div className="mon">
       <ListPageHeader
         title="Employee Monitoring"
-        question={admin
+        question={admin || lead
           ? 'How office PCs are used in work hours: active time, idle time and the apps used. Only what employees agreed to is recorded.'
           : 'What TeamLink records on your office PC in work hours, and the notice you accepted.'}
       />
@@ -66,13 +69,15 @@ export default function EmployeeMonitoring() {
           {tabs.map(([k, label]) => <div key={k} className={`tab${tab === k && !employee ? ' active' : ''}`} onClick={() => go(k)}>{label}</div>)}
         </div>
       )}
-      {employee && admin
+      {employee && (admin || lead)
         ? <EmployeeDetail id={employee} onBack={() => go(tab)} />
         : (
           <>
             {tab === 'overview' && <Overview onOpen={(id) => go('overview', { employee: id })} />}
             {tab === 'categories' && <Categories />}
             {tab === 'reports' && <Reports onOpen={(id) => go('reports', { employee: id })} />}
+            {tab === 'usage' && <Usage />}
+            {tab === 'audit' && <Audit />}
             {tab === 'devices' && <Devices manage />}
             {tab === 'settings' && <Settings />}
             {tab === 'mine' && <Mine me={me} />}
@@ -87,52 +92,159 @@ function Overview({ onOpen }) {
   const [date, setDate] = useState(todayIst());
   const [q, setQ] = useState('');
   const [dept, setDept] = useState('');
-  const [show, setShow] = useState('');
-  const { data, error, loading } = useGet('/monitoring/overview', { date });
-  const rows = useMemo(() => ((data && data.rows) || []).filter((r) => (!dept || r.department === dept)
-    && (!q.trim() || `${r.name} ${r.code || ''}`.toLowerCase().includes(q.trim().toLowerCase()))
-    && (!show || (show === 'online' ? r.online : show === 'none' ? !(r.activeHours || r.idleHours) : (r.activeHours || r.idleHours)))), [data, dept, q, show]);
+  const [team, setTeam] = useState('');
+  const [status, setStatus] = useState('');
+  const { data, error, loading, reload } = useGet('/monitoring/overview', { date });
+  const live = date === todayIst();
+  // live: refreshes by itself every 30 seconds
+  useEffect(() => {
+    if (!live) return undefined;
+    const t = setInterval(() => { if (!document.hidden) reload(); }, 30000);
+    return () => clearInterval(t);
+  }, [live, reload]);
+  const rows = useMemo(() => ((data && data.rows) || []).filter((r) => (!dept || r.department === dept) && (!team || r.team === team)
+    && (!status || r.status === status)
+    && (!q.trim() || `${r.name} ${r.code || ''}`.toLowerCase().includes(q.trim().toLowerCase()))), [data, dept, team, status, q]);
   const c = data && data.cards;
+  const card = (s) => ({ active: status === s, onClick: live ? () => setStatus(status === s ? '' : s) : undefined });
   return (
     <>
       <div className="mon-bar">
-        <label>Day <input type="date" value={date} max={todayIst()} onChange={(e) => setDate(e.target.value || todayIst())} /></label>
+        <label>Day <input type="date" value={date} max={todayIst()} onChange={(e) => { setDate(e.target.value || todayIst()); setStatus(''); }} /></label>
         <input type="search" placeholder="Search a name or code" value={q} onChange={(e) => setQ(e.target.value)} />
         <Combo value={dept} onChange={(e) => setDept(e.target.value)} aria-label="Department">
           <option value="">All departments</option>
           {((data && data.departments) || []).map((d) => <option key={d} value={d}>{d}</option>)}
         </Combo>
-        <Combo value={show} onChange={(e) => setShow(e.target.value)} aria-label="Who">
-          <option value="">Everyone with a PC</option>
-          <option value="active">Used the PC this day</option>
-          <option value="none">No activity this day</option>
-          <option value="online">Online now</option>
+        <Combo value={team} onChange={(e) => setTeam(e.target.value)} aria-label="Team">
+          <option value="">All teams</option>
+          {((data && data.teams) || []).map((d) => <option key={d} value={d}>{d}</option>)}
         </Combo>
+        {live && <span className="small-muted" style={{ marginLeft: 'auto' }}>Live: refreshes every 30 seconds</span>}
       </div>
       {error && <div className="notice red">{error}</div>}
       <KpiRow>
-        <KpiTile icon="users" tone="blue" label="Employees tracked" value={c ? c.tracked : null} loading={loading && !c} sub="With a registered PC" />
-        <KpiTile icon="check" tone="green" label="Online now" value={c ? c.online : null} loading={loading && !c} sub={date === todayIst() ? 'PC sent a sign in the last 6 minutes' : 'Today only'} onClick={() => setShow(show === 'online' ? '' : 'online')} active={show === 'online'} />
-        <KpiTile icon="clock" tone="violet" label="Avg active hours" value={c ? c.avgActiveHours : null} loading={loading && !c} sub="Of those who used the PC" />
-        <KpiTile icon="pause" tone="amber" label="Avg idle hours" value={c ? c.avgIdleHours : null} loading={loading && !c} sub="PC on, nobody using it" />
+        <KpiTile icon="users" tone="blue" label="Tracked" value={c ? c.tracked : null} loading={loading && !c} sub="With a registered PC" />
+        <KpiTile icon="check" tone="green" label="Online" value={live && c ? c.online : (live ? null : '—')} loading={loading && !c} sub="Using the PC now" {...card('Online')} />
+        <KpiTile icon="pause" tone="amber" label="Idle" value={live && c ? c.idle : (live ? null : '—')} loading={loading && !c} sub="PC on, not in use" {...card('Idle')} />
+        <KpiTile icon="x" tone="slate" label="Offline" value={live && c ? c.offline : (live ? null : '—')} loading={loading && !c} sub="No signal for 3 minutes" {...card('Offline')} />
+        <KpiTile icon="leave" tone="violet" label="On leave" value={c ? c.onLeave : null} loading={loading && !c} sub="Approved leave today" {...card('On leave')} />
+        <KpiTile icon="clock" tone="teal" label="Avg active" value={c ? `${c.avgActiveHours} h` : null} loading={loading && !c} sub={`Avg idle ${c ? c.avgIdleHours : 0} h`} />
       </KpiRow>
       <div className="tbl-wrap">
         <table className="mon-table">
-          <thead><tr><th>Employee</th><th>Department</th><th>First seen</th><th>Last seen</th><th className="num">Active</th><th className="num">Idle</th><th className="num" title="Time in apps marked Productive, out of the active time">Productivity</th><th /></tr></thead>
+          <thead><tr><th>Employee</th><th>Department</th>{live && <th>Status</th>}{live && <th>Using now</th>}<th>First seen</th><th>Last seen</th><th className="num">Active</th><th className="num">Idle</th><th className="num">Break</th><th className="num" title="Time in apps marked Productive, out of the active time">Productivity</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.employeeId} className="row-link" onClick={() => onOpen(r.employeeId)}>
                 <td><b>{r.name}</b>{r.code && <div className="small-muted">{r.code}</div>}</td>
-                <td>{r.department || '—'}</td>
+                <td>{r.department || '—'}{r.team && <div className="small-muted">{r.team}</div>}</td>
+                {live && <td><Pill tone={STATUS_TONE[r.status] || 'slate'}>{r.status || '—'}</Pill></td>}
+                {live && <td>{r.currentApp || <span className="small-muted">—</span>}</td>}
                 <td>{tm(r.firstSeen)}</td>
-                <td>{tm(r.lastSeen)}</td>
+                <td>{live && r.lastHeartbeat ? dt(r.lastHeartbeat) : tm(r.lastSeen)}</td>
                 <td className="num">{h(r.activeHours)}</td>
                 <td className="num">{h(r.idleHours)}</td>
+                <td className="num">{h(r.breakHours)}</td>
                 <td className="num">{pct(r.productivity)}</td>
-                <td>{r.online && <Pill tone="green">Online</Pill>}</td>
               </tr>
             ))}
-            {!rows.length && !loading && <tr><td colSpan={8} className="small-muted">{(data && data.rows && data.rows.length) ? 'Nobody matches these filters.' : 'No PC is registered yet. Employees install the TeamLink agent on their office PC and accept the notice (Settings has the steps).'}</td></tr>}
+            {!rows.length && !loading && <tr><td colSpan={live ? 10 : 8} className="small-muted">{(data && data.rows && data.rows.length) ? 'Nobody matches these filters.' : 'No PC is registered yet. Settings has the steps to set one up.'}</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+// ------------------------------------------------------------------------------------------------ Dates (Reports, App usage, Audit log)
+function RangeBar({ from, to, setFrom, setTo, children }) {
+  const pick = (a, b) => { setFrom(a); setTo(b); };
+  const t = todayIst();
+  return (
+    <div className="mon-bar">
+      <label>From <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} /></label>
+      <label>To <input type="date" value={to} min={from} max={t} onChange={(e) => setTo(e.target.value)} /></label>
+      <button type="button" className="btn btn-sm" onClick={() => pick(t, t)}>Today</button>
+      <button type="button" className="btn btn-sm" onClick={() => pick(addDays(t, -6), t)}>Week</button>
+      <button type="button" className="btn btn-sm" onClick={() => pick(`${t.slice(0, 7)}-01`, t)}>This month</button>
+      {children}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------------------------------------ App & website usage
+function Usage() {
+  const [from, setFrom] = useState(addDays(todayIst(), -6));
+  const [to, setTo] = useState(todayIst());
+  const [department, setDepartment] = useState('');
+  const { data, error } = useGet('/monitoring/usage', { from, to, department });
+  const list = (rows, empty, noun) => (
+    <table className="mon-table">
+      <thead><tr><th>{noun}</th><th className="num">Time</th><th className="num">People</th><th>Category</th></tr></thead>
+      <tbody>
+        {rows.map((a) => (
+          <tr key={a.key}><td><b>{a.name}</b></td><td className="num">{a.hours >= 1 ? h(a.hours) : `${a.minutes} min`}</td><td className="num">{a.people}</td><td>{a.category ? <Pill tone={CAT_TONE[a.category]}>{CAT_WORD[a.category]}</Pill> : <span className="small-muted">Not set</span>}</td></tr>
+        ))}
+        {!rows.length && <tr><td colSpan={4} className="small-muted">{empty}</td></tr>}
+      </tbody>
+    </table>
+  );
+  const s = data && data.split;
+  return (
+    <>
+      <RangeBar from={from} to={to} setFrom={setFrom} setTo={setTo}>
+        <Combo value={department} onChange={(e) => setDepartment(e.target.value)} aria-label="Department">
+          <option value="">All departments</option>
+          {((data && data.departments) || []).map((d) => <option key={d} value={d}>{d}</option>)}
+        </Combo>
+      </RangeBar>
+      {error && <div className="notice red">{error}</div>}
+      {s && (
+        <KpiRow>
+          <KpiTile icon="check" tone="green" label="Productive" value={h(s.productive)} sub="Active time" />
+          <KpiTile icon="list" tone="slate" label="Neutral" value={h(s.neutral)} sub="Active time" />
+          <KpiTile icon="alert" tone="red" label="Unproductive" value={h(s.unproductive)} sub="Active time" />
+          <KpiTile icon="file" tone="amber" label="Not marked" value={h(s.unset)} sub="Mark them in Productivity rules" />
+        </KpiRow>
+      )}
+      {data && (
+        <div className="mon-two">
+          <Panel title="Top apps" flush>{list(data.topApps, 'No app used in these days.', 'App')}</Panel>
+          <Panel title="Top websites" sub="Sites with a rule, found in the browser's window title" flush>{list(data.topSites, 'No marked website used in these days.', 'Website')}</Panel>
+        </div>
+      )}
+      {data && data.byDepartment.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <Panel title="By department" flush>
+            <table className="mon-table">
+              <thead><tr><th>Department</th><th className="num">Productive</th><th className="num">Neutral</th><th className="num">Unproductive</th><th className="num">Not marked</th></tr></thead>
+              <tbody>{data.byDepartment.map((t) => <tr key={t.name}><td><b>{t.name}</b></td><td className="num">{h(t.productive)}</td><td className="num">{h(t.neutral)}</td><td className="num">{h(t.unproductive)}</td><td className="num">{h(t.unset)}</td></tr>)}</tbody>
+            </table>
+          </Panel>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ------------------------------------------------------------------------------------------------ Audit log
+function Audit() {
+  const [from, setFrom] = useState(addDays(todayIst(), -29));
+  const [to, setTo] = useState(todayIst());
+  const { data, error } = useGet('/monitoring/audit', { from, to });
+  const rows = (data && data.rows) || [];
+  return (
+    <>
+      <div className="small-muted" style={{ marginBottom: 8 }}>Who looked at whose activity, what was exported, settings changes and PCs set up or switched off.</div>
+      <RangeBar from={from} to={to} setFrom={setFrom} setTo={setTo} />
+      {error && <div className="notice red">{error}</div>}
+      <div className="tbl-wrap">
+        <table className="mon-table">
+          <thead><tr><th>When</th><th>Who</th><th>What</th><th>Detail</th></tr></thead>
+          <tbody>
+            {rows.map((r) => <tr key={r.id}><td style={{ whiteSpace: 'nowrap' }}>{dt(r.at)}</td><td><b>{r.who}</b></td><td>{r.action}</td><td className="small-muted mon-titles">{r.detail || '—'}</td></tr>)}
+            {data && !rows.length && <tr><td colSpan={4} className="small-muted">Nothing in these days.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -153,13 +265,13 @@ function Timeline({ rows, workStart, workEnd, day }) {
       <div className="mon-tl-bar">
         {rows.map((r, i) => {
           const l = pos(r.start); const w = Math.max(0.2, pos(r.end) - l);
-          return <span key={i} className={`mon-tl-seg ${r.idle ? 'idle' : 'active'}`} style={{ left: `${l}%`, width: `${w}%` }} title={`${tm(r.start)} – ${tm(r.end)} · ${r.idle ? 'Idle' : r.app}`} />;
+          return <span key={i} className={`mon-tl-seg ${r.break ? 'break' : r.idle ? 'idle' : 'active'}`} style={{ left: `${l}%`, width: `${w}%` }} title={`${tm(r.start)} – ${tm(r.end)} · ${r.break ? 'Break' : r.idle ? 'Idle' : r.app}`} />;
         })}
       </div>
       <div className="mon-tl-axis">
         {hours.map((t) => <span key={t} style={{ left: `${pos(t)}%` }}>{tm(t).replace(':00', '')}</span>)}
       </div>
-      <div className="mon-tl-legend"><span><i className="active" /> Active</span><span><i className="idle" /> Idle</span><span><i /> No activity / PC off</span></div>
+      <div className="mon-tl-legend"><span><i className="active" /> Active</span><span><i className="idle" /> Idle</span><span><i className="break" /> Break</span><span><i /> No activity / PC off</span></div>
     </div>
   );
 }
@@ -185,7 +297,7 @@ export function EmployeeDetail({ id, onBack, own = false }) {
         <>
           <KpiRow>
             <KpiTile icon="clock" tone="green" label="Active" value={h(t.activeHours)} sub={`First ${tm(t.first)} · last ${tm(t.last)}`} />
-            <KpiTile icon="pause" tone="amber" label="Idle" value={h(t.idleHours)} sub="PC on, not in use" />
+            <KpiTile icon="pause" tone="amber" label="Idle" value={h(t.idleHours)} sub={`Break ${h(t.breakHours)}`} />
             <KpiTile icon="trend" tone="blue" label="Productivity" value={pct(t.productivity)} sub="Productive apps, of the active time" />
             <KpiTile icon="calendar" tone="violet" label="Days with activity" value={data.perDay.length} sub={`${data.from} to ${data.to}`} />
           </KpiRow>
@@ -233,12 +345,12 @@ export function EmployeeDetail({ id, onBack, own = false }) {
 // ------------------------------------------------------------------------------------------------ App categories
 function Categories() {
   const { data, error, reload } = useGet('/monitoring/app-categories');
-  const [form, setForm] = useState({ appName: '', kind: 'app', category: 'productive' });
+  const [form, setForm] = useState({ appName: '', kind: 'app', category: 'productive', department: '' });
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   async function save(body) {
     setMsg(''); setErr('');
-    try { await api.post('/monitoring/app-categories', body); setMsg(`Saved: ${body.appName} is ${CAT_WORD[body.category].toLowerCase()}.`); setForm({ appName: '', kind: 'app', category: 'productive' }); reload(); } catch (e) { setErr(errOf(e, 'Could not save.')); }
+    try { await api.post('/monitoring/app-categories', body); setMsg(`Saved: ${body.appName} is ${CAT_WORD[body.category].toLowerCase()}.`); setForm({ appName: '', kind: 'app', category: 'productive', department: '' }); reload(); } catch (e) { setErr(errOf(e, 'Could not save.')); }
   }
   async function change(row, category) {
     try { await api.put(`/monitoring/app-categories/${row.id}`, { category }); reload(); } catch (e) { setErr(errOf(e, 'Could not save.')); }
@@ -254,11 +366,15 @@ function Categories() {
   );
   return (
     <>
-      <div className="small-muted" style={{ marginBottom: 8 }}>An <b>app</b> is matched by its name (chrome, excel, winword). A <b>website</b> is a word in the browser&apos;s window title (youtube, naukri, linkedin). Productivity counts the active time in productive apps and websites.</div>
+      <div className="small-muted" style={{ marginBottom: 8 }}>An <b>app</b> is matched by its name (chrome, excel, winword). A <b>website</b> is a word in the browser&apos;s window title (youtube, naukri, linkedin). A department&apos;s own rule wins over the rule for every department (LinkedIn for Recruitment, Tally for Accounts). The score is the active time in productive apps and websites.</div>
       <div className="mon-bar">
         <input placeholder="App (excel) or website word (naukri)" value={form.appName} onChange={(e) => setForm({ ...form, appName: e.target.value })} aria-label="App or website" />
         <Combo value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })} aria-label="App or website"><option value="app">App</option><option value="site">Website</option></Combo>
         {pick(form.category, (v) => setForm({ ...form, category: v }), 'Category')}
+        <Combo value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} aria-label="For which department">
+          <option value="">Every department</option>
+          {((data && data.departments) || []).map((d) => <option key={d} value={d}>{d}</option>)}
+        </Combo>
         <button type="button" className="btn btn-primary btn-sm" disabled={!form.appName.trim()} onClick={() => save(form)}>Add</button>
       </div>
       {msg && <div className="notice green">{msg}</div>}
@@ -266,18 +382,19 @@ function Categories() {
       <div className="mon-two">
         <Panel title="Marked apps and websites" flush>
           <table className="mon-table">
-            <thead><tr><th>App / website</th><th>Type</th><th>Category</th><th>Set by</th><th /></tr></thead>
+            <thead><tr><th>App / website</th><th>Type</th><th>Department</th><th>Category</th><th>Set by</th><th /></tr></thead>
             <tbody>
               {((data && data.rows) || []).map((r) => (
                 <tr key={r.id}>
                   <td><b>{r.appName}</b></td>
                   <td>{r.kind === 'site' ? 'Website' : 'App'}</td>
+                  <td>{r.department || 'Every department'}</td>
                   <td>{pick(r.category, (v) => change(r, v), `Category of ${r.appName}`)}</td>
                   <td className="small-muted">{r.setBy || '—'}</td>
                   <td><button type="button" className="btn btn-sm btn-ghost" onClick={() => remove(r)}>Remove</button></td>
                 </tr>
               ))}
-              {data && !data.rows.length && <tr><td colSpan={5} className="small-muted">Nothing marked yet.</td></tr>}
+              {data && !data.rows.length && <tr><td colSpan={6} className="small-muted">Nothing marked yet.</td></tr>}
             </tbody>
           </table>
         </Panel>
@@ -308,36 +425,43 @@ function Reports({ onOpen }) {
   const [from, setFrom] = useState(addDays(todayIst(), -6));
   const [to, setTo] = useState(todayIst());
   const [department, setDepartment] = useState('');
-  const { data, error, loading } = useGet('/monitoring/reports', { from, to, department });
+  const [view, setView] = useState('employee');
+  const { data, error, loading } = useGet('/monitoring/reports', { from, to, department, view });
+  const rows = (data && data.rows) || [];
+  const nums = (r) => (
+    <>
+      <td className="num">{h(r.activeHours)}</td><td className="num">{h(r.idleHours)}</td><td className="num">{h(r.breakHours)}</td>
+      <td className="num">{h(r.productiveHours)}</td><td className="num">{h(r.unproductiveHours)}</td><td className="num">{pct(r.productivity)}</td>
+    </>
+  );
+  const heads = <><th className="num">Active</th><th className="num">Idle</th><th className="num">Break</th><th className="num">Productive</th><th className="num">Unproductive</th><th className="num">Score</th></>;
   return (
     <>
-      <div className="mon-bar">
-        <label>From <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} /></label>
-        <label>To <input type="date" value={to} min={from} max={todayIst()} onChange={(e) => setTo(e.target.value)} /></label>
+      <RangeBar from={from} to={to} setFrom={setFrom} setTo={setTo}>
+        <Combo value={view} onChange={(e) => setView(e.target.value)} aria-label="Report">
+          <option value="employee">Per employee</option>
+          <option value="daily">Day by day (login, logout)</option>
+          <option value="team">Per department</option>
+        </Combo>
         <Combo value={department} onChange={(e) => setDepartment(e.target.value)} aria-label="Department">
           <option value="">All departments</option>
           {((data && data.departments) || []).map((d) => <option key={d} value={d}>{d}</option>)}
         </Combo>
-        <span style={{ marginLeft: 'auto' }}><ExportMenu url="/monitoring/reports" params={{ from, to, department }} label="Export" /></span>
-      </div>
+        <span style={{ marginLeft: 'auto' }}><ExportMenu url="/monitoring/reports" params={{ from, to, department, view }} label="Export" /></span>
+      </RangeBar>
       {error && <div className="notice red">{error}</div>}
       <div className="tbl-wrap">
         <table className="mon-table">
-          <thead><tr><th>Employee</th><th>Department</th><th className="num">Days</th><th className="num">Active</th><th className="num">Idle</th><th className="num">Productive</th><th className="num">Unproductive</th><th className="num">Productivity</th></tr></thead>
+          <thead>
+            {view === 'team' && <tr><th>Department</th><th className="num">Employees</th>{heads}</tr>}
+            {view === 'daily' && <tr><th>Date</th><th>Employee</th><th>Login</th><th>Logout</th>{heads}</tr>}
+            {view === 'employee' && <tr><th>Employee</th><th>Department</th><th className="num">Days</th>{heads}</tr>}
+          </thead>
           <tbody>
-            {((data && data.rows) || []).map((r) => (
-              <tr key={r.employeeId} className="row-link" onClick={() => onOpen(r.employeeId)}>
-                <td><b>{r.name}</b>{r.code && <div className="small-muted">{r.code}</div>}</td>
-                <td>{r.department || '—'}</td>
-                <td className="num">{r.days}</td>
-                <td className="num">{h(r.activeHours)}</td>
-                <td className="num">{h(r.idleHours)}</td>
-                <td className="num">{h(r.productiveHours)}</td>
-                <td className="num">{h(r.unproductiveHours)}</td>
-                <td className="num">{pct(r.productivity)}</td>
-              </tr>
-            ))}
-            {data && !data.rows.length && !loading && <tr><td colSpan={8} className="small-muted">No activity in these days.</td></tr>}
+            {view === 'team' && rows.map((r) => <tr key={r.key}><td><b>{r.name}</b></td><td className="num">{r.employees}</td>{nums(r)}</tr>)}
+            {view === 'daily' && rows.map((r) => <tr key={r.key} className="row-link" onClick={() => onOpen(r.employeeId)}><td style={{ whiteSpace: 'nowrap' }}>{r.day}</td><td><b>{r.name}</b>{r.department && <div className="small-muted">{r.department}</div>}</td><td>{tm(r.login)}</td><td>{tm(r.logout)}</td>{nums(r)}</tr>)}
+            {view === 'employee' && rows.map((r) => <tr key={r.key} className="row-link" onClick={() => onOpen(r.employeeId)}><td><b>{r.name}</b>{r.code && <div className="small-muted">{r.code}</div>}</td><td>{r.department || '—'}</td><td className="num">{r.days}</td>{nums(r)}</tr>)}
+            {data && !rows.length && !loading && <tr><td colSpan={10} className="small-muted">No activity in these days.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -360,20 +484,21 @@ function Devices({ manage = false }) {
       {error && <div className="notice red">{error}</div>}
       <div className="tbl-wrap">
         <table className="mon-table">
-          <thead><tr>{manage && <th>Employee</th>}<th>PC</th><th>System</th><th>Registered</th><th>Last seen</th><th>Status</th><th /></tr></thead>
+          <thead><tr>{manage && <th>Employee</th>}<th>PC</th><th>System</th><th>Agent</th><th>Registered</th><th>Last seen</th><th>Status</th><th /></tr></thead>
           <tbody>
             {rows.map((d) => (
               <tr key={d.id}>
                 {manage && <td><b>{d.employee ? d.employee.name : '—'}</b>{d.employee && d.employee.department && <div className="small-muted">{d.employee.department}</div>}</td>}
                 <td>{d.deviceName}</td>
                 <td className="small-muted">{d.os || '—'}</td>
+                <td className="small-muted">{d.agentVersion || '—'}</td>
                 <td>{dt(d.registeredAt)}</td>
                 <td>{dt(d.lastSeenAt)}</td>
                 <td>{!d.isActive ? <Pill tone="slate">Switched off</Pill> : d.online ? <Pill tone="green">Online</Pill> : <Pill tone="amber">Offline</Pill>}</td>
                 <td>{d.isActive && <button type="button" className="btn btn-sm" onClick={() => off(d)}>Deactivate</button>}</td>
               </tr>
             ))}
-            {data && !rows.length && <tr><td colSpan={manage ? 7 : 6} className="small-muted">No PC registered yet.</td></tr>}
+            {data && !rows.length && <tr><td colSpan={manage ? 8 : 7} className="small-muted">No PC registered yet.</td></tr>}
           </tbody>
         </table>
       </div>

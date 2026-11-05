@@ -219,11 +219,11 @@ router.get('/', async (req, res) => {
   const attendance = await prisma.attendance.findMany({ where, include: { employee: true }, orderBy: { date: 'desc' } });
   // PC ACTIVITY (Employee Monitoring, 2026-11-04): the first and last activity on the office PC that day, shown beside the
   // marked times - it never changes them (utils/monitoring.js pcActivity). Only for logins that may see monitoring:
-  // HR / Admin for everyone, an employee for their own days.
+  // HR / Admin for everyone, a lead their team, an employee their own days.
   try {
     const MON = require('../utils/monitoring'); // eslint-disable-line global-require
-    const admin = MON.isMonitorAdmin(req.user);
-    const ids = [...new Set(attendance.map((a) => a.employeeId))].filter((id) => admin || id === req.user.employeeId);
+    const access = await MON.accessOf(req.user);
+    const ids = [...new Set(attendance.map((a) => a.employeeId))].filter((id) => !access.ids || access.ids.includes(id));
     if (ids.length && attendance.length) {
       const days = attendance.map((a) => a.date).sort();
       const pc = await MON.pcActivity(ids, days[0], days[days.length - 1]);

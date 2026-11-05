@@ -19,6 +19,7 @@ param(
   [string]$Server = 'https://teamlink.teamlinks.in'
 )
 $ErrorActionPreference = 'Stop'
+$AgentVersion = '1.1'
 # older Windows would otherwise try an old, refused kind of secure connection
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, System.Security
@@ -156,8 +157,10 @@ if (-not $cfg) { $cfg = Register; if (-not $cfg) { exit } }
 $settings = @{ workStart = '09:30'; workEnd = '18:30'; idleThresholdMinutes = 5 }
 $queue = New-Object System.Collections.ArrayList
 if (Test-Path $QueueFile) { try { (Get-Content $QueueFile -Raw | ConvertFrom-Json) | ForEach-Object { [void]$queue.Add($_) } } catch {} }
-$current = $null      # the open segment: app, title, idle, start
-$paused = $false
+$current = $null      # the open segment: app, title, idle, brk, start
+$paused = $false      # stopped by TeamLink (no consent, PC switched off)
+$onBreak = $false     # the employee pressed Pause: only the break itself is timed
+$clockedOutDay = ''   # the employee clocked out: nothing until the next day
 
 function In-WorkHours {
   $now = (Get-Date).ToUniversalTime().AddMinutes(330).ToString('HH:mm')
@@ -167,13 +170,23 @@ function Close-Segment {
   if ($script:current) {
     $end = (Get-Date).ToUniversalTime()
     if (($end - $script:current.start).TotalSeconds -ge 1) {
-      [void]$script:queue.Add(@{ appName = $script:current.app; windowTitle = $script:current.title; start = $script:current.start.ToString('o'); end = $end.ToString('o'); isIdle = $script:current.idle })
+      [void]$script:queue.Add(@{ appName = $script:current.app; windowTitle = $script:current.title; start = $script:current.start.ToString('o'); end = $end.ToString('o'); isIdle = $script:current.idle; isBreak = $script:current.brk })
     }
     $script:current = $null
   }
 }
+function Today-Ist { return (Get-Date).ToUniversalTime().AddMinutes(330).ToString('yyyy-MM-dd') }
 function Sample {
-  if ($script:paused -or -not (In-WorkHours)) { Close-Segment; return }
+  if ($script:clockedOutDay -and $script:clockedOutDay -ne (Today-Ist)) { $script:clockedOutDay = ''; Update-Menu }
+  if ($script:paused -or $script:clockedOutDay -or -not (In-WorkHours)) { Close-Segment; return }
+  if ($script:onBreak) {
+    # a break: only that it is a break and how long; no app, no title
+    $c = $script:current
+    if ($c -and $c.brk -and ((Get-Date).ToUniversalTime() - $c.start).TotalMinutes -lt 30) { return }
+    Close-Segment
+    $script:current = @{ app = 'Break'; title = ''; idle = $false; brk = $true; start = (Get-Date).ToUniversalTime() }
+    return
+  }
   $idle = [TLWin]::IdleSeconds() -ge ([int]$settings.idleThresholdMinutes * 60)
   $h = [TLWin]::GetForegroundWindow()
   $app = 'Desktop'; $title = ''
@@ -187,7 +200,7 @@ function Sample {
   $c = $script:current
   if ($c -and $c.app -eq $app -and $c.title -eq $title -and $c.idle -eq $idle -and ((Get-Date).ToUniversalTime() - $c.start).TotalMinutes -lt 30) { return }
   Close-Segment
-  $script:current = @{ app = $app; title = $title; idle = $idle; start = (Get-Date).ToUniversalTime() }
+  $script:current = @{ app = $app; title = $title; idle = $idle; brk = $false; start = (Get-Date).ToUniversalTime() }
 }
 function Flush {
   Close-Segment   # send what is done so far; the next sample opens a new segment
@@ -215,7 +228,11 @@ function Ask-Consent($data) {
   }
 }
 function Heartbeat {
-  $r = Call-Api 'POST' '/heartbeat' $null $script:cfg.token
+  # what the Live Dashboard shows: the app's name only, never a title
+  $c = $script:current
+  $state = if ($script:clockedOutDay) { 'clockout' } elseif ($script:onBreak) { 'break' } else { $null }
+  $beat = @{ agentVersion = $AgentVersion; paused = $state; currentApp = $(if ($c -and -not $c.brk) { $c.app } else { '' }); idle = [bool]($c -and $c.idle) }
+  $r = Call-Api 'POST' '/heartbeat' $beat $script:cfg.token
   if ($r.status -eq 200) {
     $s = $r.data.settings
     $script:settings = @{ workStart = $s.workStart; workEnd = $s.workEnd; idleThresholdMinutes = $s.idleThresholdMinutes }
@@ -232,6 +249,14 @@ $tray.Visible = $true
 $menu = New-Object Windows.Forms.ContextMenuStrip
 $who = $menu.Items.Add("Set up for $($cfg.employee)"); $who.Enabled = $false
 [void]$menu.Items.Add('What is recorded (open TeamLink)', $null, { Start-Process ($script:Server.TrimEnd('/') + '/monitoring?tab=mine') })
+$pauseItem = $menu.Items.Add('Pause (break)', $null, { $script:onBreak = -not $script:onBreak; Close-Segment; Update-Menu; try { Sample; Heartbeat } catch {} })
+$clockItem = $menu.Items.Add('Clock out for today', $null, { $script:onBreak = $false; $script:clockedOutDay = (Today-Ist); Close-Segment; Update-Menu; try { Flush; Heartbeat } catch {} })
+function Update-Menu {
+  $script:pauseItem.Text = if ($script:onBreak) { 'Resume' } else { 'Pause (break)' }
+  $script:pauseItem.Enabled = -not $script:clockedOutDay
+  $script:clockItem.Enabled = -not $script:clockedOutDay
+  $script:tray.Text = if ($script:clockedOutDay) { 'TeamLink: clocked out for today, nothing is recorded' } elseif ($script:onBreak) { 'TeamLink: on a break, nothing is recorded' } else { 'TeamLink: recording PC use in work hours' }
+}
 [void]$menu.Items.Add('Stop recording and close', $null, { Flush; $script:tray.Visible = $false; [Windows.Forms.Application]::Exit() })
 [void]$menu.Items.Add('Do not start with Windows', $null, { Remove-Item -Path $StartupLink -ErrorAction SilentlyContinue; $script:tray.ShowBalloonTip(5000, 'TeamLink', 'It will not start with Windows any more.', 'Info') })
 $tray.ContextMenuStrip = $menu
@@ -242,6 +267,6 @@ try { [void][TLWin]::ShowWindow([TLWin]::GetConsoleWindow(), 0) } catch {}
 Heartbeat
 $sampleTimer = New-Object Windows.Forms.Timer; $sampleTimer.Interval = 15000; $sampleTimer.Add_Tick({ try { Sample } catch {} }); $sampleTimer.Start()
 $flushTimer = New-Object Windows.Forms.Timer; $flushTimer.Interval = 120000; $flushTimer.Add_Tick({ try { Flush } catch {} }); $flushTimer.Start()
-$beatTimer = New-Object Windows.Forms.Timer; $beatTimer.Interval = 300000; $beatTimer.Add_Tick({ try { Heartbeat } catch {} }); $beatTimer.Start()
+$beatTimer = New-Object Windows.Forms.Timer; $beatTimer.Interval = 60000; $beatTimer.Add_Tick({ try { Heartbeat } catch {} }); $beatTimer.Start()
 [Windows.Forms.Application]::Run()
 $tray.Dispose()
