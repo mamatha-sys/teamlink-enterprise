@@ -37,3 +37,7 @@
 .mon .mon-code-box{margin-top:10px}
 .mon .mon-code-box span{display:inline-block;font-size:24px;font-weight:700;letter-spacing:2px;padding:6px 14px;border-radius:8px;background:var(--bg-soft,#f8fafc);border:1px solid var(--line,#e4e7ec)}
 .mon .mon-pick{list-style:none;margin:6px 0 0;padding:0}
+/* the filter row stays one row: the site-wide fields are full width */
+.mon .mon-bar input[type=search],.mon .mon-bar input:not([type]){width:280px;flex:0 1 280px}
+.mon .mon-bar input[type=date]{width:auto}
+.mon .mon-bar > .combo{width:210px;flex:0 1 210px}

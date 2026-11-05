@@ -23,7 +23,9 @@ const addDays = (d, n) => new Date(new Date(`${d}T00:00:00Z`).getTime() + n * 86
 const errOf = (e, d) => (e && e.response && e.response.data && e.response.data.error) || d;
 const tm = (iso) => (iso ? new Date(iso).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true }) : '—');
 const dt = (iso) => (iso ? new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true }) : '—');
-const h = (v) => (v == null ? '—' : `${Number(v).toFixed(1)} h`);
+// under an hour reads in minutes: "0.0 h" said nothing about 2 minutes of work
+const h = (v) => { if (v == null) return '—'; const n = Number(v); if (!n) return '0 h'; return n < 1 ? `${Math.max(1, Math.round(n * 60))} min` : `${n.toFixed(1)} h`; };
+const dur = (sec) => (sec < 60 ? `${sec} sec` : sec < 3600 ? `${Math.round(sec / 60)} min` : `${(sec / 3600).toFixed(1)} h`);
 const pct = (v) => (v == null ? '—' : `${v}%`);
 const CAT_TONE = { productive: 'green', neutral: 'slate', unproductive: 'red' };
 const CAT_WORD = { productive: 'Productive', neutral: 'Neutral', unproductive: 'Unproductive' };
@@ -184,7 +186,7 @@ function Usage() {
       <thead><tr><th>{noun}</th><th className="num">Time</th><th className="num">People</th><th>Category</th></tr></thead>
       <tbody>
         {rows.map((a) => (
-          <tr key={a.key}><td><b>{a.name}</b></td><td className="num">{a.hours >= 1 ? h(a.hours) : `${a.minutes} min`}</td><td className="num">{a.people}</td><td>{a.category ? <Pill tone={CAT_TONE[a.category]}>{CAT_WORD[a.category]}</Pill> : <span className="small-muted">Not set</span>}</td></tr>
+          <tr key={a.key}><td><b>{a.name}</b></td><td className="num">{h(a.hours)}</td><td className="num">{a.people}</td><td>{a.category ? <Pill tone={CAT_TONE[a.category]}>{CAT_WORD[a.category]}</Pill> : <span className="small-muted">Not set</span>}</td></tr>
         ))}
         {!rows.length && <tr><td colSpan={4} className="small-muted">{empty}</td></tr>}
       </tbody>
@@ -259,7 +261,7 @@ function Timeline({ rows, workStart, workEnd, day }) {
   const span = Math.max(1, b - a);
   const pos = (t) => Math.min(100, Math.max(0, ((new Date(t).getTime() - a) / span) * 100));
   const hours = [];
-  for (let t = Math.ceil(a / 3600000) * 3600000; t <= b; t += 3600000) hours.push(t);
+  for (let t = a; t <= b; t += 3600000) hours.push(t);
   return (
     <div className="mon-tl" aria-label="The day: active and idle">
       <div className="mon-tl-bar">
@@ -316,7 +318,7 @@ export function EmployeeDetail({ id, onBack, own = false }) {
           )}
           <div className="mon-two">
             <Panel title="Top 10 apps and websites" sub="Active time">
-              <BarList showShare rows={data.top10.map((a, i) => ({ key: a.key, label: a.name, value: Math.round(a.seconds / 60), tone: ['blue', 'violet', 'teal', 'amber', 'green', 'pink', 'slate', 'blue', 'violet', 'teal'][i] }))} format={(v) => `${v} min`} empty="No app used in this period." />
+              <BarList showShare rows={data.top10.map((a, i) => ({ key: a.key, label: a.name, value: a.seconds, tone: ['blue', 'violet', 'teal', 'amber', 'green', 'pink', 'slate', 'blue', 'violet', 'teal'][i] }))} format={dur} empty="No app used in this period." />
             </Panel>
             <Panel title="All apps and websites" flush>
               <div className="mon-scroll">
@@ -325,8 +327,8 @@ export function EmployeeDetail({ id, onBack, own = false }) {
                   <tbody>
                     {data.apps.map((a) => (
                       <tr key={a.key}>
-                        <td><b>{a.name}</b>{a.kind === 'site' && <span className="small-muted"> · website</span>}{a.topTitles.length > 0 && <div className="small-muted mon-titles">{a.topTitles.map((x) => `${x.title} (${x.minutes} min)`).join(' · ')}</div>}</td>
-                        <td className="num">{a.hours >= 1 ? h(a.hours) : `${Math.round(a.seconds / 60)} min`}</td>
+                        <td><b>{a.name}</b>{a.kind === 'site' && <span className="small-muted"> · website</span>}{a.topTitles.length > 0 && <div className="small-muted mon-titles">{a.topTitles.map((x) => `${x.title} (${x.minutes ? `${x.minutes} min` : 'under 1 min'})`).join(' · ')}</div>}</td>
+                        <td className="num">{dur(a.seconds)}</td>
                         <td>{a.category ? <Pill tone={CAT_TONE[a.category]}>{CAT_WORD[a.category]}</Pill> : <span className="small-muted">Not set</span>}</td>
                       </tr>
                     ))}
