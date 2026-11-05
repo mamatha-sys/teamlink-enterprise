@@ -213,7 +213,8 @@ class ScriptDialogue extends D.Dialogue {
         if (lg.only) { turn.understood = 'language'; return { say: this.speak(this.line(sc.idx)), done: false }; } // "Telugu lo matladandi": the same question, now in Telugu
       }
     }
-    const k = D.classify(text);
+    let k = D.classify(text);
+    if (k.intent === 'unclear' && /\b(not going to|don'?t want|do not want|no interest|not required|not looking|leave me|stop talking)\b|వద్దు|ఇష్టం లేదు|నాకు అక్కర్లేదు|नहीं चाहिए|मुझे नहीं/i.test(text)) k = { ...k, intent: 'no' };
     turn.understood = k.intent;
     st.lastHeard = text;
     if (k.human) st.human = true;
@@ -240,9 +241,16 @@ class ScriptDialogue extends D.Dialogue {
         turn.understood = 'question_noted';
         return { say: this.speak(this.again()), done: false }; // the question again; the person's own question is for the team
       }
+      // "do you have a minute / can we talk?" answered with a no: one try to convince, then a kind close
+      const permissionAsk = cur.kind === 'ask' && sc.idx === this.steps.findIndex((x) => x.kind === 'ask' || x.kind === 'interest') && /minute|moment|spare|convenient|talk|time/i.test(cur.text);
+      if (permissionAsk && k.intent === 'no') {
+        if (st.pitchAt === sc.idx) { st.declineReason = S.clean(text, 120); st.interest = 'no'; return this.endWith('Not Interested', 'did not want to talk', this.declineLine || (this.ackText(k, cur) + (this.steps[this.steps.length - 1].kind === 'closing' ? ` ${this.line(this.steps.length - 1)}` : ''))); }
+        const pitch = this.nextPitch();
+        if (pitch) { st.pitchAt = sc.idx; st.declineReason = S.clean(text, 120); return { say: this.speak(pitch), done: false }; }
+      }
       if (cur.kind === 'interest') {
         // after a try to convince: a yes goes on; a no, or the reason, gets the next try, and when there is none left the call is closed kindly
-        if (this.st.pitchCount && k.intent !== 'yes' && k.intent !== 'maybe') {
+        if (st.pitchAt === sc.idx && k.intent !== 'yes' && k.intent !== 'maybe') {
           st.declineReason = S.clean(text, 120);
           const more = this.nextPitch();
           if (more) return { say: this.speak(more), done: false };
@@ -251,7 +259,7 @@ class ScriptDialogue extends D.Dialogue {
         }
         if (k.intent === 'no') {
           const pitch = this.nextPitch();
-          if (pitch) { st.declineReason = S.clean(text, 120); return { say: this.speak(pitch), done: false }; } st.interest = 'no'; st.declineReason = S.clean(text, 120); sc.got.push({ q: this.line(sc.idx), a: S.clean(text, 160) }); return this.endWith('Not Interested', 'not interested', this.declineLine || (this.ackText(k, cur) + (this.steps[this.steps.length - 1].kind === 'closing' ? ` ${this.line(this.steps.length - 1)}` : ''))); }
+          if (pitch) { st.pitchAt = sc.idx; st.declineReason = S.clean(text, 120); return { say: this.speak(pitch), done: false }; } st.interest = 'no'; st.declineReason = S.clean(text, 120); sc.got.push({ q: this.line(sc.idx), a: S.clean(text, 160) }); return this.endWith('Not Interested', 'not interested', this.declineLine || (this.ackText(k, cur) + (this.steps[this.steps.length - 1].kind === 'closing' ? ` ${this.line(this.steps.length - 1)}` : ''))); }
         if (k.intent === 'yes') st.interest = 'yes';
         else if (k.intent === 'maybe') st.interest = 'unsure';
         else { // not a plain yes / no: asked once more, then taken as unsure

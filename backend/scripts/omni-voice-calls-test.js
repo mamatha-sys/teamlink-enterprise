@@ -192,7 +192,18 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     svc.setClock(() => new Date('2026-11-04T20:30:00Z')); // 02:00 India time
     check('outside the calling hours nothing is dialled', await (async () => { const x = await refuse({}); return !x.ok && x.code === 'outside_hours'; })());
     svc.setClock(() => new Date('2026-11-04T06:30:00Z'));
-    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 14, { before, now: originated.length });
+    // a refusal to the very first question ("do you have a minute to talk?") is also met with one try, in words the general reader does not know
+    const PM = 'Opening: Hello {name}, this is the AI assistant of Teamlink.\nAsk: Do you have one minute to talk about a job opportunity?\nSay: We have an HR Recruiter opening.\nInterest: Are you interested?\nConvince: It will only take a minute and the salary is good. Shall I continue?\nDecline: No problem. Have a nice day.\nClosing: Thank you. Goodbye.';
+    const pm1 = await omni.create({ externalId: 'pm1', toNumber: '9333333331', name: 'Sravanthi', script: PM }, { ...deps, ami: AMI });
+    const pd1 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(pm1.id)); pd1.start(); await pd1.hear('hello');
+    const p1 = await pd1.hear('I am not going to talk about it');
+    const p2 = await pd1.hear('no');
+    check('a no to "do you have a minute?" gets one try, then a kind close (the script Decline)', /only take a minute/.test(p1.say) && !p1.done && p2.done === true && /^No problem\. Have a nice day/.test(p2.say), { p1, p2 });
+    const pm2 = await omni.create({ externalId: 'pm2', toNumber: '9333333332', name: 'Ravi', script: PM }, { ...deps, ami: AMI });
+    const pd2 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(pm2.id)); pd2.start(); await pd2.hear('hello'); await pd2.hear('I am not going to talk about it');
+    const p3 = await pd2.hear('okay go ahead');
+    check('if the person then agrees, the call goes on to the vacancy and the interest question', /HR Recruiter opening/.test(p3.say) && /Are you interested\?$/.test(p3.say), p3);
+    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 16, { before, now: originated.length });
     check('Asterisk refusing the call fails it in words (and leaves a failed row)', await (async () => { const x = await refuse({ toNumber: '9333333333' }, { ...deps, ami: { action: async () => ({ Response: 'Error', Message: 'no trunk' }) } }); return !x.ok && x.code === 'not_dialled'; })());
   } finally {
     await prisma.$disconnect().catch(() => {});
