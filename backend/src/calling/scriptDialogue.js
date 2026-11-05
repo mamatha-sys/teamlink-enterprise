@@ -201,7 +201,11 @@ class ScriptDialogue extends D.Dialogue {
     const sc = st.script;
     const text = String(textIn == null ? '' : textIn).slice(0, 600);
     const atOpening = sc.idx === 0 && this.steps[0] && this.steps[0].kind === 'opening' && !st.identity;
-    const heardAs = meta.heard === 'unclear' ? (atOpening ? 'clear' : 'unclear') : (text.trim() ? 'clear' : 'none');
+    let heardAs = meta.heard === 'unclear' ? (atOpening ? 'clear' : 'unclear') : (text.trim() ? 'clear' : 'none');
+    // an OPEN question (where are you, how many years, what qualification, notice period, salary): whatever was written for the answer is kept as the answer, it is not asked again (founder 2026-11-05:
+    // the call was closed with "your network is not good" while the person was answering "graduation" - the words came out garbled three times)
+    const openQ = this.facts && this.steps[sc.idx] && this.steps[sc.idx].kind === 'ask' && sc.idx !== this.steps.findIndex((x) => x.kind === 'ask' || x.kind === 'interest');
+    if (heardAs === 'unclear' && openQ && text.trim().length >= 2) heardAs = 'clear';
     st.turns += 1;
     const turn = { who: 'candidate', text: S.clean(text, 300), heard: heardAs, at: new Date().toISOString() };
     if (meta.lang) turn.lang = meta.lang;
@@ -212,7 +216,7 @@ class ScriptDialogue extends D.Dialogue {
     if (heardAs === 'unclear' || heardAs === 'none') {
       turn.understood = 'not_clear';
       sc.silent += 1;
-      if (sc.silent > 2) return this.endWith('Unclear', 'could not hear the person clearly', this.P.audioClose);
+      if (sc.silent > (this.facts ? 4 : 2)) return this.endWith('Unclear', 'could not hear the person clearly', this.P.audioClose);
       const h = HUMAN[this.language] || HUMAN.English;
       const kind = this.steps[sc.idx].kind;
       if (kind === 'opening') return { say: this.speak(h.hear), done: false };

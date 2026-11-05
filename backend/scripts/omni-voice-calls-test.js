@@ -278,7 +278,13 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     check('busy: asked for a better time, the answer is kept and the call ends (Call Back Later)', /better time to call you back/.test(o6.outs[1].say) && o6.outs[2].done === true && /I will call you then/.test(o6.outs[2].say) && o6.dd.outcome().outcome === 'Call Back Later' && /Disposition: CB/.test(o6.dd.outcome().summary), { a: o6.outs[1].say, b: o6.outs[2].say, s: o6.dd.outcome().summary });
     const o7 = await talk('dc1', '9111222207', ['hello', 'yes', 'yes interested']);
     check('the summary starts with the disposition code (INT / NI / CB / WN / DNC / NR)', /^Disposition: INT/.test(o7.dd.outcome().summary) && /^Disposition: NI/.test(o2.dd.outcome().summary), { a: o7.dd.outcome().summary.slice(0, 60), b: o2.dd.outcome().summary.slice(0, 60) });
-    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 31, { before, now: originated.length });
+    // a garbled answer to an OPEN question is kept as the answer; the call is not closed with "network problem"
+    const gq = await talk('gq1', '9111222208', ['hello', 'yes', 'yes interested', 'Kukatpally', 'mm graduation ante B Com', 'ఇ లేదు నాంత']);
+    check('a half-heard answer to "how many years / qualification" is taken as the answer and the call goes on', gq.outs.slice(4).every((x) => !x.done) && /notice period|current salary|qualification|నోటీస్|సాలరీ/.test(gq.outs[5].say), gq.outs.slice(3).map((x) => x.say));
+    const gh = await talk('gq2', '9111222209', ['hello', 'yes', 'yes interested', 'Kukatpally']);
+    const gh1 = await gh.dd.hear('', { heard: 'unclear' }); const gh2 = await gh.dd.hear('', { heard: 'unclear' }); const gh3 = await gh.dd.hear('', { heard: 'unclear' }); const gh4 = await gh.dd.hear('', { heard: 'unclear' });
+    check('nothing at all heard: asked again up to four times before the line is called not clear', !gh1.done && !gh2.done && !gh3.done && !gh4.done, [gh1.say, gh4.say]);
+    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 33, { before, now: originated.length });
     check('Asterisk refusing the call fails it in words (and leaves a failed row)', await (async () => { const x = await refuse({ toNumber: '9333333333' }, { ...deps, ami: { action: async () => ({ Response: 'Error', Message: 'no trunk' }) } }); return !x.ok && x.code === 'not_dialled'; })());
   } finally {
     await prisma.$disconnect().catch(() => {});
