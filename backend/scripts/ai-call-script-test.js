@@ -88,7 +88,7 @@ const make = (script = SCRIPT) => new ScriptDialogue({ purpose: 'Screening', lan
   r = await d.hear('sorry, can you repeat?');
   check('"repeat that" says the same line again', !r.done && /How many years of experience/.test(r.say), r.say);
 
-  d = make(); d.start();
+  d = make(); d.start(); await d.hear('yes'); // (the first reply to the greeting always counts: the person picked up)
   let last;
   for (let i = 0; i < 3; i += 1) last = await d.hear('', { heard: 'unclear' });
   check('a line nobody can hear ends politely after two more tries, nothing assumed', last.done === true && d.outcome().outcome === 'Unclear', last);

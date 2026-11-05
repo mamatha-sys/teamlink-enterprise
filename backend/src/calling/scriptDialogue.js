@@ -188,7 +188,8 @@ class ScriptDialogue extends D.Dialogue {
     const st = this.st;
     const sc = st.script;
     const text = String(textIn == null ? '' : textIn).slice(0, 600);
-    const heardAs = meta.heard === 'unclear' ? 'unclear' : (text.trim() ? 'clear' : 'none');
+    const atOpening = sc.idx === 0 && this.steps[0] && this.steps[0].kind === 'opening' && !st.identity;
+    const heardAs = meta.heard === 'unclear' ? (atOpening ? 'clear' : 'unclear') : (text.trim() ? 'clear' : 'none');
     st.turns += 1;
     const turn = { who: 'candidate', text: S.clean(text, 300), heard: heardAs, at: new Date().toISOString() };
     if (meta.lang) turn.lang = meta.lang;

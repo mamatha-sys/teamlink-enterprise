@@ -140,6 +140,7 @@ function isEcho(heard, said) {
   const h = w(heard); const s = new Set(w(said));
   return h.length >= 2 && h.filter((x) => s.has(x)).length / h.length >= 0.6;
 }
+const GREETING = /^(hello|hi|hey|hallo|hullo|హలో|హల్లో|హాయ్|హెలో|నమస్తే|నమస్కారం|नमस्ते|हेलो|हैलो|हाय|जय)[\s.,!?।]*$/i;
 function isBackchannel(text) {
   const w = String(text || '').toLowerCase().replace(/[.,!?।]/g, ' ').split(/\s+/).filter(Boolean);
   return w.length > 0 && w.length <= 2 && w.every((x) => BACKCHANNEL.includes(x) || x.replace(/[\p{M}]/gu, '').length <= 1);
@@ -533,8 +534,8 @@ function handle(sock, engines, opts = {}) {
       const { text } = r2;
       // A SCRIPT CALL ANSWERS ONLY WHAT IT HEARD CLEARLY (founder 2026-11-05: "candidate voice ni clear ga vinaka answer cheyali"): a Telugu / Hindi reply of a word or two that has no real Telugu / Hindi
       // word and means nothing ("సచ్చే", "The model is in the video" written for a sentence that was not caught) is not an answer: the person is asked to say it once more
-      if (heardAs === 'clear' && d && d.scriptName && ['Telugu', 'Hindi'].includes(lang) && !nativeScore(text, lang) && String(text).trim().split(/s+/).length < 4
-        && ['unclear', 'silence'].includes(require('../dialogue').classify(text).intent)) heardAs = 'unclear'; // eslint-disable-line global-require
+      if (heardAs === 'clear' && d && d.scriptName && ['Telugu', 'Hindi'].includes(lang) && pcm.length / (A.RATE * 2) >= 2 && !nativeScore(text, lang) && String(text).trim().split(/\s+/).length <= 2
+        && !isBackchannel(text) && !GREETING.test(String(text).trim()) && ['unclear', 'silence'].includes(require('../dialogue').classify(text).intent)) heardAs = 'unclear'; // eslint-disable-line global-require
       // A LISTENING NOISE OVER THE ASSISTANT (founder 2026-10-30: "matladuthu matladuthu agi pothundhi"): "ఆ", "హా", "ok",
       // "हाँ", a cough - said while the assistant was still explaining - is not an answer. The assistant goes on with the rest of
       // what it was saying. (Over the LAST sentence - the question - a "yes" is the answer and is read as one.)

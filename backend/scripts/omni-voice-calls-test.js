@@ -222,7 +222,7 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const vd2 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(vr2.id)); vd2.start();
     const t1 = await vd2.hear('అవును చెప్పండి', { heard: 'clear', lang: 'Telugu' });
     const t2 = await vd2.hear('అవును చెప్పండి', { heard: 'clear', lang: 'Telugu' });
-    check('a person who speaks Telugu gets the rest of the call in Telugu, built from the same facts (no translation needed)', vd2.language === 'Telugu' && /ఒక నిమిషం/.test(t1.say) && /HR Recruiter/.test(t2.say) && /Kukatpally/.test(t2.say) && /10 వేలు/.test(t2.say) && /జీతం/.test(t2.say), { lang: vd2.language, t1: t1.say, t2: t2.say });
+    check('a person who speaks Telugu gets the rest of the call in Telugu, built from the same facts (no translation needed)', vd2.language === 'Telugu' && /ఒక నిమిషం/.test(t1.say) && /HR Recruiter/.test(t2.say) && /Kukatpally/.test(t2.say) && /10 వేలు/.test(t2.say) && /సాలరీ/.test(t2.say), { lang: vd2.language, t1: t1.say, t2: t2.say });
     const vr3 = await omni.create({ externalId: 'vac3', toNumber: '9222333303', name: 'Asha', script: FACTS.replace('Contact:', 'Language: Hindi; Contact:') }, { ...deps, ami: AMI });
     const vd3 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(vr3.id));
     check('"Language: Hindi" starts the call in Hindi', /नमस्ते Asha जी/.test(vd3.start().say), vd3.language);
@@ -245,7 +245,7 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const te1 = await ted.hear('చెప్పండి', { heard: 'clear', lang: 'Telugu' });
     const te2 = await ted.hear('శాలరీ ఎంత', { heard: 'clear', lang: 'Telugu' });
     const te3 = await ted.hear('ఉంది', { heard: 'clear', lang: 'Telugu' });
-    check('Telugu: the vacancy and the question; the salary question is answered from the facts with only the question again; "ఉంది" is a yes and the details follow', /ఆసక్తిగా ఉందా\?$/.test(te1.say) && /^జీతం 10 వేలు/.test(te2.say) && /ఆసక్తిగా ఉందా\?$/.test(te2.say) && !/పోస్టు ఖాళీగా/.test(te2.say) && /ఎక్కడ/.test(te3.say), { te1: te1.say, te2: te2.say, te3: te3.say });
+    check('Telugu: the vacancy and the question; the salary question is answered from the facts with only the question again; "ఉంది" is a yes and the details follow', /ఇంట్రెస్ట్.{0,3}గా ఉందా\?$/.test(te1.say) && /^సాలరీ 10 వేలు/.test(te2.say) && /ఇంట్రెస్ట్.{0,3}గా ఉందా\?$/.test(te2.say) && !/ఓపెనింగ్ ఉంది/.test(te2.say) && /ఎక్కడ/.test(te3.say), { te1: te1.say, te2: te2.say, te3: te3.say });
     // a half heard answer after "what is the problem?" does not close the call: asked once more
     const wr = await omni.create({ externalId: 'vac12', toNumber: '9222333312', name: 'Kiran', script: FACTS }, { ...deps, ami: AMI });
     const wd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(wr.id)); wd.start(); await wd.hear('hello'); await wd.hear('yes');
@@ -253,7 +253,12 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const w1 = await wd.hear('సచ్చే', { heard: 'clear' });
     const w2 = await wd.hear('the location is far', { heard: 'clear' });
     check('a half heard reply (one odd word) after "what is the problem?" is asked again, the call is not closed on it; a real reply is answered', !w1.done && /May I know what the problem is|Sorry|క్షమించండి|సమస్య/.test(w1.say) && /./.test(w2.say), { w1, w2 });
-    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 23, { before, now: originated.length });
+    // a loud "hello" that was heard as noise (the first reply to the greeting) is the person picking up: the call goes on, it does not ask "can you hear me?"
+    const lr = await omni.create({ externalId: 'vac13', toNumber: '9222333313', name: 'Kiran', script: FACTS }, { ...deps, ami: AMI });
+    const ld = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(lr.id)); ld.start();
+    const l1 = await ld.hear('', { heard: 'unclear' });
+    check('the first reply, even when its words were not caught, goes on to the first question (no "can you hear me?")', /one minute/.test(l1.say) && !/Can you hear me/.test(l1.say), l1);
+    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 24, { before, now: originated.length });
     check('Asterisk refusing the call fails it in words (and leaves a failed row)', await (async () => { const x = await refuse({ toNumber: '9333333333' }, { ...deps, ami: { action: async () => ({ Response: 'Error', Message: 'no trunk' }) } }); return !x.ok && x.code === 'not_dialled'; })());
   } finally {
     await prisma.$disconnect().catch(() => {});
