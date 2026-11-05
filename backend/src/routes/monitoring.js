@@ -17,11 +17,15 @@
 //   GET  /audit?from=&to=                        HR / Admin: who looked at what, exports, settings, PCs
 //   GET/POST/PUT/DELETE /app-categories          HR / Admin (GET: + apps seen with no category)
 //   GET/PUT /settings                            HR / Admin (GET is open to everyone: work hours and the notice)
-//   GET  /devices, PUT /devices/:id/deactivate   HR / Admin all; an employee their own PCs
+//   GET  /devices, PUT /devices/:id/deactivate   Super Admin, Admin, IT Admin act; HR looks; an employee their own PCs
+//   PUT  /devices/:id/approve                    Super Admin, Admin, IT Admin: a new PC, when approval is switched on
+//   GET/POST/DELETE /overrides                   HR / Admin: other rules for a department or an employee, night shifts, not monitored
+//   GET  /attendance-suggestions, POST .../approve, .../dismiss   HR / Admin: an empty day filled from PC activity
 //   GET  /me, POST /me/consent                   my notice, my consent, my PCs
 //   POST /setup-code { employeeId? }              a one-time code for the agent: HR / Admin for anyone, an employee for themselves
 //   GET  /people?q=                              HR / Admin: find an employee for a code
-//   GET  /agent                                  the double-click setup file holding the PC agent, for any TeamLink login
+//   GET  /agent?kind=exe                         the setup file holding the PC agent (.cmd, or .exe), for any TeamLink login
+//   GET  /agent-script                           (a PC) the agent itself, for auto-update
 // The general API limit counts an agent per device (utils/apiRateLimit.js), with its own strict limits.
 // ---------------------------------------------------------------------------
 const express = require('express');
@@ -40,6 +44,11 @@ const publicSettings = (s) => ({
   workStart: s.workStart, workEnd: s.workEnd, breakStart: s.breakStart, breakEnd: s.breakEnd, idleThresholdMinutes: s.idleThresholdMinutes, retentionDays: s.retentionDays,
   screenshotsEnabled: false, policyVersion: s.policyVersion,
   alertsEnabled: !!s.alertsEnabled, longIdleMinutes: s.longIdleMinutes, offlineMinutes: s.offlineMinutes, lowActivityHours: s.lowActivityHours,
+});
+// what only the Settings tab shows
+const fullSettings = (s) => ({
+  ...publicSettings(s), policyText: s.policyText, unauthorizedApps: s.unauthorizedApps || '', alertEmail: !!s.alertEmail, trackTitles: s.trackTitles !== false,
+  reportEnabled: !!s.reportEnabled, reportFrequency: s.reportFrequency || 'daily', reportEmails: s.reportEmails || '', autoUpdate: s.autoUpdate !== false, deviceApproval: !!s.deviceApproval, itAdminIds: s.itAdminIds || '',
 });
 
 // =============================================================== the agent
@@ -121,7 +130,15 @@ router.post('/heartbeat', agent, wrap(async (req, res) => {
   await M.heartbeat(req.device, req.body || {});
   const s = await M.settings();
   const consent = await M.hasConsent(req.device.employeeId, s.policyVersion);
-  return res.json({ settings: publicSettings(s), consentRequired: !consent, ...(consent ? {} : { policyText: s.policyText }) });
+  const mine = M.effective(s, await M.overrideIndex(), req.device.employee || { id: req.device.employeeId });
+  const body = req.body || {};
+  const update = s.autoUpdate !== false && M.needsUpdate(body.agentVersion) ? { version: M.latestAgent().version, sha256: M.latestAgent().sha256 } : undefined;
+  return res.json({ settings: { ...publicSettings(s), ...mine }, consentRequired: !consent, update, ...(consent ? {} : { policyText: s.policyText }) });
+}));
+// auto-update: the agent script itself; the PC checks its hash against the heartbeat before using it
+router.get('/agent-script', agent, wrap(async (req, res) => {
+  res.set('Content-Type', 'application/octet-stream');
+  res.send(M.latestAgent().bytes);
 }));
 // a new notice accepted on the PC itself
 router.post('/consent', agent, wrap(async (req, res) => {
@@ -141,6 +158,7 @@ const teamOnly = wrap(async (req, res, next) => {
   return next();
 });
 const adminOnly = (req, res, next) => (M.isMonitorAdmin(req.user) ? next() : fail(res, 403, 'Employee monitoring is for HR and Admin. You can see your own activity under My activity.'));
+const L = require('../utils/monitoringLinks');
 
 router.get('/overview', teamOnly, wrap(async (req, res) => res.json(await M.overview(req.query.date, req.access))));
 
@@ -156,7 +174,8 @@ router.get('/employee/:id', wrap(async (req, res) => {
 }));
 
 router.get('/reports', teamOnly, wrap(async (req, res) => {
-  const view = ['daily', 'team'].includes(req.query.view) ? req.query.view : 'employee';
+  const view = ['daily', 'team', 'payroll'].includes(req.query.view) ? req.query.view : 'employee';
+  if (view === 'payroll' && !req.access.admin) return fail(res, 403, 'The payroll reference is for HR and Admin.');
   const out = await M.reportRows(req.query.from, req.query.to, req.query.department || '', req.access, view);
   const KIT = require('../utils/exportKit'); // eslint-disable-line global-require
   const format = req.query.format ? KIT.formatOf(req.query) : null;
@@ -166,8 +185,9 @@ router.get('/reports', teamOnly, wrap(async (req, res) => {
   const nums = (r) => [r.activeHours, r.idleHours, r.breakHours, r.productiveHours, r.unproductiveHours, pct(r.productivity)];
   const tail = ['Active hours', 'Idle hours', 'Break hours', 'Productive hours', 'Unproductive hours', 'Productivity'];
   const table = {
-    employee: [['Employee', 'Code', 'Department', 'Days', ...tail], (r) => [r.name, r.code || '', r.department || '', r.days, ...nums(r)]],
-    daily: [['Date', 'Employee', 'Code', 'Department', 'Login', 'Logout', ...tail], (r) => [r.day, r.name, r.code || '', r.department || '', tm(r.login), tm(r.logout), ...nums(r)]],
+    employee: [['Employee', 'Code', 'Department', 'Days', ...tail, 'Profiles moved', 'Sent to client', 'Calls', 'Messages'], (r) => [r.name, r.code || '', r.department || '', r.days, ...nums(r), r.moved, r.submitted, r.calls, r.messages]],
+    daily: [['Date', 'Day type', 'Employee', 'Code', 'Department', 'Login', 'Logout', ...tail], (r) => [r.day, r.dayType || 'Working day', r.name, r.code || '', r.department || '', tm(r.login), tm(r.logout), ...nums(r)]],
+    payroll: [['Employee', 'Code', 'Department', 'Working days', 'Days on PC', 'Leave days', 'Days with neither', 'Active hours', 'Productive hours', 'Idle hours', 'Productivity'], (r) => [r.name, r.code || '', r.department || '', r.workingDays, r.pcDays, r.leaveDays, r.noPcDays, r.activeHours, r.productiveHours, r.idleHours, pct(r.productivity)]],
     team: [['Department', 'Employees', ...tail], (r) => [r.name, r.employees, ...nums(r)]],
   }[view];
   return KIT.sendTable(req, res, {
@@ -186,15 +206,36 @@ router.get('/alerts', teamOnly, wrap(async (req, res) => {
   res.json(await require('../utils/monitoringAlerts').list(from, to, req.access)); // eslint-disable-line global-require
 }));
 
+// --- attendance suggestions: HR approves, and only an empty day is filled
+router.get('/attendance-suggestions', adminOnly, wrap(async (req, res) => res.json(await L.suggestions(req.query.from, req.query.to, null))));
+router.post('/attendance-suggestions/approve', adminOnly, wrap(async (req, res) => {
+  const b = req.body || {};
+  const out = await L.approveSuggestion(req.user, null, String(b.employeeId || ''), String(b.day || ''), String(b.status || ''));
+  return out.error ? fail(res, out.status, out.error) : res.json({ ok: true, message: out.message });
+}));
+router.post('/attendance-suggestions/dismiss', adminOnly, wrap(async (req, res) => {
+  const b = req.body || {};
+  const out = await L.dismissSuggestion(req.user, String(b.employeeId || ''), String(b.day || ''));
+  return out.error ? fail(res, out.status, out.error) : res.json({ ok: true, message: out.message });
+}));
+
+// --- different rules for a department or an employee
+router.get('/overrides', adminOnly, wrap(async (req, res) => res.json({ rows: await M.listOverrides() })));
+router.post('/overrides', adminOnly, wrap(async (req, res) => {
+  const out = await M.saveOverride(req.user, req.body || {});
+  return out.error ? fail(res, out.status, out.error) : res.status(201).json({ ok: true, row: out.row, message: 'Saved.' });
+}));
+router.delete('/overrides/:id', adminOnly, wrap(async (req, res) => { await M.removeOverride(req.user, req.params.id); res.json({ ok: true }); }));
+
 router.get('/audit', adminOnly, wrap(async (req, res) => res.json(await M.auditRows(req.query.from, req.query.to))));
 
 // --- app categories
-router.get('/app-categories', adminOnly, wrap(async (req, res) => {
+router.get('/app-categories', teamOnly, wrap(async (req, res) => {
   const [rows, unset, depts] = await Promise.all([
     prisma.appCategory.findMany({ orderBy: [{ department: 'asc' }, { appName: 'asc' }] }), M.uncategorised(),
     prisma.employee.findMany({ where: { department: { not: null } }, select: { department: true }, distinct: ['department'] }),
   ]);
-  res.json({ rows, uncategorised: unset, categories: M.CATEGORIES, departments: depts.map((d) => d.department).filter(Boolean).sort() });
+  res.json({ rows, uncategorised: req.access.admin ? unset : [], canEdit: req.access.admin, categories: M.CATEGORIES, departments: depts.map((d) => d.department).filter(Boolean).sort() });
 }));
 const catBody = (b) => {
   const appName = String(b.appName || '').trim().toLowerCase().replace(/\.exe$/, '').slice(0, 80);
@@ -226,34 +267,53 @@ router.delete('/app-categories/:id', adminOnly, wrap(async (req, res) => {
 // --- settings
 router.get('/settings', wrap(async (req, res) => {
   const s = await M.settings();
-  res.json({ ...publicSettings(s), policyText: s.policyText, updatedBy: s.updatedBy || null, updatedAt: s.updatedAt || null, canEdit: M.isMonitorAdmin(req.user) });
+  const it = M.isItIn(s, req.user);
+  const hr = M.isMonitorAdmin(req.user);
+  const itIds = String(s.itAdminIds || '').split(',').filter(Boolean);
+  const itAdmins = hr && itIds.length ? await prisma.employee.findMany({ where: { id: { in: itIds } }, select: { id: true, name: true } }) : [];
+  res.json({
+    itAdmins,
+    ...(hr ? fullSettings(s) : { ...publicSettings(s), policyText: s.policyText, ...(it ? { autoUpdate: s.autoUpdate !== false, deviceApproval: !!s.deviceApproval } : {}) }),
+    updatedBy: s.updatedBy || null, updatedAt: s.updatedAt || null, canEdit: hr, canAgent: M.isSuper(req.user) || it, canChooseIt: M.isSuper(req.user),
+    ...(hr ? { latestAgent: M.latestAgent().version } : {}),
+  });
 }));
-router.put('/settings', adminOnly, wrap(async (req, res) => {
-  const out = await M.saveSettings(req.user, req.body || {});
+router.put('/settings', wrap(async (req, res, next) => (M.isMonitorAdmin(req.user) || await M.isIt(req.user) ? next() : fail(res, 403, 'Settings are for HR, Admin and IT Admin.'))), wrap(async (req, res) => {
+  // IT Admin: the agent's settings and nothing else
+  const body = M.isMonitorAdmin(req.user) ? (req.body || {}) : { autoUpdate: (req.body || {}).autoUpdate, deviceApproval: (req.body || {}).deviceApproval };
+  const out = await M.saveSettings(req.user, body);
   if (out.error) return fail(res, out.status, out.error);
-  return res.json({ ...publicSettings(out.settings), policyText: out.settings.policyText, message: out.newVersion ? 'Saved. The notice changed, so every employee accepts it again before more is recorded.' : 'Saved.' });
+  return res.json({ ...fullSettings(out.settings), message: out.newVersion ? 'Saved. The notice changed, so every employee accepts it again before more is recorded.' : 'Saved.' });
 }));
 
 // --- devices
 router.get('/devices', wrap(async (req, res) => {
-  const admin = M.isMonitorAdmin(req.user);
+  const admin = M.isMonitorAdmin(req.user) || await M.isIt(req.user);
   if (!admin && !req.user.employeeId) return res.json({ rows: [] });
   // a lead looks at people on the Live Dashboard; Devices is HR / Admin's, and each employee's own PCs
   const rows = await prisma.monitoringDevice.findMany({
     where: admin ? {} : { employeeId: req.user.employeeId },
     orderBy: [{ isActive: 'desc' }, { lastSeenAt: 'desc' }],
-    select: { id: true, deviceName: true, os: true, agentVersion: true, registeredAt: true, lastSeenAt: true, isActive: true, employee: { select: { id: true, name: true, employeeCode: true, department: true } } },
+    select: { id: true, deviceName: true, os: true, agentVersion: true, registeredAt: true, lastSeenAt: true, isActive: true, approved: true, employee: { select: { id: true, name: true, employeeCode: true, department: true } } },
   });
   const now = Date.now();
-  res.json({ rows: rows.map((d) => ({ ...d, online: d.isActive && d.lastSeenAt && now - new Date(d.lastSeenAt).getTime() < 3 * 60000 })), canManage: admin });
+  res.json({ rows: rows.map((d) => ({ ...d, online: d.isActive && d.lastSeenAt && now - new Date(d.lastSeenAt).getTime() < 3 * 60000, outdated: M.needsUpdate(d.agentVersion) })), latestAgent: M.latestAgent().version, canManage: await M.canManageDevices(req.user) });
 }));
 router.put('/devices/:id/deactivate', wrap(async (req, res) => {
   const d = await prisma.monitoringDevice.findUnique({ where: { id: req.params.id } });
   if (!d) return fail(res, 404, 'Not found.');
-  if (!M.isMonitorAdmin(req.user) && d.employeeId !== req.user.employeeId) return fail(res, 403, 'Only HR, Admin or the employee can switch this PC off.');
+  if (!(await M.canManageDevices(req.user)) && d.employeeId !== req.user.employeeId) return fail(res, 403, 'Only the Super Admin, Admin, IT Admin or the employee can switch this PC off.');
   await prisma.monitoringDevice.update({ where: { id: d.id }, data: { isActive: false } });
   await logAudit({ userId: req.user.id, action: 'Monitoring: PC switched off', entity: 'MonitoringDevice', entityId: d.id, toValue: d.deviceName }).catch(() => {});
   res.json({ ok: true, message: `${d.deviceName} no longer sends activity. It can be registered again from the agent.` });
+}));
+
+router.put('/devices/:id/approve', wrap(async (req, res) => {
+  if (!(await M.canManageDevices(req.user))) return fail(res, 403, 'Only the Super Admin, Admin or IT Admin approves a PC.');
+  const d = await prisma.monitoringDevice.update({ where: { id: req.params.id }, data: { approved: true } }).catch(() => null);
+  if (!d) return fail(res, 404, 'Not found.');
+  await logAudit({ userId: req.user.id, action: 'Monitoring: PC approved', entity: 'MonitoringDevice', entityId: d.id, toValue: d.deviceName }).catch(() => {});
+  return res.json({ ok: true, message: `${d.deviceName} is approved.` });
 }));
 
 // --- attendance: "PC activity" (first / last activity of each day), beside the marked times - it never changes them
@@ -279,7 +339,7 @@ router.post('/setup-code', wrap(async (req, res) => {
   await logAudit({ userId: req.user.id, actorName: req.user.name, action: 'Monitoring: set-up code made', entity: 'Monitoring', entityId: id, toValue: emp.name }).catch(() => {});
   return res.status(201).json({ ...out, employee: emp.name });
 }));
-router.get('/people', adminOnly, wrap(async (req, res) => {
+router.get('/people', wrap(async (req, res, next) => (M.isMonitorAdmin(req.user) ? next() : fail(res, 403, 'This is for HR and Admin.'))), wrap(async (req, res) => {
   const q = String(req.query.q || '').trim();
   if (q.length < 2) return res.json({ rows: [] });
   const rows = await prisma.employee.findMany({
@@ -291,9 +351,10 @@ router.get('/people', adminOnly, wrap(async (req, res) => {
 
 // --- the agent itself: any TeamLink login downloads it from Settings / My activity (it records nothing until its own set-up)
 router.get('/agent', wrap(async (req, res) => {
+  const exe = req.query.kind === 'exe' ? M.agentInstaller() : null;
   res.set('Content-Type', 'application/octet-stream');
-  res.set('Content-Disposition', 'attachment; filename="TeamLinkMonitorSetup.cmd"');
-  res.send(Buffer.from(M.agentSetupFile(), 'utf8'));
+  res.set('Content-Disposition', `attachment; filename="TeamLinkMonitorSetup.${exe ? 'exe' : 'cmd'}"`);
+  res.send(exe || Buffer.from(M.agentSetupFile(), 'utf8'));
 }));
 
 // --- me
@@ -302,7 +363,7 @@ router.get('/me', wrap(async (req, res) => {
   const id = req.user.employeeId;
   const consents = id ? await prisma.monitoringConsent.findMany({ where: { employeeId: id }, orderBy: { acceptedAt: 'desc' } }) : [];
   res.json({
-    hasEmployee: !!id, isAdmin: M.isMonitorAdmin(req.user), isLead: (await M.accessOf(req.user)).lead, settings: publicSettings(s), policyText: s.policyText,
+    hasEmployee: !!id, isAdmin: M.isMonitorAdmin(req.user), isLead: (await M.accessOf(req.user)).lead, isIt: M.isItIn(s, req.user), canManageDevices: await M.canManageDevices(req.user), settings: publicSettings(s), policyText: s.policyText,
     accepted: consents.some((c) => c.policyVersion === s.policyVersion), consents,
   });
 }));

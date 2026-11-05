@@ -5217,6 +5217,7 @@ model MonitoringDevice {
   registeredAt DateTime      @default(now()) @map("registered_at")
   lastSeenAt   DateTime?     @map("last_seen_at")
   isActive     Boolean       @default(true) @map("is_active")
+  approved     Boolean       @default(true) // false: waiting for IT / Admin (Settings: a new PC needs approval)
   // what the last heartbeat said (the Live Dashboard): the app in front (name only), idle, break / clocked out, the agent's version
   agentVersion String?       @map("agent_version")
   currentApp   String?       @map("current_app")
@@ -5247,11 +5248,31 @@ model RequirementOpenRequest {
   @@index([requirementId])
 }
 
+// Different rules for a department or an employee (an employee's own wins). Empty = the company setting. Work may end after
+// midnight: a night shift. excluded: nothing is recorded or shown for them.
+model MonitoringOverride {
+  id                   String   @id @default(cuid())
+  scope                String // department | employee
+  target               String // the department's name, or the employee's id
+  workStart            String?  @map("work_start")
+  workEnd              String?  @map("work_end")
+  breakStart           String?  @map("break_start")
+  breakEnd             String?  @map("break_end")
+  idleThresholdMinutes Int?     @map("idle_threshold_minutes")
+  trackTitles          Boolean? @map("track_titles")
+  excluded             Boolean?
+  updatedBy            String?  @map("updated_by")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@unique([scope, target])
+  @@map("monitoring_overrides")
+}
+
 model MonitoringAlert {
   id         String   @id @default(cuid())
   employeeId String   @map("employee_id")
   employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  kind       String // idle | stopped | offline | low
+  kind       String // idle | stopped | offline | low | unauthorized
   day        String // YYYY-MM-DD, India time
   detail     String?
   createdAt  DateTime @default(now()) @map("created_at")
@@ -5318,6 +5339,16 @@ model MonitoringSetting {
   longIdleMinutes      Int      @default(30) @map("long_idle_minutes")
   offlineMinutes       Int      @default(15) @map("offline_minutes")
   lowActivityHours     Int      @default(4) @map("low_activity_hours")
+  unauthorizedApps     String?  @map("unauthorized_apps") // apps / website words, comma separated: using one raises an alert
+  alertEmail           Boolean  @default(false) @map("alert_email") // alerts by mail too, when company mail is connected
+  trackTitles          Boolean  @default(true) @map("track_titles") // false: app names only (websites are read from titles)
+  reportEnabled        Boolean  @default(false) @map("report_enabled") // the scheduled mail
+  reportFrequency      String   @default("daily") @map("report_frequency") // daily | weekly
+  reportEmails         String?  @map("report_emails")
+  reportLastDay        String?  @map("report_last_day")
+  autoUpdate           Boolean  @default(true) @map("auto_update") // agents update themselves
+  deviceApproval       Boolean  @default(false) @map("device_approval") // a new PC counts only after it is approved
+  itAdminIds           String?  @map("it_admin_ids") // employee ids: manage PCs and agents, see no activity
   idleThresholdMinutes Int      @default(5) @map("idle_threshold_minutes")
   retentionDays        Int      @default(90) @map("retention_days")
   screenshotsEnabled   Boolean  @default(false) @map("screenshots_enabled") // stays off: TeamLink takes no screenshots

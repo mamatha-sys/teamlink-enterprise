@@ -52,6 +52,11 @@ const todayIst = () => istDay(Date.now());
 const atIst = (day, hm) => new Date(`${day}T${hm}:00+05:30`);
 const validDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) && !Number.isNaN(new Date(`${s}T00:00:00Z`).getTime());
 const addDays = (day, n) => new Date(new Date(`${day}T00:00:00Z`).getTime() + n * 86400000).toISOString().slice(0, 10);
+const hmOf = (ms) => new Date(new Date(ms).getTime() + IST).toISOString().slice(11, 16);
+// A NIGHT SHIFT: work ends after midnight (22:00 to 06:00). It all belongs to the day it started on.
+const isNight = (c) => c.workStart > c.workEnd;
+const shiftDay = (ms, c) => (isNight(c) && hmOf(ms) < c.workEnd ? addDays(istDay(ms), -1) : istDay(ms));
+const atShift = (day, hm, c) => atIst(isNight(c) && hm < c.workStart ? addDays(day, 1) : day, hm);
 
 // --- who may see -------------------------------------------------------------------------------------------------
 // HR / Admin: Super Admin, Admin and HR (by role or HRMS role) - the HR desk of the permission matrix (SET.HR_DESK).
@@ -61,6 +66,13 @@ function isMonitorAdmin(user) {
 
 // What this login may see: { admin, lead, ids } - ids = the employees (null = everyone).
 const LEAD_ROLES = ['TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER'];
+const isSuper = (u) => !!u && ['SUPER_ADMIN', 'ADMIN'].some((r) => r === u.role || r === String(u.hrmsRole || '').toUpperCase());
+const csvOf = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
+// IT ADMIN (the plan's role table): PCs and agents only, never anybody's activity. Chosen in Settings.
+const isItIn = (s, u) => !!u && !!u.employeeId && csvOf(s.itAdminIds).includes(u.employeeId);
+const isIt = async (u) => isItIn(await settings(), u);
+// HR sees PCs; Super Admin, Admin and IT Admin act on them
+const canManageDevices = async (u) => isSuper(u) || isIt(u);
 async function accessOf(user) {
   if (isMonitorAdmin(user)) return { admin: true, lead: false, ids: null };
   const S = require('./scope'); // eslint-disable-line global-require
@@ -76,7 +88,7 @@ async function settings() {
   let row = await prisma.monitoringSetting.findUnique({ where: { id: 'default' } });
   if (!row) row = await prisma.monitoringSetting.create({ data: { id: 'default', policyText: DEFAULT_POLICY } }).catch(() => null);
   if (row && row.policyText === FIRST_POLICY) row = await prisma.monitoringSetting.update({ where: { id: 'default' }, data: { policyText: DEFAULT_POLICY, policyVersion: (row.policyVersion || 1) + 1 } }).catch(() => row);
-  const s = row || { workStart: '09:30', workEnd: '18:30', breakStart: '12:30', breakEnd: '13:15', idleThresholdMinutes: 5, retentionDays: 90, screenshotsEnabled: false, policyVersion: 1, policyText: DEFAULT_POLICY };
+  const s = row || { workStart: '09:30', workEnd: '18:30', breakStart: '12:30', breakEnd: '13:15', idleThresholdMinutes: 5, retentionDays: 90, screenshotsEnabled: false, policyVersion: 1, policyText: DEFAULT_POLICY, trackTitles: true, autoUpdate: true };
   return { ...s, policyText: s.policyText || DEFAULT_POLICY, screenshotsEnabled: false };
 }
 async function saveSettings(user, body = {}) {
@@ -101,6 +113,27 @@ async function saveSettings(user, body = {}) {
     data.retentionDays = n;
   }
   if (body.alertsEnabled !== undefined) data.alertsEnabled = body.alertsEnabled === true;
+  if (body.alertEmail !== undefined) data.alertEmail = body.alertEmail === true;
+  if (body.trackTitles !== undefined) data.trackTitles = body.trackTitles === true;
+  if (body.unauthorizedApps !== undefined) data.unauthorizedApps = csvOf(body.unauthorizedApps).map((x) => x.toLowerCase().slice(0, 60)).slice(0, 100).join(', ') || null;
+  if (body.reportEnabled !== undefined) data.reportEnabled = body.reportEnabled === true;
+  if (body.reportFrequency !== undefined) data.reportFrequency = body.reportFrequency === 'weekly' ? 'weekly' : 'daily';
+  if (body.reportEmails !== undefined) {
+    const list = csvOf(String(body.reportEmails).replace(/[;\s]+/g, ','));
+    if (list.some((m) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(m))) return { status: 400, error: 'Write the mail addresses separated by commas.' };
+    data.reportEmails = list.slice(0, 20).join(', ') || null;
+  }
+  if ((body.reportEnabled === true) && !(data.reportEmails !== undefined ? data.reportEmails : cur.reportEmails)) return { status: 400, error: 'Write at least one mail address for the report.' };
+  // the agent's own settings: Super Admin, Admin, IT Admin (HR has the policy settings)
+  if (['autoUpdate', 'deviceApproval'].some((k) => body[k] !== undefined && body[k] !== cur[k]) || (body.itAdminIds !== undefined && body.itAdminIds !== (cur.itAdminIds || ''))) {
+    if (!(await canManageDevices(user))) return { status: 403, error: 'Agent settings are for the Super Admin, Admin or IT Admin.' };
+    if (body.autoUpdate !== undefined) data.autoUpdate = body.autoUpdate === true;
+    if (body.deviceApproval !== undefined) data.deviceApproval = body.deviceApproval === true;
+    if (body.itAdminIds !== undefined) {
+      if (!isSuper(user)) return { status: 403, error: 'Only the Super Admin or Admin chooses the IT Admins.' };
+      data.itAdminIds = csvOf(body.itAdminIds).join(',') || null;
+    }
+  }
   const limits = [['longIdleMinutes', 5, 240, 'Long idle: 5 to 240 minutes.'], ['offlineMinutes', 5, 240, 'No signal: 5 to 240 minutes.'], ['lowActivityHours', 1, 12, 'Low activity: 1 to 12 hours.']];
   for (const [k, lo, hi, msg] of limits) {
     if (body[k] !== undefined) {
@@ -121,6 +154,71 @@ async function saveSettings(user, body = {}) {
   return { status: 200, settings: await settings(), newVersion: !!data.policyVersion };
 }
 
+// --- different rules for a department or an employee -------------------------------------------------------------------
+async function overrideIndex() {
+  const rows = await prisma.monitoringOverride.findMany().catch(() => []);
+  return new Map(rows.map((r) => [`${r.scope}|${r.target}`, r]));
+}
+// The rules for one person: their own, then their department's, then the company's.
+function effective(s, index, emp) {
+  const own = (emp && index.get(`employee|${emp.id}`)) || {};
+  const dept = (emp && emp.department && index.get(`department|${emp.department}`)) || {};
+  const pick = (k) => { if (own[k] !== null && own[k] !== undefined) return own[k]; if (dept[k] !== null && dept[k] !== undefined) return dept[k]; return s[k]; };
+  return {
+    workStart: pick('workStart'), workEnd: pick('workEnd'), breakStart: pick('breakStart') || '', breakEnd: pick('breakEnd') || '', idleThresholdMinutes: pick('idleThresholdMinutes'),
+    trackTitles: s.trackTitles !== false && pick('trackTitles') !== false, excluded: pick('excluded') === true,
+  };
+}
+async function saveOverride(user, body = {}) {
+  const scope = body.scope === 'employee' ? 'employee' : 'department';
+  const target = String(body.target || '').trim().slice(0, 120);
+  if (!target) return { status: 400, error: scope === 'employee' ? 'Pick the employee.' : 'Pick the department.' };
+  const time = (k) => { const v = String(body[k] || '').trim(); return v || null; };
+  const data = { workStart: time('workStart'), workEnd: time('workEnd'), breakStart: time('breakStart'), breakEnd: time('breakEnd') };
+  if (!!data.workStart !== !!data.workEnd) return { status: 400, error: 'Give both the start and the end of work, or neither.' };
+  if (!!data.breakStart !== !!data.breakEnd) return { status: 400, error: 'Give both the start and the end of the break, or neither.' };
+  if (Object.values(data).some((v) => v && !HM.test(v))) return { status: 400, error: 'Write times like 09:30.' };
+  if (data.workStart && data.workStart === data.workEnd) return { status: 400, error: 'Work cannot start and end at the same time.' };
+  const idle = body.idleThresholdMinutes === '' || body.idleThresholdMinutes === null || body.idleThresholdMinutes === undefined ? null : Math.round(Number(body.idleThresholdMinutes));
+  if (idle !== null && !(idle >= 1 && idle <= 60)) return { status: 400, error: 'Idle after: 1 to 60 minutes.' };
+  data.idleThresholdMinutes = idle;
+  data.trackTitles = body.trackTitles === false ? false : null;
+  data.excluded = body.excluded === true ? true : null;
+  data.updatedBy = user ? user.name || null : null;
+  if (Object.entries(data).every(([k, v]) => k === 'updatedBy' || v === null)) return { status: 400, error: 'Change at least one rule.' };
+  const row = await prisma.monitoringOverride.upsert({ where: { scope_target: { scope, target } }, create: { scope, target, ...data }, update: data });
+  await require('./audit').logAudit({ userId: user && user.id, actorName: user && user.name, action: 'Employee monitoring rule changed', entity: 'MonitoringSetting', entityId: row.id, toValue: `${scope}: ${target}${data.excluded ? ' · not monitored' : ''}`.slice(0, 300) }).catch(() => {}); // eslint-disable-line global-require
+  return { status: 200, row };
+}
+async function listOverrides() {
+  const rows = await prisma.monitoringOverride.findMany({ orderBy: [{ scope: 'asc' }, { target: 'asc' }] });
+  const ids = rows.filter((r) => r.scope === 'employee').map((r) => r.target);
+  const emps = ids.length ? await prisma.employee.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, employeeCode: true } }) : [];
+  const byId = new Map(emps.map((e) => [e.id, e]));
+  return rows.map((r) => ({ ...r, label: r.scope === 'employee' ? ((byId.get(r.target) || {}).name || 'Employee') : r.target }));
+}
+async function removeOverride(user, id) {
+  const row = await prisma.monitoringOverride.delete({ where: { id } }).catch(() => null);
+  if (row) await require('./audit').logAudit({ userId: user && user.id, actorName: user && user.name, action: 'Employee monitoring rule removed', entity: 'MonitoringSetting', entityId: id, toValue: `${row.scope}: ${row.target}`.slice(0, 300) }).catch(() => {}); // eslint-disable-line global-require
+}
+
+// --- the agent itself: the version on the server, and what a PC should run ------------------------------------------------
+const AGENT_FILE = require('path').join(__dirname, '..', '..', 'agent', 'TeamLinkMonitor.ps1');
+let agentCache = null;
+function latestAgent() {
+  if (agentCache) return agentCache;
+  const bytes = require('fs').readFileSync(AGENT_FILE); // eslint-disable-line global-require
+  const version = (/\$AgentVersion = '([\d.]+)'/.exec(bytes.toString('utf8')) || [])[1] || null;
+  agentCache = { version, bytes, sha256: crypto.createHash('sha256').update(bytes).digest('hex') };
+  return agentCache;
+}
+const older = (a, b) => {
+  const x = String(a || '0').split('.').map(Number); const y = String(b || '0').split('.').map(Number);
+  for (let i = 0; i < Math.max(x.length, y.length); i += 1) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); }
+  return false;
+};
+const needsUpdate = (version) => !!version && older(version, latestAgent().version);
+
 // --- consent -----------------------------------------------------------------------------------------------------
 async function hasConsent(employeeId, version) {
   return !!(await prisma.monitoringConsent.findFirst({ where: { employeeId, policyVersion: version }, select: { id: true } }));
@@ -136,7 +234,7 @@ async function deviceOf(req) {
   const h = String(req.headers.authorization || '');
   const tok = h.startsWith('Device ') ? h.slice(7).trim() : '';
   if (tok.length < 32) return null;
-  const d = await prisma.monitoringDevice.findUnique({ where: { tokenHash: hashToken(tok) }, include: { employee: { select: { id: true, name: true, employmentStatus: true } } } });
+  const d = await prisma.monitoringDevice.findUnique({ where: { tokenHash: hashToken(tok) }, include: { employee: { select: { id: true, name: true, employmentStatus: true, department: true } } } });
   if (!d || !d.isActive) return null;
   if (['Exited', 'Relieved', 'Terminated'].includes(d.employee && d.employee.employmentStatus)) return null;
   return d;
@@ -144,7 +242,7 @@ async function deviceOf(req) {
 async function registerDevice({ employeeId, deviceName, os }) {
   const token = crypto.randomBytes(32).toString('base64url');
   const device = await prisma.monitoringDevice.create({
-    data: { employeeId, deviceName: String(deviceName || 'Office PC').trim().slice(0, 80) || 'Office PC', os: os ? String(os).trim().slice(0, 80) : null, tokenHash: hashToken(token), lastSeenAt: new Date() },
+    data: { employeeId, approved: !(await settings()).deviceApproval, deviceName: String(deviceName || 'Office PC').trim().slice(0, 80) || 'Office PC', os: os ? String(os).trim().slice(0, 80) : null, tokenHash: hashToken(token), lastSeenAt: new Date() },
   });
   return { token, device };
 }
@@ -192,6 +290,9 @@ async function ingest(device, records) {
   if (!(await hasConsent(device.employeeId, s.policyVersion))) return { status: 412, error: 'The employee has not accepted the current monitoring notice yet.', consentRequired: true, policyVersion: s.policyVersion, policyText: s.policyText };
   if (!Array.isArray(records)) return { status: 400, error: 'Send records as a list.' };
   if (records.length > MAX_BATCH) return { status: 400, error: `At most ${MAX_BATCH} records at a time.` };
+  const cfg = effective(s, await overrideIndex(), device.employee || { id: device.employeeId });
+  // not monitored, or the PC is still waiting for approval: nothing is kept
+  if (cfg.excluded || device.approved === false) return { status: 200, saved: 0, skipped: records.length };
   const now = Date.now();
   const rows = [];
   let skipped = 0;
@@ -200,21 +301,21 @@ async function ingest(device, records) {
     const st = new Date(r && r.start).getTime();
     const en = new Date(r && r.end).getTime();
     if (!app || !Number.isFinite(st) || !Number.isFinite(en) || en <= st || en - st > MAX_RECORD_MS || en > now + 5 * 60000 || st < now - 7 * 86400000) { skipped += 1; continue; } // eslint-disable-line no-continue
-    // work hours only (India time), cut to the day of the record
-    const day = istDay(st);
-    const ws = atIst(day, s.workStart).getTime();
-    const we = atIst(day, s.workEnd).getTime();
+    // work hours only (India time), cut to the day of the record (a night shift belongs to the day it started on)
+    const day = shiftDay(st, cfg);
+    const ws = atShift(day, cfg.workStart, cfg).getTime();
+    const we = atShift(day, cfg.workEnd, cfg).getTime();
     const a = Math.max(st, ws);
     const b = Math.min(en, we);
     if (b - a < 1000) { skipped += 1; continue; } // eslint-disable-line no-continue
     // THE LUNCH BREAK (founder 2026-11-05: "break 12:30 - 1:15 consider cheyyu"): the part inside it is Break - not idle, and no app or title kept
-    const bs = HM.test(s.breakStart || '') && HM.test(s.breakEnd || '') && s.breakStart < s.breakEnd ? atIst(day, s.breakStart).getTime() : null;
-    const be = bs ? atIst(day, s.breakEnd).getTime() : null;
+    const bs = HM.test(cfg.breakStart) && HM.test(cfg.breakEnd) && atShift(day, cfg.breakStart, cfg) < atShift(day, cfg.breakEnd, cfg) ? atShift(day, cfg.breakStart, cfg).getTime() : null;
+    const be = bs ? atShift(day, cfg.breakEnd, cfg).getTime() : null;
     const parts = bs && a < be && b > bs
       ? [[a, bs, false], [Math.max(a, bs), Math.min(b, be), true], [be, b, false]]
       : [[a, b, false]];
     parts.filter(([x, y]) => y - x >= 1000).forEach(([x, y, lunch]) => rows.push({
-      deviceId: device.id, employeeId: device.employeeId, appName: lunch ? 'Break' : app, windowTitle: lunch ? null : cleanTitle(app, r.windowTitle),
+      deviceId: device.id, employeeId: device.employeeId, appName: lunch ? 'Break' : app, windowTitle: lunch || !cfg.trackTitles ? null : cleanTitle(app, r.windowTitle),
       startTime: new Date(x), endTime: new Date(y), durationSeconds: Math.round((y - x) / 1000),
       isIdle: !lunch && r.isBreak !== true && (r.isIdle === true || r.idle === true), isBreak: lunch || r.isBreak === true, day,
     }));
@@ -316,19 +417,21 @@ async function overview(day, access = null) {
   const d = validDay(day) ? day : todayIst();
   const live = d === todayIst();
   const cfg = await settings();
-  const nowHm = new Date(Date.now() + IST).toISOString().slice(11, 16);
-  const lunchNow = live && cfg.breakStart && cfg.breakStart <= nowHm && nowHm < cfg.breakEnd;
-  const [devices, logs, catOf, leaves] = await Promise.all([
+  const nowHm = hmOf(Date.now());
+  const [devices, logs, catOf, leaves, rules] = await Promise.all([
     prisma.monitoringDevice.findMany({ where: { isActive: true, ...within(access) }, select: { employeeId: true, lastSeenAt: true, currentApp: true, currentIdle: true, pausedState: true } }),
     prisma.activityLog.findMany({ where: { day: d, ...within(access) }, select: LOG_SELECT }),
     categoryIndex(),
     prisma.leaveRequest.findMany({ where: { status: 'Approved', fromDate: { lte: d }, toDate: { gte: d }, ...within(access) }, select: { employeeId: true } }),
+    overrideIndex(),
   ]);
   const onLeave = new Set(leaves.map((l) => l.employeeId));
-  const ids = [...new Set([...devices.map((x) => x.employeeId), ...logs.map((l) => l.employeeId)])];
-  const emps = await employeesById(ids);
+  const seen = [...new Set([...devices.map((x) => x.employeeId), ...logs.map((l) => l.employeeId)])];
+  const emps = await employeesById(seen);
+  const rulesOf = (id) => effective(cfg, rules, emps.get(id) || { id });
+  const ids = seen.filter((id) => !rulesOf(id).excluded); // somebody not monitored is not on the board
   const byEmp = new Map(ids.map((id) => [id, []]));
-  logs.forEach((l) => byEmp.get(l.employeeId).push(l));
+  logs.forEach((l) => { if (byEmp.has(l.employeeId)) byEmp.get(l.employeeId).push(l); });
   const latest = new Map();
   devices.forEach((x) => { const cur = latest.get(x.employeeId); if (!cur || new Date(x.lastSeenAt || 0) > new Date(cur.lastSeenAt || 0)) latest.set(x.employeeId, x); });
   const now = Date.now();
@@ -337,7 +440,8 @@ async function overview(day, access = null) {
     const t = totalsOf(byEmp.get(id), catOf, e.department || '');
     const dev = latest.get(id) || null;
     let status = live ? liveStatus(dev, onLeave.has(id), now) : (onLeave.has(id) ? 'On leave' : null);
-    if (lunchNow && ['Online', 'Idle'].includes(status)) status = 'On break'; // the lunch break
+    const mine = rulesOf(id);
+    if (live && mine.breakStart && mine.breakStart <= nowHm && nowHm < mine.breakEnd && ['Online', 'Idle'].includes(status)) status = 'On break'; // the lunch break
     return {
       employeeId: id, name: e.name, code: e.employeeCode || null, department: e.department || null, team: e.team || null,
       firstSeen: t.first, lastSeen: t.last, activeHours: t.activeHours, idleHours: t.idleHours, breakHours: t.breakHours, productivity: t.productivity,
@@ -351,7 +455,7 @@ async function overview(day, access = null) {
   return {
     day: d, live,
     cards: {
-      tracked: new Set(devices.map((x) => x.employeeId)).size, online: count('Online'), idle: count('Idle'), offline: count('Offline') + count('Stopped'), onLeave: count('On leave'),
+      tracked: new Set(devices.map((x) => x.employeeId).filter((id) => ids.includes(id))).size, online: count('Online'), idle: count('Idle'), offline: count('Offline') + count('Stopped'), onLeave: count('On leave'),
       onBreak: count('On break') + count('Clocked out'), avgActiveHours: avg('activeHours'), avgIdleHours: avg('idleHours'),
     },
     rows,
@@ -409,6 +513,10 @@ function rangeOf(from, to, days) {
 // The reports. view: employee (one row per person), daily (one row per person per day, with login and logout), team (per department).
 async function reportRows(from, to, department, access = null, view = 'employee') {
   const [a, b] = rangeOf(from, to, 366);
+  const L = require('./monitoringLinks'); // eslint-disable-line global-require
+  if (view === 'payroll') return L.payrollRows(a, b, department, access);
+  const WD = require('./workingDays'); // eslint-disable-line global-require
+  await WD.ready().catch(() => {});
   const logs = await prisma.activityLog.findMany({ where: { day: { gte: a, lte: b }, ...within(access) }, select: LOG_SELECT });
   const catOf = await categoryIndex();
   const ids = [...new Set(logs.map((l) => l.employeeId))];
@@ -439,13 +547,16 @@ async function reportRows(from, to, department, access = null, view = 'employee'
     rows = [...group((l) => `${l.employeeId}|${l.day}`).entries()].map(([k, list]) => {
       const [id, day] = k.split('|');
       const e = emps.get(id) || {};
-      return { key: k, employeeId: id, day, name: e.name || 'Employee', code: e.employeeCode || null, department: e.department || null, ...base(list, e.department || '') };
+      return { key: k, employeeId: id, day, dayType: WD.isWorking(day) ? null : 'Holiday / week off', name: e.name || 'Employee', code: e.employeeCode || null, department: e.department || null, ...base(list, e.department || '') };
     }).sort((p, q) => q.day.localeCompare(p.day) || String(p.name).localeCompare(String(q.name)));
   } else {
     rows = [...group((l) => l.employeeId).entries()].map(([id, list]) => {
       const e = emps.get(id) || {};
       return { key: id, employeeId: id, name: e.name || 'Employee', code: e.employeeCode || null, department: e.department || null, ...base(list, e.department || '') };
     }).sort((p, q) => String(p.name).localeCompare(String(q.name)));
+    // the ATS and Omnichannel work beside the PC time
+    const work = await L.workCounts(rows.map((r) => r.employeeId), a, b);
+    rows.forEach((r) => Object.assign(r, work.get(r.employeeId)));
   }
   return { from: a, to: b, view, rows, departments: [...new Set([...emps.values()].map((e) => e.department).filter(Boolean))].sort() };
 }
@@ -546,11 +657,19 @@ function agentSetupFile(payload) {
   ].join('\n').replace(/\n/g, '\r\n');
 }
 
+// The .exe: a small program (agent/setup/TeamLinkSetup.cs, built on Windows, kept in the repository) with the agent appended.
+function agentInstaller() {
+  const fs = require('fs'); // eslint-disable-line global-require
+  const stub = fs.readFileSync(require('path').join(__dirname, '..', '..', 'agent', 'TeamLinkMonitorSetup-stub.exe')); // eslint-disable-line global-require
+  return Buffer.concat([stub, Buffer.from('::TEAMLINK-PAYLOAD::', 'ascii'), latestAgent().bytes]);
+}
+
 // --- retention ------------------------------------------------------------------------------------------------------------------
 async function purge() {
   const s = await settings();
   const cutoff = addDays(todayIst(), -s.retentionDays);
   const r = await prisma.activityLog.deleteMany({ where: { day: { lt: cutoff } } });
+  await prisma.appSetting.deleteMany({ where: { key: { startsWith: 'monitoring.attdismiss.' }, updatedAt: { lt: new Date(`${cutoff}T00:00:00Z`) } } }).catch(() => {});
   await prisma.monitoringAlert.deleteMany({ where: { day: { lt: cutoff } } });
   return r.count;
 }
@@ -564,6 +683,6 @@ function startSweep() {
 }
 
 module.exports = {
-  istTime, totalsOf, newSetupCode, readSetupCode, endSetupCode, agentSetupFile, CATEGORIES, DEFAULT_POLICY, AUDIT_ENTITIES, isMonitorAdmin, accessOf, heartbeat, usage, auditRows, settings, saveSettings, hasConsent, recordConsent, hashToken, deviceOf, registerDevice,
+  istTime, hmOf, addDays, validDay, shiftDay, atShift, overrideIndex, effective, saveOverride, listOverrides, removeOverride, latestAgent, needsUpdate, isSuper, isIt, isItIn, canManageDevices, totalsOf, newSetupCode, readSetupCode, endSetupCode, agentSetupFile, agentInstaller, CATEGORIES, DEFAULT_POLICY, AUDIT_ENTITIES, isMonitorAdmin, accessOf, heartbeat, usage, auditRows, settings, saveSettings, hasConsent, recordConsent, hashToken, deviceOf, registerDevice,
   ingest, categoryIndex, overview, employeeDetail, reportRows, uncategorised, pcActivity, purge, startSweep, todayIst, istDay, cleanTitle,
 };

@@ -7,19 +7,20 @@
 //                   or nothing came from it an hour into the work day. It cannot tell a PC switched off from an agent removed:
 //                   the alert says so, and the person looks.
 //   Low activity    after work: active hours under the limit               (default 4 hours)
+//   Unauthorized    an app or website on HR's list was used                (Settings; the list starts empty)
 //
-// Who hears: the employee's team lead (the approval chain) and HR, by the bell. Each kind at most once a day per person. Nothing on
-// a holiday or weekly off, on approved leave, in the lunch break, or for someone who clocked out or is on a break.
+// Who hears: the employee's team lead (the approval chain) and HR, by the bell, and by mail when HR switched that on and company mail
+// is connected. Agent stopped and No signal go to the IT Admins too. Each kind at most once a day per person. Nothing on a holiday or
+// weekly off, on approved leave, in the lunch break, for someone who clocked out, is on a break or is not monitored. Each person is
+// checked against their own rules: a department's or their own work hours, and a night shift counts as the day it started on.
 // Runs every 5 minutes (startSweep); the sandbox runs no timers.
 // ---------------------------------------------------------------------------
 const crypto = require('crypto');
 const prisma = require('../db');
 const M = require('./monitoring');
 
-const IST = 330 * 60000;
-const WORD = { idle: 'Long idle', stopped: 'Agent stopped', offline: 'No signal', low: 'Low activity' };
-const hmOf = (ms) => new Date(ms + IST).toISOString().slice(11, 16);
-const atIst = (day, hm) => new Date(`${day}T${hm}:00+05:30`).getTime();
+const WORD = { idle: 'Long idle', stopped: 'Agent stopped', offline: 'No signal', low: 'Low activity', unauthorized: 'Unauthorized app' };
+const DEVICE_KINDS = ['stopped', 'offline'];
 
 // the idle time at the very end of the day's records (a break or real work ends it)
 function trailingIdleSeconds(logs) {
@@ -41,48 +42,55 @@ async function recipients(employee, lad) {
   } catch { return []; }
 }
 
-// The alerts due now, without writing anything: [{ employeeId, kind, detail }]
+// The alerts due now, without writing anything: [{ employeeId, kind, day, detail }]
 async function scan(now = Date.now(), s = null) {
   const cfg = s || await M.settings();
-  const day = M.istDay(now);
   const WD = require('./workingDays'); // eslint-disable-line global-require
   await WD.ready().catch(() => {});
-  if (!WD.isWorking(day)) return [];
-  const ws = atIst(day, cfg.workStart); const we = atIst(day, cfg.workEnd);
-  if (now < ws) return [];
-  const hm = hmOf(now);
-  const lunch = !!cfg.breakStart && cfg.breakStart <= hm && hm < cfg.breakEnd;
-  const inHours = now < we;
-  const [devices, logs, leaves, catOf] = await Promise.all([
-    prisma.monitoringDevice.findMany({ where: { isActive: true, employee: { employmentStatus: { notIn: ['Exited', 'Relieved', 'Terminated'] } } }, select: { employeeId: true, lastSeenAt: true, pausedState: true } }),
-    prisma.activityLog.findMany({ where: { day }, orderBy: { startTime: 'asc' }, select: { employeeId: true, appName: true, windowTitle: true, durationSeconds: true, isIdle: true, isBreak: true, startTime: true, endTime: true } }),
-    prisma.leaveRequest.findMany({ where: { status: 'Approved', fromDate: { lte: day }, toDate: { gte: day } }, select: { employeeId: true } }),
-    M.categoryIndex(),
+  const today = M.istDay(now);
+  const yesterday = M.addDays(today, -1);
+  const [devices, logs, leaves, catOf, rules] = await Promise.all([
+    prisma.monitoringDevice.findMany({ where: { isActive: true, approved: true, employee: { employmentStatus: { notIn: ['Exited', 'Relieved', 'Terminated'] } } }, select: { employeeId: true, lastSeenAt: true, pausedState: true, employee: { select: { id: true, department: true } } } }),
+    prisma.activityLog.findMany({ where: { day: { in: [yesterday, today] } }, orderBy: { startTime: 'asc' }, select: { employeeId: true, appName: true, windowTitle: true, durationSeconds: true, isIdle: true, isBreak: true, startTime: true, endTime: true, day: true } }),
+    prisma.leaveRequest.findMany({ where: { status: 'Approved', fromDate: { lte: today }, toDate: { gte: yesterday } }, select: { employeeId: true, fromDate: true, toDate: true } }),
+    M.categoryIndex(), M.overrideIndex(),
   ]);
-  const onLeave = new Set(leaves.map((l) => l.employeeId));
+  const banned = String(cfg.unauthorizedApps || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
   const latest = new Map();
   devices.forEach((d) => { const c = latest.get(d.employeeId); if (!c || new Date(d.lastSeenAt || 0) > new Date(c.lastSeenAt || 0)) latest.set(d.employeeId, d); });
-  const byEmp = new Map();
-  logs.forEach((l) => { if (!byEmp.has(l.employeeId)) byEmp.set(l.employeeId, []); byEmp.get(l.employeeId).push(l); });
   const out = [];
   latest.forEach((d, employeeId) => {
-    if (onLeave.has(employeeId)) return;
-    const mine = byEmp.get(employeeId) || [];
+    const mineRules = M.effective(cfg, rules, d.employee);
+    if (mineRules.excluded) return;
+    const day = M.shiftDay(now, mineRules);
+    if (!WD.isWorking(day)) return;
+    if (leaves.some((l) => l.employeeId === employeeId && day >= l.fromDate && day <= l.toDate)) return;
+    const ws = M.atShift(day, mineRules.workStart, mineRules).getTime();
+    const we = M.atShift(day, mineRules.workEnd, mineRules).getTime();
+    if (now < ws) return;
+    const hm = M.hmOf(now);
+    const lunch = !!mineRules.breakStart && mineRules.breakStart <= hm && hm < mineRules.breakEnd;
+    const mine = logs.filter((l) => l.employeeId === employeeId && l.day === day);
     const seen = d.lastSeenAt ? new Date(d.lastSeenAt).getTime() : 0;
     const seenToday = seen >= ws;
-    if (inHours && !lunch) {
-      if (d.pausedState === 'stopped' && seenToday) out.push({ employeeId, kind: 'stopped', detail: `Recording was stopped on the PC at ${M.istTime(seen)}.` });
+    const add = (kind, detail) => out.push({ employeeId, kind, day, detail });
+    if (now < we && !lunch) {
+      if (d.pausedState === 'stopped' && seenToday) add('stopped', `Recording was stopped on the PC at ${M.istTime(seen)}.`);
       else if (!d.pausedState) {
         const silent = Math.round((now - seen) / 60000);
-        if (seenToday && silent >= cfg.offlineMinutes) out.push({ employeeId, kind: 'offline', detail: `No signal from the PC since ${M.istTime(seen)}. The PC may be off, or the agent may have stopped.` });
-        else if (!seenToday && now - ws >= 3600000) out.push({ employeeId, kind: 'offline', detail: 'No signal from the PC today. The PC may be off, or the agent may have stopped.' });
+        if (seenToday && silent >= cfg.offlineMinutes) add('offline', `No signal from the PC since ${M.istTime(seen)}. The PC may be off, or the agent may have stopped.`);
+        else if (!seenToday && now - ws >= 3600000) add('offline', 'No signal from the PC today. The PC may be off, or the agent may have stopped.');
         const idleMin = Math.round(trailingIdleSeconds(mine) / 60);
-        if (idleMin >= cfg.longIdleMinutes) out.push({ employeeId, kind: 'idle', detail: `Idle for ${idleMin} minutes.` });
+        if (idleMin >= cfg.longIdleMinutes) add('idle', `Idle for ${idleMin} minutes.`);
       }
     }
-    if (!inHours && mine.length) {
-      const t = M.totalsOf(mine, catOf);
-      if (t.activeHours < cfg.lowActivityHours) out.push({ employeeId, kind: 'low', detail: `Active for ${t.activeHours} hours today (the limit is ${cfg.lowActivityHours}).` });
+    if (banned.length) {
+      const hit = mine.find((l) => !l.isIdle && !l.isBreak && banned.some((w) => String(l.appName).toLowerCase().includes(w) || String(l.windowTitle || '').toLowerCase().includes(w)));
+      if (hit) add('unauthorized', `Used ${banned.find((w) => String(hit.appName).toLowerCase().includes(w) || String(hit.windowTitle || '').toLowerCase().includes(w))} at ${M.istTime(hit.startTime)}.`);
+    }
+    if (now >= we && mine.length) {
+      const t = M.totalsOf(mine, catOf, d.employee.department || '');
+      if (t.activeHours < cfg.lowActivityHours) add('low', `Active for ${t.activeHours} hours today (the limit is ${cfg.lowActivityHours}).`);
     }
   });
   return out;
@@ -94,24 +102,35 @@ async function run(now = Date.now()) {
   if (!s.alertsEnabled) return { created: 0, off: true };
   const due = await scan(now, s);
   if (!due.length) return { created: 0 };
-  const day = M.istDay(now);
-  const have = await prisma.monitoringAlert.findMany({ where: { day }, select: { employeeId: true, kind: true } });
-  const seen = new Set(have.map((a) => `${a.employeeId}|${a.kind}`));
-  const fresh = due.filter((a) => !seen.has(`${a.employeeId}|${a.kind}`));
+  const have = await prisma.monitoringAlert.findMany({ where: { day: { in: [...new Set(due.map((a) => a.day))] } }, select: { employeeId: true, kind: true, day: true } });
+  const seen = new Set(have.map((a) => `${a.employeeId}|${a.kind}|${a.day}`));
+  const fresh = due.filter((a) => !seen.has(`${a.employeeId}|${a.kind}|${a.day}`));
   if (!fresh.length) return { created: 0 };
   const lad = await require('./approvalWorkflow').ladder().catch(() => null); // eslint-disable-line global-require
   const { notifyUsers } = require('./notify'); // eslint-disable-line global-require
+  const itIds = String(s.itAdminIds || '').split(',').filter(Boolean);
+  const itUsers = itIds.length ? (await prisma.employee.findMany({ where: { id: { in: itIds }, userId: { not: null } }, select: { userId: true } })).map((e) => e.userId) : [];
   let created = 0;
   for (const a of fresh) {
     // eslint-disable-next-line no-await-in-loop
     const emp = await prisma.employee.findUnique({ where: { id: a.employeeId } });
     if (!emp) continue; // eslint-disable-line no-continue
     // eslint-disable-next-line no-await-in-loop
-    const row = await prisma.monitoringAlert.create({ data: { id: crypto.randomUUID(), employeeId: a.employeeId, kind: a.kind, day, detail: a.detail } }).catch(() => null);
+    const row = await prisma.monitoringAlert.create({ data: { id: crypto.randomUUID(), employeeId: a.employeeId, kind: a.kind, day: a.day, detail: a.detail } }).catch(() => null);
     if (!row) continue; // eslint-disable-line no-continue
     created += 1;
     // eslint-disable-next-line no-await-in-loop
-    await notifyUsers(await recipients(emp, lad), { title: `🖥️ ${WORD[a.kind]}: ${emp.name}`, message: `${a.detail}\nOpen: /monitoring?tab=alerts` }).catch(() => {});
+    const to = [...new Set([...(await recipients(emp, lad)), ...(DEVICE_KINDS.includes(a.kind) ? itUsers : [])])];
+    const title = `🖥️ ${WORD[a.kind]}: ${emp.name}`;
+    // eslint-disable-next-line no-await-in-loop
+    await notifyUsers(to, { title, message: `${a.detail}\nOpen: /monitoring?tab=alerts` }).catch(() => {});
+    if (s.alertEmail && to.length) {
+      // eslint-disable-next-line no-await-in-loop
+      const people = await prisma.user.findMany({ where: { id: { in: to }, status: 'Active' }, select: { email: true } });
+      const list = people.map((u) => u.email).filter(Boolean);
+      // eslint-disable-next-line no-await-in-loop
+      if (list.length) await require('./mailer').sendMail({ to: list.join(', '), subject: `TeamLink: ${WORD[a.kind]}, ${emp.name}`, text: `${emp.name}: ${a.detail}\n\nHRMS -> Employee Monitoring -> Alerts.`, useEmployeeFrom: false, fromName: 'TeamLink' }).catch(() => {}); // eslint-disable-line global-require
+    }
   }
   return { created };
 }
@@ -129,7 +148,8 @@ async function list(from, to, access = null) {
 let TIMER = null;
 function startSweep() {
   if (require('./sandbox').isSandbox() || TIMER) return; // eslint-disable-line global-require
-  const tick = () => run().then((r) => { if (r.created) console.log(`[monitoring] ${r.created} alert(s)`); }).catch((e) => console.error('[monitoring alerts]', e.message)); // eslint-disable-line no-console
+  const tick = () => run().then((r) => { if (r.created) console.log(`[monitoring] ${r.created} alert(s)`); }).catch((e) => console.error('[monitoring alerts]', e.message)) // eslint-disable-line no-console
+    .then(() => require('./monitoringLinks').sendScheduled()).catch((e) => console.error('[monitoring mail]', e.message)); // eslint-disable-line global-require, no-console
   TIMER = setInterval(tick, 5 * 60000);
   if (TIMER.unref) TIMER.unref();
 }

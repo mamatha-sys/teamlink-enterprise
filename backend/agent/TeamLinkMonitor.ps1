@@ -16,10 +16,12 @@
   Settings: %APPDATA%\TeamLinkMonitor\config.json (the device token is encrypted for this Windows user, DPAPI).
 #>
 param(
-  [string]$Server = 'https://teamlink.teamlinks.in'
+  [string]$Server = 'https://teamlink.teamlinks.in',
+  [string]$SetupCode = '',   # the installer's /code=: fills the box, the notice is still shown
+  [switch]$AfterUpdate       # started by its own older copy, which is closing
 )
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '1.7'
+$AgentVersion = '1.8'
 # older Windows would otherwise try an old, refused kind of secure connection
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, System.Security
@@ -45,7 +47,7 @@ public static class TLWin {
 
 # one agent per PC login: running the setup file again must not start a second copy (two icons, every minute counted twice)
 $script:OneCopy = New-Object Threading.Mutex($false, 'Local\TeamLinkMonitor')
-if (-not $script:OneCopy.WaitOne(0)) {
+if (-not $script:OneCopy.WaitOne($(if ($AfterUpdate) { 30000 } else { 0 }))) {
   [Windows.Forms.MessageBox]::Show('TeamLink Monitor is already running on this PC. Look for its icon next to the clock.', 'TeamLink') | Out-Null
   exit 0
 }
@@ -122,7 +124,7 @@ function Ask-Login {
   $f = New-Object Windows.Forms.Form
   $f.Text = 'TeamLink - set up this PC'; $f.Width = 420; $f.Height = 320; $f.StartPosition = 'CenterScreen'; $f.TopMost = $true
   $l0 = New-Object Windows.Forms.Label; $l0.Text = 'Set-up code from TeamLink (if you have one)'; $l0.Left = 20; $l0.Top = 14; $l0.Width = 360
-  $c = New-Object Windows.Forms.TextBox; $c.Left = 20; $c.Top = 34; $c.Width = 360; $c.CharacterCasing = 'Upper'
+  $c = New-Object Windows.Forms.TextBox; $c.Left = 20; $c.Top = 34; $c.Width = 360; $c.CharacterCasing = 'Upper'; $c.Text = $SetupCode
   $lo = New-Object Windows.Forms.Label; $lo.Text = 'or sign in with your own TeamLink login:'; $lo.Left = 20; $lo.Top = 68; $lo.Width = 360
   $l1 = New-Object Windows.Forms.Label; $l1.Text = 'Email'; $l1.Left = 20; $l1.Top = 90; $l1.Width = 360
   $e = New-Object Windows.Forms.TextBox; $e.Left = 20; $e.Top = 110; $e.Width = 360; $e.Text = $script:lastEmail
@@ -171,7 +173,7 @@ $cfg = Load-Config
 if ($cfg -and $cfg.server) { $script:Server = $cfg.server } else { $script:Server = $Server }
 if (-not $cfg) { $cfg = Register; if (-not $cfg) { exit } }
 
-$settings = @{ workStart = '09:30'; workEnd = '18:30'; idleThresholdMinutes = 5 }
+$settings = @{ workStart = '09:30'; workEnd = '18:30'; idleThresholdMinutes = 5; excluded = $false }
 $queue = New-Object System.Collections.ArrayList
 # what was not sent last time, and the piece that was running when the PC went off: sent now
 function Restore-Saved {
@@ -188,12 +190,16 @@ Restore-Saved
 $current = $null      # the open segment: app, title, idle, brk, start
 $lastSample = $null   # when the PC last looked: a long gap means it was asleep
 $stopping = $false    # the employee pressed Stop recording
+$updateTried = ''     # a version already tried: once a run is enough
 $paused = $false      # stopped by TeamLink (no consent, PC switched off)
 $onBreak = $false     # the employee pressed Pause: only the break itself is timed
 $clockedOutDay = ''   # the employee clocked out: nothing until the next day
 
 function In-WorkHours {
+  if ($settings.excluded) { return $false }
   $now = (Get-Date).ToUniversalTime().AddMinutes(330).ToString('HH:mm')
+  # a night shift ends after midnight
+  if ($settings.workStart -gt $settings.workEnd) { return ($now -ge $settings.workStart -or $now -lt $settings.workEnd) }
   return ($now -ge $settings.workStart -and $now -lt $settings.workEnd)
 }
 function Save-Queue {
@@ -292,6 +298,24 @@ function Ask-Consent($data) {
     if ($r.status -eq 200) { $script:paused = $false }
   }
 }
+# A NEW AGENT FROM TEAMLINK: taken only if its hash matches what TeamLink announced and the script is whole; any trouble keeps this one running.
+function Apply-Update($u) {
+  if ($script:updateTried -eq $u.version) { return }
+  $script:updateTried = $u.version
+  $new = Join-Path $Dir 'update.ps1'
+  $copy = Join-Path $Dir 'TeamLinkMonitor.ps1'
+  try {
+    Invoke-WebRequest -Uri ($script:Server.TrimEnd('/') + '/api/monitoring/agent-script') -Headers @{ Authorization = "Device $($script:cfg.token)" } -OutFile $new -UseBasicParsing -TimeoutSec 60
+    if ((Get-FileHash -Path $new -Algorithm SHA256).Hash -ne ([string]$u.sha256).ToUpper()) { throw 'hash' }
+    $errs = $null; [void][System.Management.Automation.Language.Parser]::ParseFile($new, [ref]$null, [ref]$errs)
+    if ($errs.Count) { throw 'parse' }
+    Move-Item -Path $new -Destination $copy -Force
+  } catch { Remove-Item -Path $new -ErrorAction SilentlyContinue; return }
+  try { Flush } catch {}
+  Start-Process -FilePath "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', "`"$copy`"", '-AfterUpdate')
+  $script:tray.Visible = $false
+  [Windows.Forms.Application]::Exit()
+}
 function Heartbeat {
   # what the Live Dashboard shows: the app's name only, never a title
   $c = $script:current
@@ -300,9 +324,10 @@ function Heartbeat {
   $r = Call-Api 'POST' '/heartbeat' $beat $script:cfg.token
   if ($r.status -eq 200) {
     $s = $r.data.settings
-    $script:settings = @{ workStart = $s.workStart; workEnd = $s.workEnd; idleThresholdMinutes = $s.idleThresholdMinutes }
+    $script:settings = @{ workStart = $s.workStart; workEnd = $s.workEnd; idleThresholdMinutes = $s.idleThresholdMinutes; excluded = [bool]$s.excluded }
     # a new notice: shown at once, and nothing more is recorded until it is accepted
     if ($r.data.consentRequired) { Ask-Consent @{ policyText = $r.data.policyText; policyVersion = $s.policyVersion } }
+    elseif ($r.data.update -and -not $script:stopping) { Apply-Update $r.data.update }
   } elseif ($r.status -eq 401) { $script:paused = $true }
 }
 

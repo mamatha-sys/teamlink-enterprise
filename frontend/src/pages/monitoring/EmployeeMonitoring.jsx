@@ -12,8 +12,9 @@ import './monitoring.css';
 // ---------------------------------------------------------------------------
 // HRMS -> EMPLOYEE MONITORING (2026-11-04). How office PCs are used in work hours, from the TeamLink desktop agent the
 // employee installs and agrees to (backend: routes/monitoring.js, utils/monitoring.js; the agent: backend/agent/TeamLinkMonitor.ps1).
-//   HR / Admin  Live Dashboard · Reports · App usage · Alerts · Productivity rules · Devices · Audit log · Settings · My activity
-//   TL / STL / Manager  Live Dashboard · Reports · App usage · Alerts (their own team) · My activity
+//   HR / Admin  Live Dashboard · Reports · App usage · Alerts · Attendance · Productivity rules · Devices · Audit log · Settings · My activity
+//   TL / STL / Manager  Live Dashboard · Reports · App usage · Alerts (their own team) · Productivity rules (to read) · My activity
+//   IT Admin    Devices · Agent settings · My activity: PCs and agents, nobody's activity
 //   everyone    My activity: their own day, their PCs and the notice they accepted
 // Only the app name, window title and active / idle time are recorded - never keystrokes, passwords, the clipboard,
 // screenshots or chat content - and only after the employee accepts the notice.
@@ -49,9 +50,11 @@ export default function EmployeeMonitoring() {
   const me = useGet('/monitoring/me');
   const admin = !!(me.data && me.data.isAdmin);
   const lead = !!(me.data && me.data.isLead);
+  const it = !!(me.data && me.data.isIt);
   const tabs = admin
-    ? [['overview', 'Live Dashboard'], ['reports', 'Reports'], ['usage', 'App usage'], ['alerts', 'Alerts'], ['categories', 'Productivity rules'], ['devices', 'Devices'], ['audit', 'Audit log'], ['settings', 'Settings'], ['mine', 'My activity']]
-    : lead ? [['overview', 'Live Dashboard'], ['reports', 'Reports'], ['usage', 'App usage'], ['alerts', 'Alerts'], ['mine', 'My activity']] : [['mine', 'My activity']];
+    ? [['overview', 'Live Dashboard'], ['reports', 'Reports'], ['usage', 'App usage'], ['alerts', 'Alerts'], ['attendance', 'Attendance'], ['categories', 'Productivity rules'], ['devices', 'Devices'], ['audit', 'Audit log'], ['settings', 'Settings'], ['mine', 'My activity']]
+    : lead ? [['overview', 'Live Dashboard'], ['reports', 'Reports'], ['usage', 'App usage'], ['alerts', 'Alerts'], ['categories', 'Productivity rules'], ['mine', 'My activity']]
+      : it ? [['devices', 'Devices'], ['settings', 'Agent settings'], ['mine', 'My activity']] : [['mine', 'My activity']];
   const tab = tabs.some(([k]) => k === params.get('tab')) ? params.get('tab') : tabs[0][0];
   const employee = params.get('employee');
   const go = (t, extra = {}) => setParams({ tab: t, ...extra });
@@ -62,7 +65,7 @@ export default function EmployeeMonitoring() {
     <div className="mon">
       <ListPageHeader
         title="Employee Monitoring"
-        question={admin || lead
+        question={admin || lead || it
           ? 'How office PCs are used in work hours: active time, idle time and the apps used. Only what employees agreed to is recorded.'
           : 'What TeamLink records on your office PC in work hours, and the notice you accepted.'}
       />
@@ -77,7 +80,8 @@ export default function EmployeeMonitoring() {
           <>
             {tab === 'overview' && <Overview onOpen={(id) => go('overview', { employee: id })} />}
             {tab === 'categories' && <Categories />}
-            {tab === 'reports' && <Reports onOpen={(id) => go('reports', { employee: id })} />}
+            {tab === 'reports' && <Reports admin={admin} onOpen={(id) => go('reports', { employee: id })} />}
+            {tab === 'attendance' && <AttendanceTab />}
             {tab === 'usage' && <Usage />}
             {tab === 'audit' && <Audit />}
             {tab === 'alerts' && <Alerts onOpen={(id) => go('alerts', { employee: id })} />}
@@ -264,6 +268,54 @@ function Alerts({ onOpen }) {
   );
 }
 
+// ------------------------------------------------------------------------------------------------ Attendance suggestions
+// A working day with PC activity and no attendance at all. HR approves or dismisses; it only fills an empty day.
+function AttendanceTab() {
+  const [from, setFrom] = useState(addDays(todayIst(), -13));
+  const [to, setTo] = useState(addDays(todayIst(), -1));
+  const { data, error, reload } = useGet('/monitoring/attendance-suggestions', { from, to });
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+  const [picked, setPicked] = useState({});
+  const [busy, setBusy] = useState(false);
+  const rows = (data && data.rows) || [];
+  async function act(r, what) {
+    setBusy(true); setMsg(''); setErr('');
+    try {
+      const out = await api.post(`/monitoring/attendance-suggestions/${what}`, { employeeId: r.employeeId, day: r.day, status: picked[r.key] || r.suggested });
+      setMsg(out.data.message); reload();
+    } catch (e) { setErr(errOf(e, 'Could not save.')); } finally { setBusy(false); }
+  }
+  return (
+    <>
+      <div className="small-muted" style={{ marginBottom: 8 }}>Working days with PC activity but no attendance: no mark, no punch and no leave. Approve to fill the day, or dismiss it. Attendance that is already there is never changed.</div>
+      <RangeBar from={from} to={to} setFrom={setFrom} setTo={setTo} />
+      {msg && <div className="notice green">{msg}</div>}
+      {(err || error) && <div className="notice red">{err || error}</div>}
+      <div className="tbl-wrap">
+        <table className="mon-table">
+          <thead><tr><th>Date</th><th>Employee</th><th>First activity</th><th>Last activity</th><th className="num">Hours</th><th className="num">Active</th><th>Mark as</th><th /></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key}>
+                <td style={{ whiteSpace: 'nowrap' }}>{r.day}</td>
+                <td><b>{r.name}</b><div className="small-muted">{[r.code, r.department].filter(Boolean).join(' · ')}</div></td>
+                <td>{r.checkIn}</td><td>{r.checkOut}</td><td className="num">{h(r.hours)}</td><td className="num">{h(r.activeHours)}</td>
+                <td><Combo value={picked[r.key] || r.suggested} onChange={(e) => setPicked({ ...picked, [r.key]: e.target.value })} aria-label={`Mark ${r.name} on ${r.day}`}><option value="Present">Present</option><option value="Half Day">Half Day</option></Combo></td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={() => act(r, 'approve')}>Approve</button>{' '}
+                  <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={() => act(r, 'dismiss')}>Dismiss</button>
+                </td>
+              </tr>
+            ))}
+            {data && !rows.length && <tr><td colSpan={8} className="small-muted">Nothing to approve in these days.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
 // ------------------------------------------------------------------------------------------------ Audit log
 function Audit() {
   const [from, setFrom] = useState(addDays(todayIst(), -29));
@@ -413,8 +465,9 @@ function Categories() {
   );
   return (
     <>
+      {data && !data.canEdit && <div className="notice">You can read these rules. HR changes them.</div>}
       <div className="small-muted" style={{ marginBottom: 8 }}>An <b>app</b> is matched by its name (chrome, excel, winword). A <b>website</b> is a word in the browser&apos;s window title (youtube, naukri, linkedin). A department&apos;s own rule wins over the rule for every department (LinkedIn for Recruitment, Tally for Accounts). The score is the active time in productive apps and websites.</div>
-      <div className="mon-bar">
+      {data && data.canEdit && <div className="mon-bar">
         <input placeholder="App (excel) or website word (naukri)" value={form.appName} onChange={(e) => setForm({ ...form, appName: e.target.value })} aria-label="App or website" />
         <Combo value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })} aria-label="App or website"><option value="app">App</option><option value="site">Website</option></Combo>
         {pick(form.category, (v) => setForm({ ...form, category: v }), 'Category')}
@@ -423,7 +476,7 @@ function Categories() {
           {((data && data.departments) || []).map((d) => <option key={d} value={d}>{d}</option>)}
         </Combo>
         <button type="button" className="btn btn-primary btn-sm" disabled={!form.appName.trim()} onClick={() => save(form)}>Add</button>
-      </div>
+      </div>}
       {msg && <div className="notice green">{msg}</div>}
       {(err || error) && <div className="notice red">{err || error}</div>}
       <div className="mon-rules">
@@ -436,9 +489,9 @@ function Categories() {
                 <tr key={r.id}>
                   <td><b>{r.appName}</b><div className="small-muted">{r.kind === 'site' ? 'Website' : 'App'}</div></td>
                   <td>{r.department || 'Every department'}</td>
-                  <td>{pick(r.category, (v) => change(r, v), `Category of ${r.appName}`)}</td>
+                  <td>{data.canEdit ? pick(r.category, (v) => change(r, v), `Category of ${r.appName}`) : (CAT_WORD[r.category] || r.category)}</td>
                   <td className="small-muted">{r.setBy || '—'}</td>
-                  <td><button type="button" className="btn btn-sm btn-ghost" onClick={() => remove(r)}>Remove</button></td>
+                  <td>{data.canEdit && <button type="button" className="btn btn-sm btn-ghost" onClick={() => remove(r)}>Remove</button>}</td>
                 </tr>
               ))}
               {data && !data.rows.length && <tr><td colSpan={5} className="small-muted">Nothing marked yet.</td></tr>}
@@ -446,7 +499,7 @@ function Categories() {
           </table>
           </div>
         </Panel>
-        <Panel title="Seen in the last 30 days, not marked" sub="An app not marked lowers the score: mark the ones used most" flush>
+        {data && data.canEdit && <Panel title="Seen in the last 30 days, not marked" sub="An app not marked lowers the score: mark the ones used most" flush>
           {data && data.uncategorised.length > 1 && (
             <div className="mon-markall">
               <span className="small-muted">Mark all as:</span>
@@ -468,14 +521,14 @@ function Categories() {
               {data && !data.uncategorised.length && <tr><td colSpan={3} className="small-muted">Every app seen is marked.</td></tr>}
             </tbody>
           </table>
-        </Panel>
+        </Panel>}
       </div>
     </>
   );
 }
 
 // ------------------------------------------------------------------------------------------------ Reports
-function Reports({ onOpen }) {
+function Reports({ onOpen, admin = false }) {
   const [from, setFrom] = useState(addDays(todayIst(), -6));
   const [to, setTo] = useState(todayIst());
   const [department, setDepartment] = useState('');
@@ -496,6 +549,7 @@ function Reports({ onOpen }) {
           <option value="employee">Per employee</option>
           <option value="daily">Day by day (login, logout)</option>
           <option value="team">Per department</option>
+          {admin && <option value="payroll">Payroll reference</option>}
         </Combo>
         <Combo value={department} onChange={(e) => setDepartment(e.target.value)} aria-label="Department">
           <option value="">All departments</option>
@@ -503,19 +557,22 @@ function Reports({ onOpen }) {
         </Combo>
         <span style={{ marginLeft: 'auto' }}><ExportMenu url="/monitoring/reports" params={{ from, to, department, view }} label="Export" /></span>
       </RangeBar>
+      {view === 'payroll' && <div className="small-muted" style={{ marginBottom: 8 }}>A reference for HR. It deducts nothing: a PC that was off does not prove someone was absent.</div>}
       {error && <div className="notice red">{error}</div>}
       <div className="tbl-wrap">
         <table className="mon-table">
           <thead>
             {view === 'team' && <tr><th>Department</th><th className="num">Employees</th>{heads}</tr>}
             {view === 'daily' && <tr><th>Date</th><th>Employee</th><th>Login</th><th>Logout</th>{heads}</tr>}
-            {view === 'employee' && <tr><th>Employee</th><th>Department</th><th className="num">Days</th>{heads}</tr>}
+            {view === 'employee' && <tr><th>Employee</th><th>Department</th><th className="num">Days</th>{heads}<th className="num" title="Candidates moved a step in the ATS">Moved</th><th className="num" title="Profiles sent to the client">Sent</th><th className="num">Calls</th><th className="num" title="WhatsApp, SMS and email sent">Messages</th></tr>}
+            {view === 'payroll' && <tr><th>Employee</th><th>Department</th><th className="num">Working days</th><th className="num">On PC</th><th className="num">Leave</th><th className="num">Neither</th><th className="num">Active</th><th className="num">Productive</th><th className="num">Idle</th><th className="num">Score</th></tr>}
           </thead>
           <tbody>
             {view === 'team' && rows.map((r) => <tr key={r.key}><td><b>{r.name}</b></td><td className="num">{r.employees}</td>{nums(r)}</tr>)}
-            {view === 'daily' && rows.map((r) => <tr key={r.key} className="row-link" onClick={() => onOpen(r.employeeId)}><td style={{ whiteSpace: 'nowrap' }}>{r.day}</td><td><b>{r.name}</b>{r.department && <div className="small-muted">{r.department}</div>}</td><td>{tm(r.login)}</td><td>{tm(r.logout)}</td>{nums(r)}</tr>)}
-            {view === 'employee' && rows.map((r) => <tr key={r.key} className="row-link" onClick={() => onOpen(r.employeeId)}><td><b>{r.name}</b>{r.code && <div className="small-muted">{r.code}</div>}</td><td>{r.department || '—'}</td><td className="num">{r.days}</td>{nums(r)}</tr>)}
-            {data && !rows.length && !loading && <tr><td colSpan={10} className="small-muted">No activity in these days.</td></tr>}
+            {view === 'daily' && rows.map((r) => <tr key={r.key} className="row-link" onClick={() => onOpen(r.employeeId)}><td style={{ whiteSpace: 'nowrap' }}>{r.day}{r.dayType && <div className="small-muted">{r.dayType}</div>}</td><td><b>{r.name}</b>{r.department && <div className="small-muted">{r.department}</div>}</td><td>{tm(r.login)}</td><td>{tm(r.logout)}</td>{nums(r)}</tr>)}
+            {view === 'employee' && rows.map((r) => <tr key={r.key} className="row-link" onClick={() => onOpen(r.employeeId)}><td><b>{r.name}</b>{r.code && <div className="small-muted">{r.code}</div>}</td><td>{r.department || '—'}</td><td className="num">{r.days}</td>{nums(r)}<td className="num">{r.moved || 0}</td><td className="num">{r.submitted || 0}</td><td className="num">{r.calls || 0}</td><td className="num">{r.messages || 0}</td></tr>)}
+            {view === 'payroll' && rows.map((r) => <tr key={r.key} className="row-link" onClick={() => onOpen(r.employeeId)}><td><b>{r.name}</b>{r.code && <div className="small-muted">{r.code}</div>}</td><td>{r.department || '—'}</td><td className="num">{r.workingDays}</td><td className="num">{r.pcDays}</td><td className="num">{r.leaveDays}</td><td className="num">{r.noPcDays}</td><td className="num">{h(r.activeHours)}</td><td className="num">{h(r.productiveHours)}</td><td className="num">{h(r.idleHours)}</td><td className="num">{pct(r.productivity)}</td></tr>)}
+            {data && !rows.length && !loading && <tr><td colSpan={13} className="small-muted">No activity in these days.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -531,11 +588,16 @@ function Devices({ manage = false }) {
     if (!window.confirm(`Stop ${d.deviceName}${manage && d.employee ? ` (${d.employee.name})` : ''} from sending activity?`)) return;
     try { const r = await api.put(`/monitoring/devices/${d.id}/deactivate`); setMsg(r.data.message); reload(); } catch (e) { setMsg(errOf(e, 'Could not switch it off.')); }
   }
+  async function approve(d) {
+    try { const r = await api.put(`/monitoring/devices/${d.id}/approve`); setMsg(r.data.message); reload(); } catch (e) { setMsg(errOf(e, 'Could not approve it.')); }
+  }
   const rows = (data && data.rows) || [];
+  const canAct = !manage || (data && data.canManage);
   return (
     <>
       {msg && <div className="notice">{msg}</div>}
       {error && <div className="notice red">{error}</div>}
+      {data && manage && <div className="small-muted" style={{ marginBottom: 8 }}>{`Latest agent: ${data.latestAgent}. PCs update themselves unless that is switched off in Settings.`}{!data.canManage && ' You can look at PCs here; the Super Admin, Admin or IT Admin act on them.'}</div>}
       <div className="tbl-wrap">
         <table className="mon-table">
           <thead><tr>{manage && <th>Employee</th>}<th>PC</th><th>System</th><th>Agent</th><th>Registered</th><th>Last seen</th><th>Status</th><th /></tr></thead>
@@ -545,11 +607,14 @@ function Devices({ manage = false }) {
                 {manage && <td><b>{d.employee ? d.employee.name : '—'}</b>{d.employee && d.employee.department && <div className="small-muted">{d.employee.department}</div>}</td>}
                 <td>{d.deviceName}</td>
                 <td className="small-muted">{d.os || '—'}</td>
-                <td className="small-muted">{d.agentVersion || '—'}</td>
+                <td className="small-muted">{d.agentVersion || '—'}{d.outdated && <div><Pill tone="amber">Update due</Pill></div>}</td>
                 <td>{dt(d.registeredAt)}</td>
                 <td>{dt(d.lastSeenAt)}</td>
-                <td>{!d.isActive ? <Pill tone="slate">Switched off</Pill> : d.online ? <Pill tone="green">Online</Pill> : <Pill tone="amber">Offline</Pill>}</td>
-                <td>{d.isActive && <button type="button" className="btn btn-sm" onClick={() => off(d)}>Deactivate</button>}</td>
+                <td>{!d.isActive ? <Pill tone="slate">Switched off</Pill> : d.approved === false ? <Pill tone="amber">Waiting for approval</Pill> : d.online ? <Pill tone="green">Online</Pill> : <Pill tone="amber">Offline</Pill>}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  {d.isActive && d.approved === false && data.canManage && <><button type="button" className="btn btn-sm btn-primary" onClick={() => approve(d)}>Approve</button>{' '}</>}
+                  {d.isActive && canAct && <button type="button" className="btn btn-sm" onClick={() => off(d)}>Deactivate</button>}
+                </td>
               </tr>
             ))}
             {data && !rows.length && <tr><td colSpan={manage ? 8 : 7} className="small-muted">No PC registered yet.</td></tr>}
@@ -601,13 +666,13 @@ function SetUpCode({ pick = false }) {
 function SetUpPc({ pick = false }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  async function download() {
+  async function download(kind = 'exe') {
     setBusy(true); setErr('');
     try {
-      const r = await api.get('/monitoring/agent', { responseType: 'blob' });
+      const r = await api.get('/monitoring/agent', { responseType: 'blob', params: { kind } });
       const href = URL.createObjectURL(r.data);
       const a = document.createElement('a');
-      a.href = href; a.download = 'TeamLinkMonitorSetup.cmd'; document.body.appendChild(a); a.click();
+      a.href = href; a.download = `TeamLinkMonitorSetup.${kind}`; document.body.appendChild(a); a.click();
       a.remove(); setTimeout(() => URL.revokeObjectURL(href), 2000);
     } catch { setErr('Could not download the file. Please try again.'); } finally { setBusy(false); }
   }
@@ -615,14 +680,101 @@ function SetUpPc({ pick = false }) {
     <Panel title="Setting up an office PC" sub="Windows only. Takes about a minute on each PC.">
       <ol className="mon-steps">
         <li>On the office PC, sign in to TeamLink and press <b>Download the PC agent</b>. If the browser warns about the file, choose <b>Keep</b>.</li>
-        <li>Double-click the downloaded file <b>TeamLinkMonitorSetup.cmd</b>. If Windows shows a blue box, press <b>More info</b> → <b>Run anyway</b>.</li>
+        <li>Double-click the downloaded file <b>TeamLinkMonitorSetup.exe</b>. If Windows shows a blue box, press <b>More info</b> → <b>Run anyway</b>. No admin rights are needed.</li>
         <li>Type the <b>set-up code</b> below into the agent, or sign in with the employee&apos;s own TeamLink email and password.</li>
         <li>The employee reads the notice and accepts it.</li>
         <li>Done. A TeamLink icon stays next to the clock, it starts with Windows, and the PC appears under <b>Devices</b>.</li>
       </ol>
-      <button type="button" className="btn btn-primary" style={{ marginTop: 10 }} disabled={busy} onClick={download}>{busy ? 'Downloading…' : 'Download the PC agent'}</button>
+      <button type="button" className="btn btn-primary" style={{ marginTop: 10 }} disabled={busy} onClick={() => download('exe')}>{busy ? 'Downloading…' : 'Download the PC agent'}</button>{' '}
+      <button type="button" className="btn btn-ghost" style={{ marginTop: 10 }} disabled={busy} onClick={() => download('cmd')}>The .exe is blocked? Get the .cmd</button>
+      <div className="small-muted" style={{ marginTop: 6 }}>IT can pass the code: <code>TeamLinkMonitorSetup.exe /code=XXXX-XXXX</code>. The employee still reads and accepts the notice.</div>
       {err && <div className="notice red" style={{ marginTop: 8 }}>{err}</div>}
       <SetUpCode pick={pick} />
+    </Panel>
+  );
+}
+
+// ------------------------------------------------------------------------------------------------ Other rules for a department or an employee
+function EmployeePick({ onPick }) {
+  const [q, setQ] = useState('');
+  const [found, setFound] = useState([]);
+  useEffect(() => {
+    if (q.trim().length < 2) { setFound([]); return undefined; }
+    const t = setTimeout(() => { api.get('/monitoring/people', { params: { q } }).then((r) => setFound(r.data.rows || [])).catch(() => setFound([])); }, 250);
+    return () => clearTimeout(t);
+  }, [q]);
+  return (
+    <>
+      <div className="mon-bar" style={{ margin: '8px 0 0' }}><input type="search" placeholder="Search the employee's name or code" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Employee" /></div>
+      {found.length > 0 && (
+        <ul className="mon-pick">
+          {found.map((e) => <li key={e.id}><button type="button" className="btn btn-sm btn-ghost" onClick={() => { onPick(e); setQ(''); setFound([]); }}>{e.name}<span className="small-muted">{[e.employeeCode, e.department].filter(Boolean).map((x) => ` · ${x}`).join('')}</span></button></li>)}
+        </ul>
+      )}
+    </>
+  );
+}
+
+const EMPTY_RULE = { scope: 'department', target: '', who: '', workStart: '', workEnd: '', breakStart: '', breakEnd: '', idleThresholdMinutes: '', noTitles: false, excluded: false };
+function Overrides() {
+  const { data, reload } = useGet('/monitoring/overrides');
+  const cats = useGet('/monitoring/app-categories');
+  const [form, setForm] = useState(EMPTY_RULE);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const night = form.workStart && form.workEnd && form.workStart > form.workEnd;
+  async function save() {
+    setErr('');
+    try {
+      await api.post('/monitoring/overrides', { ...form, trackTitles: form.noTitles ? false : null });
+      setForm(EMPTY_RULE); reload();
+    } catch (e) { setErr(errOf(e, 'Could not save.')); }
+  }
+  async function remove(r) {
+    if (!window.confirm(`Remove the rules for ${r.label}?`)) return;
+    try { await api.delete(`/monitoring/overrides/${r.id}`); reload(); } catch (e) { setErr(errOf(e, 'Could not remove.')); }
+  }
+  const rows = (data && data.rows) || [];
+  return (
+    <Panel title="Other rules for a department or an employee" sub="Anything left empty stays as above. An employee's own rules win over their department's. If work ends after midnight it is a night shift, and it counts as the day it started.">
+      <div className="mon-bar">
+        <Combo value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value, target: '', who: '' })} aria-label="For"><option value="department">Department</option><option value="employee">Employee</option></Combo>
+        {form.scope === 'department'
+          ? <Combo value={form.target} onChange={set('target')} aria-label="Department"><option value="">Pick the department</option>{((cats.data && cats.data.departments) || []).map((d) => <option key={d} value={d}>{d}</option>)}</Combo>
+          : (form.who ? <span className="mon-tag">{form.who} <button type="button" aria-label="Pick another employee" onClick={() => setForm({ ...form, target: '', who: '' })}>×</button></span> : null)}
+      </div>
+      {form.scope === 'employee' && !form.who && <EmployeePick onPick={(e) => setForm({ ...form, target: e.id, who: e.name })} />}
+      <div className="mon-grid mon-grid-4" style={{ marginTop: 8 }}>
+        <label>Work starts <input type="time" value={form.workStart} onChange={set('workStart')} /></label>
+        <label>Work ends <input type="time" value={form.workEnd} onChange={set('workEnd')} /></label>
+        <label>Break starts <input type="time" value={form.breakStart} onChange={set('breakStart')} /></label>
+        <label>Break ends <input type="time" value={form.breakEnd} onChange={set('breakEnd')} /></label>
+        <label>Idle after (minutes) <input type="number" min={1} max={60} value={form.idleThresholdMinutes} onChange={set('idleThresholdMinutes')} /></label>
+      </div>
+      {night && <div className="notice">This is a night shift: it ends the next morning.</div>}
+      <div className="mon-checks">
+        <label className="mon-check"><input type="checkbox" checked={form.noTitles} onChange={(e) => setForm({ ...form, noTitles: e.target.checked })} /> App names only, no window titles</label>
+        <label className="mon-check"><input type="checkbox" checked={form.excluded} onChange={(e) => setForm({ ...form, excluded: e.target.checked })} /> Do not monitor at all</label>
+      </div>
+      {err && <div className="notice red">{err}</div>}
+      <button type="button" className="btn" style={{ marginTop: 8 }} disabled={!form.target} onClick={save}>Save these rules</button>
+      {rows.length > 0 && (
+        <table className="mon-table" style={{ marginTop: 12 }}>
+          <thead><tr><th>For</th><th>Work</th><th>Break</th><th>Idle after</th><th>Other</th><th /></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id}>
+                <td><b>{r.label}</b><div className="small-muted">{r.scope === 'employee' ? 'Employee' : 'Department'}</div></td>
+                <td>{r.workStart ? `${r.workStart} to ${r.workEnd}${r.workStart > r.workEnd ? ' (night)' : ''}` : '—'}</td>
+                <td>{r.breakStart ? `${r.breakStart} to ${r.breakEnd}` : '—'}</td>
+                <td>{r.idleThresholdMinutes ? `${r.idleThresholdMinutes} min` : '—'}</td>
+                <td>{[r.excluded && 'Not monitored', r.trackTitles === false && 'App names only'].filter(Boolean).join(', ') || '—'}</td>
+                <td><button type="button" className="btn btn-sm btn-ghost" onClick={() => remove(r)}>Remove</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </Panel>
   );
 }
@@ -634,13 +786,45 @@ function Settings() {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (data) setForm({ workStart: data.workStart, workEnd: data.workEnd, breakStart: data.breakStart || '', breakEnd: data.breakEnd || '', idleThresholdMinutes: data.idleThresholdMinutes, retentionDays: data.retentionDays, policyText: data.policyText, alertsEnabled: !!data.alertsEnabled, longIdleMinutes: data.longIdleMinutes, offlineMinutes: data.offlineMinutes, lowActivityHours: data.lowActivityHours }); }, [data]);
+  useEffect(() => { if (data) setForm(data.canEdit ? { workStart: data.workStart, workEnd: data.workEnd, breakStart: data.breakStart || '', breakEnd: data.breakEnd || '', idleThresholdMinutes: data.idleThresholdMinutes, retentionDays: data.retentionDays, policyText: data.policyText, alertsEnabled: !!data.alertsEnabled, longIdleMinutes: data.longIdleMinutes, offlineMinutes: data.offlineMinutes, lowActivityHours: data.lowActivityHours, unauthorizedApps: data.unauthorizedApps || '', alertEmail: !!data.alertEmail, trackTitles: data.trackTitles !== false, reportEnabled: !!data.reportEnabled, reportFrequency: data.reportFrequency || 'daily', reportEmails: data.reportEmails || '', autoUpdate: data.autoUpdate !== false, deviceApproval: !!data.deviceApproval, itAdminIds: data.itAdminIds || '' } : { autoUpdate: data.autoUpdate !== false, deviceApproval: !!data.deviceApproval }); }, [data]);
+  const [itPeople, setItPeople] = useState([]);
+  useEffect(() => { if (data && data.itAdmins) setItPeople(data.itAdmins); }, [data]);
   if (error) return <div className="notice red">{error}</div>;
   if (!form) return <div className="small-muted">Loading…</div>;
   async function save() {
     setBusy(true); setMsg(''); setErr('');
     try { const r = await api.put('/monitoring/settings', form); setMsg(r.data.message || 'Saved.'); } catch (e) { setErr(errOf(e, 'Could not save.')); } finally { setBusy(false); }
   }
+  const check = (k, label) => <label className="mon-check"><input type="checkbox" checked={!!form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.checked })} /> {label}</label>;
+  const agentPanel = (
+    <Panel title="PC agents" sub={data.canAgent ? 'For the Super Admin, Admin and IT Admin.' : 'The Super Admin, Admin or IT Admin changes these.'}>
+      <div className="mon-checks">
+        <fieldset disabled={!data.canAgent} className="mon-plain">
+          {check('autoUpdate', 'PCs update the agent by themselves')}
+          {check('deviceApproval', 'A new PC counts only after it is approved under Devices')}
+        </fieldset>
+      </div>
+      {data.canChooseIt && data.canEdit && (
+        <div style={{ marginTop: 10 }}>
+          <b>IT Admins</b>
+          <div className="small-muted">They manage PCs and agents, and they see nobody's activity.</div>
+          <div className="mon-tags">
+            {itPeople.map((p) => <span key={p.id} className="mon-tag">{p.name} <button type="button" aria-label={`Remove ${p.name}`} onClick={() => { const next = itPeople.filter((x) => x.id !== p.id); setItPeople(next); setForm({ ...form, itAdminIds: next.map((x) => x.id).join(',') }); }}>×</button></span>)}
+            {!itPeople.length && <span className="small-muted">Nobody yet.</span>}
+          </div>
+          <EmployeePick onPick={(e) => { const next = [...itPeople.filter((x) => x.id !== e.id), e]; setItPeople(next); setForm({ ...form, itAdminIds: next.map((x) => x.id).join(',') }); }} />
+        </div>
+      )}
+    </Panel>
+  );
+  const foot = (
+    <>
+      {msg && <div className="notice green">{msg}</div>}
+      {err && <div className="notice red">{err}</div>}
+      <button type="button" className="btn btn-primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
+    </>
+  );
+  if (!data.canEdit) return <div className="mon-settings">{agentPanel}{data.canAgent && foot}<SetUpPc /></div>;
   return (
     <div className="mon-settings">
       <Panel title="Work hours and records">
@@ -652,6 +836,7 @@ function Settings() {
           <label>Idle after (minutes with no mouse or keyboard) <input type="number" min={1} max={60} value={form.idleThresholdMinutes} onChange={(e) => setForm({ ...form, idleThresholdMinutes: e.target.value })} /></label>
           <label>Keep records for (days) <input type="number" min={7} max={730} value={form.retentionDays} onChange={(e) => setForm({ ...form, retentionDays: e.target.value })} /></label>
         </div>
+        {check('trackTitles', 'Record window titles (off: app names only, and websites cannot be told apart)')}
         <div className="small-muted">Only work hours (India time) are recorded; anything outside them is thrown away. The lunch break counts as Break, not idle, and keeps no app details. Older records are deleted by themselves. Screenshots: <b>off</b> - TeamLink never takes screenshots or reads what is typed.</div>
       </Panel>
       <Panel title="Alerts" sub="Sent to the team lead and HR by the bell, each kind at most once a day per person. Never on leave, holidays, or during lunch.">
@@ -660,15 +845,24 @@ function Settings() {
           <label>Long idle after (minutes) <input type="number" min={5} max={240} value={form.longIdleMinutes} onChange={(e) => setForm({ ...form, longIdleMinutes: e.target.value })} /></label>
           <label>No signal after (minutes) <input type="number" min={5} max={240} value={form.offlineMinutes} onChange={(e) => setForm({ ...form, offlineMinutes: e.target.value })} /></label>
           <label>Low activity under (hours in a day) <input type="number" min={1} max={12} value={form.lowActivityHours} onChange={(e) => setForm({ ...form, lowActivityHours: e.target.value })} /></label>
+          <label>Unauthorized apps and websites (commas between them) <input value={form.unauthorizedApps} onChange={(e) => setForm({ ...form, unauthorizedApps: e.target.value })} placeholder="netflix, steam" /></label>
+        </div>
+        {check('alertEmail', 'Send them by mail too (needs company mail connected)')}
+      </Panel>
+      <Panel title="Report by mail" sub="A summary after work, about 7 pm, with the table attached. Goes only to the addresses here.">
+        {check('reportEnabled', 'Send the report')}
+        <div className="mon-grid" style={{ marginTop: 8 }}>
+          <label>How often <Combo value={form.reportFrequency} onChange={(e) => setForm({ ...form, reportFrequency: e.target.value })} aria-label="How often"><option value="daily">Every working day</option><option value="weekly">Every Saturday, for the week</option></Combo></label>
+          <label>To <input value={form.reportEmails} onChange={(e) => setForm({ ...form, reportEmails: e.target.value })} placeholder="hr@company.com, founder@company.com" /></label>
         </div>
       </Panel>
+      <Overrides />
+      {agentPanel}
       <Panel title={`Consent notice (version ${data.policyVersion})`} sub="Every employee reads and accepts this before anything is recorded. Changing it makes a new version that everyone accepts again.">
         <textarea rows={10} value={form.policyText} onChange={(e) => setForm({ ...form, policyText: e.target.value })} aria-label="Consent notice" style={{ width: '100%' }} />
       </Panel>
       <SetUpPc pick />
-      {msg && <div className="notice green">{msg}</div>}
-      {err && <div className="notice red">{err}</div>}
-      <button type="button" className="btn btn-primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
+      {foot}
     </div>
   );
 }
