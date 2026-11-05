@@ -319,6 +319,10 @@ model ClientDocument {
 
 model Requirement {
   id             String  @id @default(cuid())
+  // Opened without a signed agreement, with the BDE TL's approval (utils/unsignedOpen.js)
+  unsignedApprovedAt DateTime?
+  unsignedApprovedBy String?
+  openRequests   RequirementOpenRequest[]
   title          String
   description    String?
   clientId       String
@@ -5222,6 +5226,25 @@ model MonitoringDevice {
 
   @@index([employeeId])
   @@map("monitoring_devices")
+}
+
+// A BDE's ask to open a requirement on an unsigned agreement, and the BDE TL's answer (utils/unsignedOpen.js). One waiting per job.
+model RequirementOpenRequest {
+  id            String      @id @default(cuid())
+  requirementId String
+  requirement   Requirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  fromStatus    String
+  askedById     String
+  askedByName   String?
+  status        String      @default("PENDING") // PENDING | APPROVED | REJECTED | CANCELLED
+  decidedById   String?
+  decidedByName String?
+  decidedAt     DateTime?
+  note          String?
+  createdAt     DateTime    @default(now())
+
+  @@index([status])
+  @@index([requirementId])
 }
 
 model MonitoringAlert {

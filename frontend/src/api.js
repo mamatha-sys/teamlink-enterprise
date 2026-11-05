@@ -15,6 +15,10 @@ export function actAsMode() {
   try { return viewAsToken() && sessionStorage.getItem(ACT_MODE_KEY) === 'act'; } catch { return false; }
 }
 
+// A REQUIREMENT ON AN UNSIGNED AGREEMENT (2026-11-05): whichever button tried to open it, the same question comes up on screen
+// (components/UnsignedAgreementPopup.jsx). The button's own error line says to answer it.
+const askUnsigned = (detail) => { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('tl-unsigned-ask', { detail })); };
+
 api.interceptors.request.use((config) => {
   const token = viewAsToken() || localStorage.getItem('tl_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
@@ -170,6 +174,15 @@ api.interceptors.response.use(undefined, (error) => {
     import('./components/duplicates/openDup.jsx').then((m) => m.openDupPanel({ candidateId: data.candidateId, message: data.error })).catch(() => null);
   }
   throw error;
+});
+
+api.interceptors.response.use((res) => {
+  if (res.data && res.data.unsignedAsk) askUnsigned(res.data.unsignedAsk);
+  return res;
+}, (error) => {
+  const d = error.response && error.response.data;
+  if (d && d.code === 'UNSIGNED_AGREEMENT' && !d.waiting) askUnsigned(d);
+  return Promise.reject(error);
 });
 
 export default api;

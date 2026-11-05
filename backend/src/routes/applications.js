@@ -678,7 +678,10 @@ async function applyStageMove(user, applicationId, body = {}, opts = {}) {
     && !existing.requirement.internal && existing.requirement.client
     && existing.requirement.client.clientType !== 'Internal'
     // eslint-disable-next-line global-require
-    && !require('../utils/atsVocab').agreementIsActive(existing.requirement.client.agreementStatus)) {
+    && !require('../utils/atsVocab').agreementIsActive(existing.requirement.client.agreementStatus)
+    // the BDE TL approved opening this job without a signed agreement (utils/unsignedOpen.js)
+    // eslint-disable-next-line global-require
+    && !require('../utils/unsignedOpen').covered(existing.requirement)) {
     // eslint-disable-next-line global-require
     const label = require('../utils/atsVocab').agreementStatusLabel(existing.requirement.client.agreementStatus);
     return {

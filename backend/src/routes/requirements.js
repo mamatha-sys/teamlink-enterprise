@@ -37,6 +37,7 @@ const { isSuperAdmin: isSuperAdminUser, isDeskBde, isBdeTeam } = require('../uti
 const reqDisplay = require('../utils/requirementDisplayStatus');
 const RD = require('../utils/reqDepartments'); // a job can belong to several departments (2026-10-13)
 const RT = require('../utils/reqTeamLeads'); // a job can have several team leads (2026-10-14)
+const UO = require('../utils/unsignedOpen'); // a requirement opened on an unsigned agreement, with the BDE TL's approval (2026-11-05)
 const agreementPrivacy = require('../utils/agreementPrivacy'); // TL / STL / Recruiter / HR hear no agreement wording (2026-10-12)
 // B9.1: the duplicate-job rule (same client + title + location, still open) on the forms.
 const JD = require('../utils/jobDuplicates');
@@ -228,7 +229,7 @@ function shapeForClient(r) {
 function requirementNextAction(r, counts) {
   // A CLOSED requirement asks nothing of anyone (review #2 §5: Closed -> No Action).
   if (r.status === 'CLOSED') return { nextAction: 'Closed — no action', owner: null, ownerRole: null };
-  const agreementOk = !r.client || normalizeAgreementStatus(r.client.agreementStatus) === 'ACTIVE' || r.internal;
+  const agreementOk = !r.client || normalizeAgreementStatus(r.client.agreementStatus) === 'ACTIVE' || r.internal || UO.covered(r);
   if (!agreementOk) {
     return { nextAction: 'Complete the client agreement', owner: r.bde ? r.bde.name : (r.accountManager || null), ownerRole: 'BDE' };
   }
@@ -267,7 +268,7 @@ function requirementNextAction(r, counts) {
 // the sentence. Order matches requirementNextAction() above.
 function nextActionKindOf(r, counts) {
   if (r.status === 'CLOSED') return 'done';
-  const agreementOk = !r.client || normalizeAgreementStatus(r.client.agreementStatus) === 'ACTIVE' || r.internal;
+  const agreementOk = !r.client || normalizeAgreementStatus(r.client.agreementStatus) === 'ACTIVE' || r.internal || UO.covered(r);
   if (!agreementOk) return 'agreement';
   if (!r.recruiterId) return 'assign';
   if (!counts.total) return 'source';
@@ -904,14 +905,14 @@ const AGREEMENT_PENDING_WHERE = {
     { status: { not: 'CLOSED' } },
     { OR: [
       { status: 'AGREEMENT_CHECK' },
-      { internal: false, client: { agreementStatus: { not: 'ACTIVE' } } },
+      { internal: false, unsignedApprovedAt: null, client: { agreementStatus: { not: 'ACTIVE' } } },
     ] },
   ],
 };
 
 // The same rule in JS, for a row already in memory.
 const isAgreementPending = (r) => r.status === 'AGREEMENT_CHECK'
-  || (r.status !== 'CLOSED' && !r.internal && !!r.client && r.client.agreementStatus !== 'ACTIVE');
+  || (r.status !== 'CLOSED' && !r.internal && !!r.client && r.client.agreementStatus !== 'ACTIVE' && !r.unsignedApprovedAt);
 
 // SLA = OVERDUE (the "My Overdue" view, ?sla=overdue). SLA is computed, not
 // stored — the same requirementSla() the SLA column shows — so the filtered
@@ -925,7 +926,7 @@ async function overdueSlim(where) {
       where,
       select: {
         id: true, status: true, internal: true, priority: true, openings: true, createdAt: true,
-        targetDate: true, closingDate: true, client: { select: { agreementStatus: true } },
+        targetDate: true, closingDate: true, unsignedApprovedAt: true, client: { select: { agreementStatus: true } },
         recruiterId: true, recruiterIds: true, tlId: true, stlId: true, bdeId: true, department: true, positionCode: true,
         _count: { select: { applications: true } },
       },
@@ -1060,7 +1061,7 @@ async function enrichRows(found, user, { activity = false } = {}) {
     row.displayStatus = reqDisplay.displayStatusOf(r, stages.length, filled);
     row.ageDays = ageDaysOf(r.createdAt);
     row.agreementPending = r.status === 'AGREEMENT_CHECK'
-      || (!r.internal && r.status !== 'CLOSED' && !!r.client && normalizeAgreementStatus(r.client.agreementStatus) !== 'ACTIVE');
+      || (!r.internal && r.status !== 'CLOSED' && !r.unsignedApprovedAt && !!r.client && normalizeAgreementStatus(r.client.agreementStatus) !== 'ACTIVE');
     if (activity) {
       const la = activityOf.get(r.id);
       row.lastActivity = la ? { at: la.at, by: forClient ? null : la.by, what: la.what } : null;
@@ -2268,6 +2269,21 @@ const seatLabel = (p) => (p && p.code ? `${p.code} · ${p.department ? `${p.depa
 // agreement, the Job Portal line and the seven-step pipeline (the SAME
 // pipelineCounts() the list row and the detail page carry). Lean: stages and
 // sources only, never the candidate records.
+// THE BDE TL'S APPROVAL OF A REQUIREMENT ON AN UNSIGNED AGREEMENT (utils/unsignedOpen.js)
+router.get('/unsigned-requests/pending', async (req, res) => { res.json(await UO.pending(req.user)); });
+router.post('/unsigned-requests/:rid/decide', async (req, res) => {
+  const out = await UO.decide(req.user, req.params.rid, req.body && req.body.approve === true, req.body && req.body.note, openUnsigned);
+  res.status(out.status).json(out.body);
+});
+router.post('/:id/unsigned-request', JC.requireJobManage(), requirePerm('ats', 'requirements', 'Requirement Detail', 'approve'), async (req, res) => {
+  const denied = await approveDenied(req.user, req.requirement);
+  if (denied) return res.status(403).json({ error: denied });
+  if (agreementPrivacy.blindTo(req.user)) return res.status(403).json({ error: agreementPrivacy.HOLD_MESSAGE });
+  if (holdOnlyRole(req.user) && req.requirement.status !== 'ON_HOLD') return res.status(403).json({ error: 'An Assistant Manager / STL can resume a requirement on hold; opening it is a Manager or Admin action.' });
+  const out = await UO.request(req.user, req.requirement, openUnsigned);
+  return res.status(out.status).json(out.body);
+});
+
 router.get('/:id/summary', async (req, res) => {
   const r = req.requirement;
   const policy = await viewerPolicy(req.user);
@@ -2547,7 +2563,7 @@ router.get('/:id', async (req, res) => {
     return p ? { code: p.code, name: p.name || null, department: p.department || null } : null;
   };
   const agreementStatus = normalizeAgreementStatus(requirement.client && requirement.client.agreementStatus);
-  const agreementActive = requirement.internal || agreementIsActive(requirement.client && requirement.client.agreementStatus);
+  const agreementActive = requirement.internal || agreementIsActive(requirement.client && requirement.client.agreementStatus) || UO.covered(requirement);
   const la = activityOf.get(requirement.id);
   const recruiterSeat = seatOf(requirement.recruiterId);
   // §24 Section (Education Team A / B) — the same rule the list row uses.
@@ -2601,7 +2617,9 @@ router.get('/:id', async (req, res) => {
     agreement: requirement.internal ? { internal: true } : {
       status: agreementStatus,
       label: AGREEMENT_LABELS[agreementStatus] || agreementStatus,
-      active: agreementActive,
+      active: agreementIsActive(requirement.client && requirement.client.agreementStatus),
+      approvedBy: UO.covered(requirement) ? requirement.unsignedApprovedBy || 'the BDE TL' : null,
+      waiting: !!(await prisma.requirementOpenRequest.count({ where: { requirementId: requirement.id, status: 'PENDING' } })),
       nextStep: agreementStepText({ ...requirement.client, agreementDocument: hasAgreementDocument }),
       canOpen: desk,
       canManage: manageAgreement,
@@ -3349,7 +3367,8 @@ router.post('/', JC.requireJobCreate({ needs: 'any', internalOf: hrInternalInten
   // A requirement that is live the moment it is saved is posted on every
   // source now; one parked at Draft / Agreement Check posts when it goes live.
   await pushToPortal(requirement, { user: req.user, trigger: 'create' });
-  res.status(201).json({ ...requirement, departments: RD.departmentsOf(requirement), tlIds: RT.tlsOf(requirement), gateNote, agreementStatus: normalizeAgreementStatus(client.agreementStatus) });
+  const unsignedAsk = requirementStatus === 'AGREEMENT_CHECK' && JC.mayManageJobs(req.user) && !agreementPrivacy.blindTo(req.user) ? await UO.askFor(req.user, requirement, client) : undefined;
+  res.status(201).json({ ...requirement, departments: RD.departmentsOf(requirement), tlIds: RT.tlsOf(requirement), gateNote, unsignedAsk, agreementStatus: normalizeAgreementStatus(client.agreementStatus) });
 });
 
 // EXACTLY WHAT TO DO when a client requirement is held at the agreement gate
@@ -3455,6 +3474,8 @@ async function fullEditClientMove(user, before, data, body) {
   }
   data.clientId = wantClient;
   data.internal = wantInternal;
+  data.unsignedApprovedAt = null; // the BDE TL approved it for the old client
+  data.unsignedApprovedBy = null;
   return null;
 }
 
@@ -3767,6 +3788,26 @@ async function gateRefusal(user, client, lead) {
   return `${lead}: ${note.replace(/^Saved at Agreement Check — not live yet, because /, '').replace(' When the agreement is Active, open this requirement and press Activate Requirement.', ' Then press Activate Requirement here.')}`;
 }
 
+// An agreement that is not Active stops the door: a BDE / Manager / Admin is ASKED (utils/unsignedOpen.js), and the logins
+// that may not hear about agreements keep the plain refusal.
+async function unsignedStop(res, user, r, client, lead) {
+  if (agreementPrivacy.blindTo(user) || !client) return res.status(400).json({ error: await gateRefusal(user, client, lead) });
+  return res.status(409).json(await UO.askFor(user, r, client));
+}
+
+// The BDE TL said yes: the job opens as the ordinary doors open it. A job already running keeps its step.
+async function openUnsigned(r, actor) {
+  const status = requirementIsLive(r.status) ? r.status : ((r.recruiterId || csv(r.recruiterIds).length) ? 'RECRUITER_ASSIGNED' : 'OPEN');
+  const requirement = await prisma.requirement.update({ where: { id: r.id }, data: { status, unsignedApprovedAt: new Date(), unsignedApprovedBy: actor.name || actor.email } });
+  await logAudit({
+    userId: actor.id, actorName: actor.name, action: 'Requirement opened without a signed agreement', entity: 'Requirement',
+    entityId: r.id, fromValue: r.status, toValue: status,
+  });
+  await pushToPortal(requirement, { user: actor, trigger: 'status', prevStatus: r.status });
+  await tellTlJobIsOpen(requirement, r.client, actor.id).catch(() => null);
+  return requirement;
+}
+
 // THE JOB IS OPEN (user, 2026-10-09, step 7 -> 8): the team lead who will run it is
 // told in plain words - the job's TL (the department's default TL is put on the job
 // when the request comes in), or, when no TL is named yet, the TLs of its department,
@@ -3817,11 +3858,14 @@ router.post('/:id/activate', JC.requireJobManage(), requirePerm('ats', 'requirem
   }
   // The gate is an ACTIVE agreement, not merely a signed one. Internal
   // requirements have no client agreement to wait on.
-  if (!existing.internal && !agreementIsActive(existing.client && existing.client.agreementStatus)) {
-    await prisma.requirement.update({ where: { id: existing.id }, data: { status: 'AGREEMENT_CHECK' } });
-    return res.status(400).json({
-      error: await gateRefusal(req.user, existing.client, 'Cannot activate yet — it is held at Agreement Check'),
-    });
+  if (!existing.internal && !agreementIsActive(existing.client && existing.client.agreementStatus) && !UO.covered(existing)) {
+    // a draft is checked for a twin here: the approval opens it straight, past the check below
+    if (existing.status === 'DRAFT') {
+      const guard = await require('../utils/jobDupGuard').guardCreate({ ...existing, duplicateOverride: req.body && req.body.duplicateOverride, duplicateReason: req.body && req.body.duplicateReason }, { user: req.user }); // eslint-disable-line global-require
+      if (guard.block) return res.status(guard.block.status).json(guard.block.body);
+    }
+    const held = await prisma.requirement.update({ where: { id: existing.id }, data: { status: 'AGREEMENT_CHECK' } });
+    return unsignedStop(res, req.user, held, existing.client, 'Cannot activate yet — it is held at Agreement Check');
   }
 
   // A draft (a client's / BDE's request) becomes a real job here: the twin check runs now too (utils/jobDupGuard.js).
@@ -3880,8 +3924,8 @@ router.post('/:id/status', JC.requireJobManage(), requirePerm('ats', 'requiremen
         + `From here it can go to: ${allowed.map((x) => requirementStateWords(x)).join(', ') || 'nowhere'}.`,
     });
   }
-  if (requirementIsLive(to) && !existing.internal && !agreementIsActive(existing.client && existing.client.agreementStatus)) {
-    return res.status(400).json({ error: await gateRefusal(req.user, existing.client, 'Cannot go live yet') });
+  if (requirementIsLive(to) && !existing.internal && !agreementIsActive(existing.client && existing.client.agreementStatus) && !UO.covered(existing)) {
+    return unsignedStop(res, req.user, existing, existing.client, 'Cannot go live yet');
   }
   if (to === 'RECRUITER_ASSIGNED' && !existing.recruiterId && !csv(existing.recruiterIds).length) {
     return res.status(400).json({ error: 'Assign a recruiter before moving to Recruiter Assigned.' });
@@ -3911,8 +3955,8 @@ router.post('/:id/toggle-status', JC.requireJobManage(), requirePerm('ats', 'req
   }
   if (status === 'OPEN' && !existing.internal) {
     const client = await prisma.client.findUnique({ where: { id: existing.clientId } });
-    if (!agreementIsActive(client && client.agreementStatus)) {
-      return res.status(400).json({ error: await gateRefusal(req.user, client, 'Cannot reopen yet') });
+    if (!agreementIsActive(client && client.agreementStatus) && !UO.covered(existing)) {
+      return unsignedStop(res, req.user, existing, client, 'Cannot reopen yet');
     }
   }
   const requirement = await prisma.requirement.update({ where: { id: existing.id }, data: { status } });
@@ -4047,7 +4091,7 @@ router.post('/:id/generate-jd', require('../utils/postingGuard').requirePosting(
 
 // Job Pause / Close / Delete, posting sites, bulk-assign Undo (change list
 // 2026-10-03 §5 / §16 / §22) — routes/jobLifecycleRoutes.js.
-require('./jobLifecycleRoutes')(router, { requirementPermissions, holdOnlyRole, pushToPortal, gateRefusal });
+require('./jobLifecycleRoutes')(router, { requirementPermissions, holdOnlyRole, pushToPortal, unsignedStop });
 
 module.exports = router;
 // ATS data I/O (utils/atsFacets.js): the filter options and their counts are

@@ -89,7 +89,7 @@ async function recordUndo({ undoId, user, action, targetName, rows }) {
 }
 
 module.exports = function registerJobLifecycle(router, deps) {
-  const { requirementPermissions, holdOnlyRole, pushToPortal, gateRefusal } = deps;
+  const { requirementPermissions, holdOnlyRole, pushToPortal, unsignedStop } = deps;
 
   async function lifecycleOf(user, r) {
     const [perms, client, apps, invoices, lastHold, lastClose] = await Promise.all([
@@ -201,8 +201,8 @@ module.exports = function registerJobLifecycle(router, deps) {
       return res.status(403).json({ error: `You cannot ${verb} this requirement.` });
     }
     const client = r.clientId ? await prisma.client.findUnique({ where: { id: r.clientId } }) : null;
-    if (!r.internal && !agreementIsActive(client && client.agreementStatus)) {
-      return res.status(400).json({ error: await gateRefusal(req.user, client, `Cannot ${verb} yet`) });
+    if (!r.internal && !agreementIsActive(client && client.agreementStatus) && !require('../utils/unsignedOpen').covered(r)) { // eslint-disable-line global-require
+      return unsignedStop(res, req.user, r, client, `Cannot ${verb} yet`);
     }
     const to = (r.recruiterId || csv(r.recruiterIds).length) ? 'RECRUITER_ASSIGNED' : 'OPEN';
     return move(req, res, { to, action, ok: `${verb === 'resume' ? 'Resumed' : 'Reopened'} — the requirement is open again.` });

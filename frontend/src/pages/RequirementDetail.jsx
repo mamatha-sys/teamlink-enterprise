@@ -676,7 +676,7 @@ export default function RequirementDetail() {
               {r.commercial && <Row k="Fee %">{pct(r.commercial.feePercent)}</Row>}
               {r.commercial && <Row k="Guarantee">{r.commercial.guaranteeDays ? (/^\d+$/.test(String(r.commercial.guaranteeDays).trim()) ? `${r.commercial.guaranteeDays} days` : r.commercial.guaranteeDays) : null}</Row>}
               {r.commercial && <Row k="Payment terms">{r.commercial.paymentTerms}</Row>}
-              <Row k="Can open?">{r.agreement?.held ? 'Waiting for agreement' : agreementActive ? 'Yes' : 'After agreement is signed'}</Row>
+              <Row k="Can open?">{r.agreement?.approvedBy ? `Yes, approved by ${r.agreement.approvedBy}` : r.agreement?.held ? 'Waiting for agreement' : agreementActive ? 'Yes' : 'After agreement is signed'}</Row>
               {showAgreementTab && (
                 <button type="button" className="btn btn-sm" style={{ width: '100%', justifyContent: 'center', marginTop: 8 }} onClick={() => setTab('agreement')}>
                   See agreement
@@ -1026,8 +1026,8 @@ export default function RequirementDetail() {
               <Row k="Expiry">{r.client?.agreementEnd}</Row>
             </>
           )}
-          <Row k="Can open?">{ag.held ? 'Waiting for agreement' : agreementActive ? 'Yes' : 'After agreement is signed'}</Row>
-          <Row k="Next step">{agreementActive ? 'Nothing. The agreement is signed.' : ag.nextStep}</Row>
+          <Row k="Can open?">{ag.approvedBy ? `Yes, approved by ${ag.approvedBy}` : ag.held ? 'Waiting for agreement' : agreementActive ? 'Yes' : 'After agreement is signed'}</Row>
+          <Row k="Next step">{ag.approvedBy ? ag.nextStep : agreementActive ? 'Nothing. The agreement is signed.' : ag.nextStep}</Row>
           {!agreementActive && (
             ag.canOpen ? (
               <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1224,6 +1224,7 @@ export default function RequirementDetail() {
       })()}
 
       {notice && <div className="notice">{notice}</div>}
+      {!hideAgr && r.agreement?.waiting && <div className="notice" role="status">Waiting for the BDE TL's approval to open this requirement. The agreement is not signed.</div>}
       {!r.internal && <ClientPausedBanner clientName={clientName} lifecycle={r.client?.lifecycle} />}
       {hideAgr && r.gate.onHold && !r.internal && (
         <div className="notice amber" role="status"><span>{r.gate.message || 'This requirement is on hold. Ask your Business Development manager.'}</span></div>

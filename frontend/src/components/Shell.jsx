@@ -17,6 +17,7 @@ import NudgePopup from './NudgePopup.jsx';
 import TaskPopup from './dashboard/TaskPopup.jsx';
 import JobRequestPopup from './JobRequestPopup.jsx';
 import SelectionMailPopup from './SelectionMailPopup.jsx';
+import UnsignedAgreementPopup from './UnsignedAgreementPopup.jsx'; // a requirement on an unsigned agreement: the question, and the BDE TL's approval (2026-11-05)
 import FollowUpReminderPopup from './FollowUpReminderPopup.jsx'; // a follow-up's call-back day, on screen (2026-11-04) // the TL sends the Selected confirmation mail (2026-11-04)
 import InterviewPopup from './InterviewPopup.jsx'; // every-hour interview reminders on screen (2026-11-04)
 import HealthDot from './dashboard/HealthDot.jsx';
@@ -291,6 +292,7 @@ export default function Shell() {
             {hasAtsWork(user) && <JobRequestPopup />}
             {/* A candidate is Selected: the confirmation mail waits for the TL's Send (2026-11-04). */}
             {hasAtsWork(user) && <SelectionMailPopup />}
+            {hasAtsWork(user) && <UnsignedAgreementPopup />}
             {/* A follow-up said "call on 7th november": on that day the recruiter sees it on screen (2026-11-04). */}
             {hasAtsWork(user) && <FollowUpReminderPopup />}
             {/* From the day before an interview, every hour: the recruiter, TL and BDE see it on screen (2026-11-04). */}
