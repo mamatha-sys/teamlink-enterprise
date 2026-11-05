@@ -401,7 +401,6 @@ async function sync({ force = false, why = 'manual', by = null } = {}) {
           else if (ch === 'whatsapp' && i > 0) r = { state: 'skipped', words: `One WhatsApp number can belong to one workspace only: it is in "${wss[0].name}".` };
           else if (ch === 'threads' && i > 0) r = { state: 'skipped', words: `Threads is given to the main workspace only: "${wss[0].name}".` };
           else if (ch === 'facebook' && i > 0) r = { state: 'skipped', words: `The Facebook Page is given to the main workspace only: "${wss[0].name}".` };
-          else if (ch === 'x' && i > 0) r = { state: 'skipped', words: `X is given to the main workspace only: "${wss[0].name}".` };
           else if (ch === 'linkedin' && i > 0) r = { state: 'skipped', words: `LinkedIn is given to the main workspace only: "${wss[0].name}".` };
           else r = await pushOne(token, ws, ch, want[ch], fps[k] || null, force); // eslint-disable-line no-await-in-loop
           if (r.fp) fps[k] = r.fp; else if (r.fp === null) delete fps[k];
