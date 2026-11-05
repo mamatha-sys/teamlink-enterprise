@@ -5,12 +5,26 @@ import { AiAssist } from '../../components/ComposeForm.jsx';
 
 // ---------------------------------------------------------------------------
 // Timesheet > Checklist (founder 2026-11-03). Each person writes what they did: the day (today by default), from / to time,
-// status (Completed, Pending, In Progress) and a description, then Save. They see their own list; a TL also sees their team;
-// the Super Admin sees everyone, department by department. Only the writer can change or remove a row.
+// status (Completed, Pending, In Progress) and a description, then Save. They see their own list; a TL also sees their whole team,
+// one block per person, written or not (founder 2026-11-05: "tls ki valla andharu employee checklist kanipinchali and every day
+// filters petukuntey"); the Super Admin sees everyone, department by department. Only the writer can change or remove a row.
 // Backend: routes/timesheetChecklist.js.
 // ---------------------------------------------------------------------------
 const TONE = { Completed: 'active', Pending: 'pending', 'In Progress': 'info' };
 const EMPTY = { fromTime: '', toTime: '', status: 'In Progress', description: '' };
+
+// The days the buttons above the filters stand for, in India time.
+const dayOf = (d) => d.toISOString().slice(0, 10);
+function quickDays(today) {
+  const t = new Date(`${today}T00:00:00Z`);
+  const back = (n) => dayOf(new Date(t.getTime() - n * 86400000));
+  return [
+    { key: 'today', label: 'Today', from: today, to: '' },
+    { key: 'yesterday', label: 'Yesterday', from: back(1), to: '' },
+    { key: 'week', label: 'Last 7 days', from: back(6), to: today },
+    { key: 'month', label: 'This month', from: `${today.slice(0, 8)}01`, to: today },
+  ];
+}
 
 function EntryForm({ statuses, initial, date, onSaved, onCancel }) {
   const [f, setF] = useState(initial || EMPTY);
@@ -81,6 +95,45 @@ function Rows({ rows, showWho, showDate, statuses, onChanged, setError }) {
   );
 }
 
+// A TL's whole team for the days picked: who wrote and who has not, then each person's rows.
+function TeamList({ roster, rows, range, statuses, narrowed, onChanged, setError }) {
+  const [show, setShow] = useState('all'); // 'all' | 'wrote' | 'not'
+  const wrote = roster.filter((p) => p.entries > 0);
+  const notYet = roster.filter((p) => !p.entries);
+  const byPerson = new Map();
+  rows.forEach((r) => { if (!byPerson.has(r.userId)) byPerson.set(r.userId, []); byPerson.get(r.userId).push(r); });
+  // a status or words filter shows only the people it finds
+  const base = narrowed ? roster.filter((p) => byPerson.has(p.userId)) : roster;
+  const list = show === 'wrote' ? base.filter((p) => p.entries > 0) : show === 'not' ? base.filter((p) => !p.entries) : base;
+  if (!roster.length) return <div className="small-muted">Nobody is in your team yet.</div>;
+  return (
+    <>
+      <div className="tcl-views">
+        <button type="button" className={`tt-view${show === 'all' ? ' on' : ''}`} onClick={() => setShow('all')}>Everyone <b>{roster.length}</b></button>
+        <button type="button" className={`tt-view${show === 'wrote' ? ' on' : ''}`} onClick={() => setShow('wrote')}>Written <b>{wrote.length}</b></button>
+        <button type="button" className={`tt-view${show === 'not' ? ' on' : ''}`} onClick={() => setShow('not')}>Not written <b>{notYet.length}</b></button>
+      </div>
+      {!list.length && <div className="small-muted">Nobody here for these filters.</div>}
+      {list.map((p) => (
+        <div key={p.userId} className="tcl-person">
+          <div className="tcl-person-head">
+            <div><b>{p.name}</b> <span className="small-muted">{[p.employeeCode, p.designation, p.team].filter(Boolean).join(' · ')}</span></div>
+            {p.entries
+              ? <div className="tcl-counts">
+                  {range && <span className="small-muted">{p.days} {p.days === 1 ? 'day' : 'days'}</span>}
+                  {p.completed > 0 && <span className="status active">{p.completed} Completed</span>}
+                  {p.inProgress > 0 && <span className="status info">{p.inProgress} In Progress</span>}
+                  {p.pending > 0 && <span className="status pending">{p.pending} Pending</span>}
+                </div>
+              : <span className="status rejected">Not written</span>}
+          </div>
+          {byPerson.has(p.userId) && <Rows rows={byPerson.get(p.userId)} showWho={false} showDate={range} statuses={statuses} onChanged={onChanged} setError={setError} />}
+        </div>
+      ))}
+    </>
+  );
+}
+
 export default function TimesheetChecklist() {
   const today = new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
   const [date, setDate] = useState(today);
@@ -108,6 +161,13 @@ export default function TimesheetChecklist() {
   const mineRows = data.rows.filter((r) => r.mine);
   const teamRows = data.rows.filter((r) => !r.mine);
   const people = data.people.filter((p) => !department || p.department === department);
+  // A team that spans departments (somebody on the reporting line from another one) can be cut by department too.
+  const teamDepts = [...new Set(data.people.map((p) => p.department))].sort();
+  const showDept = data.scope === 'all' || (others && teamDepts.length > 1);
+  const deptChoices = data.scope === 'all' ? data.departments : teamDepts.map((d) => ({ department: d, count: data.people.filter((p) => p.department === d).length }));
+  const quick = quickDays(data.today);
+  const pickDays = (x) => { setDate(x.from); setTo(x.to); };
+  const quickOn = quick.find((x) => x.from === date && (x.to || '') === to);
   const changed = (m) => { setNotice(m); load(); };
   // The Super Admin's list: department by department.
   const groups = [...new Set(teamRows.map((r) => r.department))].sort().map((d) => ({ d, rows: teamRows.filter((r) => r.department === d) }));
@@ -116,6 +176,11 @@ export default function TimesheetChecklist() {
     <div className="tcl">
       {error && <div className="error-text">{error}</div>}
       {notice && <div className="tt-notice-ok" role="status">{notice}</div>}
+
+      {/* one click for the usual days (founder 2026-11-05: "every day filters"); From / To below for any other days */}
+      <div className="tcl-views">
+        {quick.map((x) => <button key={x.key} type="button" className={`tt-view${quickOn?.key === x.key ? ' on' : ''}`} onClick={() => pickDays(x)}>{x.label}</button>)}
+      </div>
 
       {/* FILTERS ON TOP (founder 2026-11-04): days From - To, status, words, and (for leads) department / employee */}
       <div className="tcl-bar">
@@ -129,11 +194,11 @@ export default function TimesheetChecklist() {
         </label>
         <label>Search<input type="search" value={q} placeholder="Words in what was done, or a name" onChange={(e) => setQ(e.target.value)} /></label>
         {(to || status || q || department || userId) && <button type="button" className="btn btn-sm" style={{ alignSelf: 'flex-end' }} onClick={() => { setTo(''); setStatus(''); setQ(''); setDepartment(''); setUserId(''); setDate(today); }}>Clear filters</button>}
-        {others && data.scope === 'all' && (
+        {showDept && (
           <label>Department
             <Combo value={department} onChange={(e) => { setDepartment(e.target.value || ''); setUserId(''); }}>
               <option value="">All departments</option>
-              {data.departments.map((d) => <option key={d.department} value={d.department}>{`${d.department} (${d.count})`}</option>)}
+              {deptChoices.map((d) => <option key={d.department} value={d.department}>{`${d.department} (${d.count})`}</option>)}
             </Combo>
           </label>
         )}
@@ -159,7 +224,7 @@ export default function TimesheetChecklist() {
 
       {others && (
         <div className="panel">
-          <div className="panel-head"><h3>{data.scope === 'all' ? 'Everyone, department-wise' : 'My team'} <span className="small-muted">({teamRows.length})</span></h3></div>
+          <div className="panel-head"><h3>{data.scope === 'all' ? 'Everyone, department-wise' : 'My team'} <span className="small-muted">{data.scope === 'all' ? `(${teamRows.length})` : `· ${range ? `${date} to ${data.to}` : (date === data.today ? 'today' : date)}`}</span></h3></div>
           <div className="panel-pad">
             {data.scope === 'all'
               ? (groups.length ? groups.map((g) => (
@@ -168,7 +233,7 @@ export default function TimesheetChecklist() {
                   <Rows rows={g.rows} showWho showDate={range} statuses={data.statuses} onChanged={changed} setError={setError} />
                 </div>
               )) : <div className="small-muted">Nobody has written a checklist for this day yet.</div>)
-              : <Rows rows={teamRows} showWho showDate={range} statuses={data.statuses} onChanged={changed} setError={setError} />}
+              : <TeamList roster={data.roster || []} rows={teamRows} range={range} statuses={data.statuses} narrowed={!!(status || qSent)} onChanged={changed} setError={setError} />}
           </div>
         </div>
       )}

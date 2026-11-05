@@ -127,4 +127,9 @@
 .tcl-table td { vertical-align: top; }
 .tcl-group { margin-bottom: 16px; }
 .tcl-group-head { font-weight: 700; font-size: 14px; padding: 6px 0; border-bottom: 1px solid var(--line, #e3e8ee); margin-bottom: 6px; }
+.tcl-views { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.tcl-person { border: 1px solid var(--line, #e3e8ee); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.tcl-person-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tcl-person .tcl-table { margin-top: 8px; }
+.tcl-counts { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 

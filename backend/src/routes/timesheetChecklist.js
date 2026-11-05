@@ -8,13 +8,19 @@
 //   PUT    /:id                                    change MY row
 //   DELETE /:id                                    remove MY row
 //
-// Who sees what: everyone their OWN rows; a TL also their team (everyone under them on the reporting line); the Super Admin
-// everyone, grouped by department. Only the person who wrote a row may change or remove it. A day in the future is refused.
+// Who sees what: everyone their OWN rows; a TL also their team; the Super Admin everyone, grouped by department. Only the person who
+// wrote a row may change or remove it. A day in the future is refused.
+//
+// A TL'S TEAM (founder 2026-11-05: "tls ki valla andharu employee checklist kanipinchali"): everyone under them on the reporting line
+// PLUS utils/scope.js employeeWhere() - the same people the rest of Timesheet gives them (their team, or their department when no
+// team is set). The reporting line alone dropped everybody with no reporting manager filled in.
+// roster: every person of the team for the days picked, written or not, so a TL sees at a glance who has not written.
 // ---------------------------------------------------------------------------
 const express = require('express');
 const prisma = require('../db');
 const { requireAuth, requirePerm } = require('../middleware/auth');
 const { logAudit } = require('../utils/audit');
+const { scopeOf, employeeWhere } = require('../utils/scope');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -25,7 +31,9 @@ const istToday = () => new Date(Date.now() + 330 * 60000).toISOString().slice(0,
 const isDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
 const isTime = (s) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(s || ''));
 const isSuperAdmin = (me) => [me.role, me.hrmsRole].some((r) => String(r || '').toUpperCase() === 'SUPER_ADMIN');
-const EMP_SELECT = { id: true, userId: true, name: true, employeeCode: true, department: true, team: true, designation: true };
+const EMP_SELECT = { id: true, userId: true, name: true, employeeCode: true, department: true, team: true, designation: true, employmentStatus: true, user: { select: { status: true } } };
+const GONE = ['Relieved', 'Exited'];
+const stillHere = (e) => (e.user ? e.user.status === 'Active' : true) && !GONE.includes(e.employmentStatus);
 
 // Everyone under this employee on the reporting line (their team, and their team's team).
 async function teamUnder(employeeId) {
@@ -48,7 +56,12 @@ async function reach(user) {
     const people = await prisma.employee.findMany({ where: { userId: { not: null } }, select: EMP_SELECT });
     return { mine, scope: 'all', people };
   }
-  const team = mine ? await teamUnder(mine.id) : [];
+  const byId = new Map((mine ? await teamUnder(mine.id) : []).map((e) => [e.id, e]));
+  if (mine && scopeOf(user).hrmsRole === 'TL' && !(user.caps && user.caps.hrmsSelfOnly)) {
+    const same = await prisma.employee.findMany({ where: { AND: [employeeWhere(user), { userId: { not: null } }] }, select: EMP_SELECT });
+    for (const e of same) if (e.id !== mine.id) byId.set(e.id, e);
+  }
+  const team = [...byId.values()];
   const people = [...(mine ? [mine] : []), ...team].filter((e) => e.userId);
   return { mine, scope: team.length ? 'team' : 'self', people };
 }
@@ -92,7 +105,7 @@ router.get('/', VIEW, async (req, res, next) => {
     const q = String(req.query.q || '').trim().toLowerCase().slice(0, 100);
     const byUser = new Map(people.map((p) => [p.userId, p]));
     const rows = await prisma.timesheetChecklist.findMany({
-      where: { date: { gte: date, lte: to }, userId: { in: [...byUser.keys()] }, ...(status ? { status } : {}) },
+      where: { date: { gte: date, lte: to }, userId: { in: [...byUser.keys()] } }, // status is applied below: it must not turn a person into 'not written'
       orderBy: [{ date: 'desc' }, { fromTime: 'asc' }, { createdAt: 'asc' }],
       take: 3000,
     });
@@ -101,14 +114,34 @@ router.get('/', VIEW, async (req, res, next) => {
       return { ...r, name: p.name || '', employeeCode: p.employeeCode || '', department: p.department || 'No department', team: p.team || '', mine: r.userId === req.user.id };
     };
     const all = rows.map(decorate);
-    const departments = [...new Set(all.map((r) => r.department))].sort().map((d) => ({ department: d, count: all.filter((r) => r.department === d).length }));
-    let shown = q ? all.filter((r) => `${r.description} ${r.name} ${r.employeeCode}`.toLowerCase().includes(q)) : all;
+    const ofStatus = status ? all.filter((r) => r.status === status) : all;
+    const departments = [...new Set(ofStatus.map((r) => r.department))].sort().map((d) => ({ department: d, count: ofStatus.filter((r) => r.department === d).length }));
+    let shown = q ? ofStatus.filter((r) => `${r.description} ${r.name} ${r.employeeCode}`.toLowerCase().includes(q)) : ofStatus;
     if (scope !== 'self' && req.query.department) shown = shown.filter((r) => r.department === req.query.department);
     if (scope !== 'self' && req.query.userId) shown = shown.filter((r) => r.userId === String(req.query.userId));
+    // Every person of the team for these days: how much each wrote (status and words filters do not make somebody "not written").
+    const roster = scope !== 'team' ? [] : people
+      .filter((p) => p.userId !== req.user.id)
+      .filter((p) => !req.query.department || (p.department || 'No department') === req.query.department)
+      .filter((p) => !req.query.userId || p.userId === String(req.query.userId))
+      .map((p) => {
+        const theirs = all.filter((r) => r.userId === p.userId);
+        return {
+          userId: p.userId, name: p.name, employeeCode: p.employeeCode, department: p.department || 'No department', team: p.team || '', designation: p.designation || '',
+          entries: theirs.length, days: new Set(theirs.map((r) => r.date)).size,
+          completed: theirs.filter((r) => r.status === 'Completed').length,
+          pending: theirs.filter((r) => r.status === 'Pending').length,
+          inProgress: theirs.filter((r) => r.status === 'In Progress').length,
+          current: stillHere(p),
+        };
+      })
+      .filter((p) => p.current || p.entries)
+      .sort((a, b) => (a.entries ? 1 : 0) - (b.entries ? 1 : 0) || a.name.localeCompare(b.name));
     res.json({
       date, to, today: istToday(), scope, statuses: STATUSES, canWrite: !!mine,
       departments,
-      people: scope === 'self' ? [] : people.map((p) => ({ userId: p.userId, name: p.name, employeeCode: p.employeeCode, department: p.department || 'No department' })).sort((a, b) => a.name.localeCompare(b.name)),
+      people: scope === 'self' ? [] : people.filter((p) => stillHere(p) || all.some((r) => r.userId === p.userId)).map((p) => ({ userId: p.userId, name: p.name, employeeCode: p.employeeCode, department: p.department || 'No department' })).sort((a, b) => a.name.localeCompare(b.name)),
+      roster,
       rows: shown,
     });
   } catch (err) { next(err); }
