@@ -19,7 +19,7 @@ param(
   [string]$Server = 'https://teamlink.teamlinks.in'
 )
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '1.5'
+$AgentVersion = '1.6'
 # older Windows would otherwise try an old, refused kind of secure connection
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, System.Security
@@ -53,6 +53,7 @@ if (-not $script:OneCopy.WaitOne(0)) {
 $Dir = Join-Path $env:APPDATA 'TeamLinkMonitor'
 $ConfigFile = Join-Path $Dir 'config.json'
 $QueueFile = Join-Path $Dir 'queue.json'
+$OpenFile = Join-Path $Dir 'open.json'   # the piece of activity still running: a shutdown or power cut loses none of it
 New-Item -ItemType Directory -Force -Path $Dir | Out-Null
 
 # ---------------------------------------------------------------- starting with Windows (the employee can switch it off in the icon's menu)
@@ -172,8 +173,20 @@ if (-not $cfg) { $cfg = Register; if (-not $cfg) { exit } }
 
 $settings = @{ workStart = '09:30'; workEnd = '18:30'; idleThresholdMinutes = 5 }
 $queue = New-Object System.Collections.ArrayList
-if (Test-Path $QueueFile) { try { (Get-Content $QueueFile -Raw | ConvertFrom-Json) | ForEach-Object { [void]$queue.Add($_) } } catch {} }
+# what was not sent last time, and the piece that was running when the PC went off: sent now
+function Restore-Saved {
+  if (Test-Path $QueueFile) { try { (Get-Content $QueueFile -Raw | ConvertFrom-Json) | ForEach-Object { [void]$script:queue.Add($_) } } catch {} }
+  if (Test-Path $OpenFile) {
+    try {
+      $o = Get-Content $OpenFile -Raw | ConvertFrom-Json
+      [void]$script:queue.Add(@{ appName = $o.app; windowTitle = $o.title; start = $o.start; end = $o.last; isIdle = [bool]$o.idle; isBreak = [bool]$o.brk })
+    } catch {}
+    Remove-Item -Path $OpenFile -ErrorAction SilentlyContinue
+  }
+}
+Restore-Saved
 $current = $null      # the open segment: app, title, idle, brk, start
+$lastSample = $null   # when the PC last looked: a long gap means it was asleep
 $paused = $false      # stopped by TeamLink (no consent, PC switched off)
 $onBreak = $false     # the employee pressed Pause: only the break itself is timed
 $clockedOutDay = ''   # the employee clocked out: nothing until the next day
@@ -182,28 +195,32 @@ function In-WorkHours {
   $now = (Get-Date).ToUniversalTime().AddMinutes(330).ToString('HH:mm')
   return ($now -ge $settings.workStart -and $now -lt $settings.workEnd)
 }
-function Close-Segment {
+function Save-Queue {
+  try {
+    if ($script:queue.Count) { ConvertTo-Json -InputObject @($script:queue) -Depth 4 | Set-Content -Path $QueueFile -Encoding UTF8 }
+    else { Remove-Item -Path $QueueFile -ErrorAction SilentlyContinue }
+  } catch {}
+}
+function Write-Open {
+  $c = $script:current
+  if (-not $c) { return }
+  try { @{ app = $c.app; title = $c.title; idle = $c.idle; brk = $c.brk; start = $c.start.ToString('o'); last = (Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json | Set-Content -Path $OpenFile -Encoding UTF8 } catch {}
+}
+# ends the open piece, now or at the moment given
+function Close-Segment($at = $null) {
   if ($script:current) {
-    $end = (Get-Date).ToUniversalTime()
+    $end = if ($at) { $at } else { (Get-Date).ToUniversalTime() }
     if (($end - $script:current.start).TotalSeconds -ge 1) {
       [void]$script:queue.Add(@{ appName = $script:current.app; windowTitle = $script:current.title; start = $script:current.start.ToString('o'); end = $end.ToString('o'); isIdle = $script:current.idle; isBreak = $script:current.brk })
+      Save-Queue
     }
     $script:current = $null
+    Remove-Item -Path $OpenFile -ErrorAction SilentlyContinue
   }
 }
 function Today-Ist { return (Get-Date).ToUniversalTime().AddMinutes(330).ToString('yyyy-MM-dd') }
-function Sample {
-  if ($script:clockedOutDay -and $script:clockedOutDay -ne (Today-Ist)) { $script:clockedOutDay = ''; Update-Menu }
-  if ($script:paused -or $script:clockedOutDay -or -not (In-WorkHours)) { Close-Segment; return }
-  if ($script:onBreak) {
-    # a break: only that it is a break and how long; no app, no title
-    $c = $script:current
-    if ($c -and $c.brk -and ((Get-Date).ToUniversalTime() - $c.start).TotalMinutes -lt 30) { return }
-    Close-Segment
-    $script:current = @{ app = 'Break'; title = ''; idle = $false; brk = $true; start = (Get-Date).ToUniversalTime() }
-    return
-  }
-  $idle = [TLWin]::IdleSeconds() -ge ([int]$settings.idleThresholdMinutes * 60)
+# what is in front now
+function Get-Front {
   $h = [TLWin]::GetForegroundWindow()
   $app = 'Desktop'; $title = ''
   if ($h -ne [IntPtr]::Zero) {
@@ -212,11 +229,42 @@ function Sample {
     $procId = 0; [void][TLWin]::GetWindowThreadProcessId($h, [ref]$procId)
     try { $app = (Get-Process -Id $procId -ErrorAction Stop).ProcessName } catch {}
   }
+  return @{ app = $app; title = $title }
+}
+function Sample {
+  $now = (Get-Date).ToUniversalTime()
+  # the timer stopped for a while: the PC was asleep. That time is nobody's work, so the open piece ends where the PC last looked.
+  if ($script:lastSample -and ($now - $script:lastSample).TotalSeconds -gt 90) { Close-Segment $script:lastSample }
+  $script:lastSample = $now
+  if ($script:clockedOutDay -and $script:clockedOutDay -ne (Today-Ist)) { $script:clockedOutDay = ''; Update-Menu }
+  if ($script:paused -or $script:clockedOutDay -or -not (In-WorkHours)) { Close-Segment; return }
+  if ($script:onBreak) {
+    # a break: only that it is a break and how long; no app, no title
+    $c = $script:current
+    if ($c -and $c.brk -and ($now - $c.start).TotalMinutes -lt 30) { Write-Open; return }
+    Close-Segment
+    $script:current = @{ app = 'Break'; title = ''; idle = $false; brk = $true; start = $now }
+    Write-Open
+    return
+  }
+  $inputAgo = [double][TLWin]::IdleSeconds()
+  $idle = $inputAgo -ge ([int]$settings.idleThresholdMinutes * 60)
+  $front = Get-Front
+  $app = $front.app; $title = $front.title
+  # a locked screen is never work: it is idle from the first moment, whatever the idle minutes
+  if ($app -in @('LockApp', 'LogonUI')) { $idle = $true; $app = 'Locked' }
   if ($idle) { $title = '' }
   $c = $script:current
-  if ($c -and $c.app -eq $app -and $c.title -eq $title -and $c.idle -eq $idle -and ((Get-Date).ToUniversalTime() - $c.start).TotalMinutes -lt 30) { return }
-  Close-Segment
-  $script:current = @{ app = $app; title = $title; idle = $idle; brk = $false; start = (Get-Date).ToUniversalTime() }
+  if ($c -and $c.app -eq $app -and $c.title -eq $title -and $c.idle -eq $idle -and ($now - $c.start).TotalMinutes -lt 30) { Write-Open; return }
+  $from = $now
+  if ($idle -and $c -and -not $c.idle -and -not $c.brk) {
+    # idle began when the mouse and keyboard stopped, not when the idle minutes ran out
+    $from = $now.AddSeconds(-$inputAgo)
+    if ($from -lt $c.start) { $from = $c.start }
+    Close-Segment $from
+  } else { Close-Segment }
+  $script:current = @{ app = $app; title = $title; idle = $idle; brk = $false; start = $from }
+  Write-Open
 }
 function Flush {
   Close-Segment   # send what is done so far; the next sample opens a new segment
@@ -232,7 +280,7 @@ function Flush {
     $script:paused = $true
   }
   if ($script:queue.Count -gt 5000) { $script:queue.RemoveRange(0, $script:queue.Count - 5000) }
-  try { $script:queue | ConvertTo-Json -Depth 4 | Set-Content -Path $QueueFile -Encoding UTF8 } catch {}
+  Save-Queue
 }
 function Ask-Consent($data) {
   $script:paused = $true

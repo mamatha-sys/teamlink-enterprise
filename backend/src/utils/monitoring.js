@@ -197,12 +197,24 @@ async function ingest(device, records) {
       startTime: new Date(a), endTime: new Date(b), durationSeconds: Math.round((b - a) / 1000), isIdle: r.isBreak !== true && (r.isIdle === true || r.idle === true), isBreak: r.isBreak === true, day,
     });
   }
-  for (let i = 0; i < rows.length; i += 200) {
+  // A batch can come twice (the answer was lost on a bad line, or the PC restarted right after sending): the same piece counts once.
+  const fresh = [];
+  if (rows.length) {
+    const times = rows.map((x) => x.startTime.getTime());
+    const have = await prisma.activityLog.findMany({ where: { deviceId: device.id, startTime: { gte: new Date(Math.min(...times)), lte: new Date(Math.max(...times)) } }, select: { startTime: true, appName: true } });
+    const seen = new Set(have.map((x) => `${new Date(x.startTime).getTime()}|${x.appName}`));
+    rows.forEach((x) => {
+      const k = `${x.startTime.getTime()}|${x.appName}`;
+      if (seen.has(k)) { skipped += 1; return; }
+      seen.add(k); fresh.push(x);
+    });
+  }
+  for (let i = 0; i < fresh.length; i += 200) {
     // eslint-disable-next-line no-await-in-loop
-    await prisma.activityLog.createMany({ data: rows.slice(i, i + 200) });
+    await prisma.activityLog.createMany({ data: fresh.slice(i, i + 200) });
   }
   await prisma.monitoringDevice.update({ where: { id: device.id }, data: { lastSeenAt: new Date() } }).catch(() => {});
-  return { status: 200, saved: rows.length, skipped };
+  return { status: 200, saved: fresh.length, skipped };
 }
 
 // A heartbeat: what the PC is doing now, for the Live Dashboard (the app's name only, never a title).

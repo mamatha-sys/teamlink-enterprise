@@ -41,3 +41,14 @@
 .mon .mon-bar input[type=search],.mon .mon-bar input:not([type]){width:280px;flex:0 1 280px}
 .mon .mon-bar input[type=date]{width:auto}
 .mon .mon-bar > .combo{width:210px;flex:0 1 210px}
+/* every tab the same width: the app widens a page only when it has KPI cards, so the tabs without them sat narrower and centred */
+main:has(.mon){max-width:1680px}
+/* Productivity rules: the rules need the room, the unmarked list beside them */
+.mon .mon-rules{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:14px;margin-top:14px;align-items:start}
+@media (max-width:1320px){.mon .mon-rules{grid-template-columns:minmax(0,1fr)}}
+.mon .mon-rules .ak-panel{min-width:0;overflow:hidden}
+.mon .mon-rules .mon-scroll{max-height:620px;overflow:auto}
+.mon .mon-rules .mon-table td{vertical-align:middle}
+.mon .mon-rules .mon-table .combo{width:160px;min-width:160px}
+.mon .mon-rules .mon-table td:nth-child(2),.mon .mon-rules .mon-table td:last-child{white-space:nowrap}
+.mon .mon-markall{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:0 16px 10px}

@@ -354,6 +354,17 @@ function Categories() {
     setMsg(''); setErr('');
     try { await api.post('/monitoring/app-categories', body); setMsg(`Saved: ${body.appName} is ${CAT_WORD[body.category].toLowerCase()}.`); setForm({ appName: '', kind: 'app', category: 'productive', department: '' }); reload(); } catch (e) { setErr(errOf(e, 'Could not save.')); }
   }
+  // every app in the "not marked" list at once
+  async function markAll(category) {
+    const list = (data && data.uncategorised) || [];
+    if (!list.length || !window.confirm(`Mark all ${list.length} as ${CAT_WORD[category]}?`)) return;
+    setMsg(''); setErr('');
+    try {
+      for (const u of list) await api.post('/monitoring/app-categories', { appName: u.appName, kind: 'app', category }); // eslint-disable-line no-await-in-loop
+      setMsg(`${list.length} app${list.length === 1 ? '' : 's'} marked ${CAT_WORD[category].toLowerCase()}.`);
+    } catch (e) { setErr(errOf(e, 'Could not save all of them.')); }
+    reload();
+  }
   async function change(row, category) {
     try { await api.put(`/monitoring/app-categories/${row.id}`, { category }); reload(); } catch (e) { setErr(errOf(e, 'Could not save.')); }
   }
@@ -381,26 +392,33 @@ function Categories() {
       </div>
       {msg && <div className="notice green">{msg}</div>}
       {(err || error) && <div className="notice red">{err || error}</div>}
-      <div className="mon-two">
-        <Panel title="Marked apps and websites" flush>
+      <div className="mon-rules">
+        <Panel title="Marked apps and websites" sub={data ? `${data.rows.length} rules` : undefined} flush>
+          <div className="mon-scroll">
           <table className="mon-table">
-            <thead><tr><th>App / website</th><th>Type</th><th>Department</th><th>Category</th><th>Set by</th><th /></tr></thead>
+            <thead><tr><th>App / website</th><th>Department</th><th>Category</th><th>Set by</th><th /></tr></thead>
             <tbody>
               {((data && data.rows) || []).map((r) => (
                 <tr key={r.id}>
-                  <td><b>{r.appName}</b></td>
-                  <td>{r.kind === 'site' ? 'Website' : 'App'}</td>
+                  <td><b>{r.appName}</b><div className="small-muted">{r.kind === 'site' ? 'Website' : 'App'}</div></td>
                   <td>{r.department || 'Every department'}</td>
                   <td>{pick(r.category, (v) => change(r, v), `Category of ${r.appName}`)}</td>
                   <td className="small-muted">{r.setBy || '—'}</td>
                   <td><button type="button" className="btn btn-sm btn-ghost" onClick={() => remove(r)}>Remove</button></td>
                 </tr>
               ))}
-              {data && !data.rows.length && <tr><td colSpan={6} className="small-muted">Nothing marked yet.</td></tr>}
+              {data && !data.rows.length && <tr><td colSpan={5} className="small-muted">Nothing marked yet.</td></tr>}
             </tbody>
           </table>
+          </div>
         </Panel>
-        <Panel title="Seen in the last 30 days, not marked" sub="Mark the ones used most" flush>
+        <Panel title="Seen in the last 30 days, not marked" sub="An app not marked lowers the score: mark the ones used most" flush>
+          {data && data.uncategorised.length > 1 && (
+            <div className="mon-markall">
+              <span className="small-muted">Mark all as:</span>
+              {['productive', 'neutral', 'unproductive'].map((c) => <button key={c} type="button" className="btn btn-sm" onClick={() => markAll(c)}>{CAT_WORD[c]}</button>)}
+            </div>
+          )}
           <table className="mon-table">
             <thead><tr><th>App</th><th className="num">Active</th><th>Mark as</th></tr></thead>
             <tbody>
