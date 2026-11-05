@@ -19,6 +19,11 @@ router.use(wrap(async (req, res, next) => { await A.warm(); next(); }));
 router.get('/me', wrap(async (req, res) => {
   const base = A.me(req.user);
   if (base.level === 'none') return res.status(403).json({ error: 'Omni-Channel is for the recruitment team, HR, Accounts (credits) and Admins.' });
+  // Green Start opens by department (utils/omniDeptLogins.js): a person whose department has no login yet keeps the native Omni-Channel in the sidebar, never a dead end
+  if (base.greenStart && !A.isAdmin(req.user)) {
+    const who = await require('../utils/omniDeptLogins').loginFor(req.user).catch(() => null); // eslint-disable-line global-require
+    if (!who || who.blocked) base.greenStart = false;
+  }
   const month = Cr.thisMonth();
   let credits = null;
   try {

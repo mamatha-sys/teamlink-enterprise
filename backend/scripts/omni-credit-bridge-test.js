@@ -27,6 +27,7 @@ const ask = (viewer, month = Cr.thisMonth()) => Z.call('GET', `/api/public/omni-
   const DEPT = `ZZTEST SCB Dept ${Z.RUN}`;
   const OTHER = `ZZTEST SCB Other ${Z.RUN}`;
   const positions = [];
+  let savedLogins = null;
   try {
     if (String(process.env.GREENSTART_SSO_SECRET || '').length < 32) { Z.check('the sandbox has the shared secret', false, 'GREENSTART_SSO_SECRET missing'); return; }
     const noToken = await Z.call('GET', '/api/public/omni-voice/credit-use?month=2026-11&viewer=x');
@@ -75,6 +76,19 @@ const ask = (viewer, month = Cr.thisMonth()) => Z.call('GET', `/api/public/omni-
     const row = (all.company || []).find((c) => c.userId === r1.id);
     Z.check('B5 company rows are ids and numbers only; workspaces is a map; cost comes from Credits', row && Object.keys(row).sort().join() === 'credits,joinings,userId' && row.credits === 3 && typeof all.workspaces === 'object' && all.cost && all.cost.whatsapp >= 0, row);
 
+    // B6 needs the sandbox started with GREENSTART_ALL_ROLES=1: a department with no Omni-Channel login keeps the native sidebar, a department with one opens Green Start
+    if (/^(1|true|yes|on)$/i.test(String(process.env.GREENSTART_ALL_ROLES || ''))) {
+      const KEY = 'omni.gs.deptLogins';
+      savedLogins = await prisma.appSetting.findUnique({ where: { key: KEY } });
+      await prisma.appSetting.deleteMany({ where: { key: KEY } });
+      const none = await Z.call('GET', '/api/outreach/me', await Z.mint(r1));
+      await prisma.appSetting.create({ data: { key: KEY, value: JSON.stringify({ departments: { [DEPT.toLowerCase()]: { state: 'ready', email: 'zz-scb-dept@example.test', dept: DEPT, workspace: 'ZZTEST' } } }) } });
+      const ready = await Z.call('GET', '/api/outreach/me', await Z.mint(r1));
+      const other = await Z.call('GET', '/api/outreach/me', await Z.mint(r3));
+      const boss = await Z.call('GET', '/api/outreach/me', await Z.mint(admin));
+      Z.check('B6 Recruiter: no department login = native Omni-Channel; with one = Green Start; another department stays native; Admin always Green Start', none.body.greenStart === false && ready.body.greenStart === true && other.body.greenStart === false && boss.body.greenStart === true, [none.body.greenStart, ready.body.greenStart, other.body.greenStart, boss.body.greenStart]);
+    } else Z.check('B6 skipped: start the sandbox with GREENSTART_ALL_ROLES=1', false);
+
     await prisma.user.update({ where: { id: r2.id }, data: { status: 'Inactive' } });
     const gone = (await ask(r2.id)).body;
     Z.check('B1b an inactive login is refused', gone.ok === false && gone.code === 'VIEWER_UNKNOWN', gone);
@@ -83,6 +97,8 @@ const ask = (viewer, month = Cr.thisMonth()) => Z.call('GET', `/api/public/omni-
       await prisma.$executeRawUnsafe('DELETE FROM "OmniCreditLedger" WHERE source = \'zz-scb\'');
       await prisma.positionAssignment.deleteMany({ where: { positionId: { in: positions } } });
       await prisma.position.deleteMany({ where: { id: { in: positions } } });
+      await prisma.appSetting.deleteMany({ where: { key: 'omni.gs.deptLogins' } });
+      if (savedLogins) await prisma.appSetting.create({ data: savedLogins });
     } catch (e) { console.log('cleanup failed:', String(e.message).slice(-200)); }
     await Z.cleanup().catch((e) => console.log('cleanup problem', String(e.message).slice(0, 160)));
     console.log(`\n${Z.pass} passed, ${Z.fail} failed`);
