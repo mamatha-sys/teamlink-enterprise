@@ -21,7 +21,7 @@ param(
   [switch]$AfterUpdate       # started by its own older copy, which is closing
 )
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '1.8'
+$AgentVersion = '1.9'
 # older Windows would otherwise try an old, refused kind of secure connection
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, System.Security
@@ -274,7 +274,8 @@ function Sample {
   Write-Open
 }
 function Flush {
-  Close-Segment   # send what is done so far; the next sample opens a new segment
+  Close-Segment   # send what is done so far
+  Sample          # and go straight on: a heartbeat right after this must still say what is in front
   if ($script:queue.Count -eq 0) { return }
   $batch = @($script:queue | Select-Object -First 400)
   $r = Call-Api 'POST' '/activity' @{ records = $batch } $script:cfg.token
@@ -355,6 +356,7 @@ $tray.ShowBalloonTip(6000, 'TeamLink', 'Recording PC use in work hours: app name
 # the icon above is what shows it is running: the black window goes, so closing it by mistake does not stop the agent
 try { [void][TLWin]::ShowWindow([TLWin]::GetConsoleWindow(), 0) } catch {}
 
+Sample   # so the very first heartbeat already says what is in front
 Heartbeat
 $sampleTimer = New-Object Windows.Forms.Timer; $sampleTimer.Interval = 15000; $sampleTimer.Add_Tick({ try { Sample } catch {} }); $sampleTimer.Start()
 $flushTimer = New-Object Windows.Forms.Timer; $flushTimer.Interval = 120000; $flushTimer.Add_Tick({ try { Flush } catch {} }); $flushTimer.Start()
