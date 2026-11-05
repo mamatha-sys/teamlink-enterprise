@@ -67,19 +67,19 @@ function parseScript(raw, lim = {}) {
 const HUMAN = {
   English: {
     ack: ['Okay.', 'Alright.', 'Sure.', 'Okay, thanks.', 'Right.'], no: ['Alright, no problem.', 'Okay, understood.', 'Sure, that is fine.'],
-    noted: 'I will note that for our team.',
+    noted: 'That is a good question. I do not have that detail in front of me, but our recruiter will confirm it with you directly.',
     reason: 'I understand. May I ask why? If something about the role is the concern, I will note it for our team.',
     sorry: ['Sorry, could you say that once more?', 'Sorry, I missed that. Could you repeat?', 'Sorry, the line is not clear. One more time please?'], hear: 'Hello? Can you hear me okay?',
   },
   Telugu: {
     ack: ['సరే.', 'సరే అండి.', 'బాగుంది.', 'ఓకే అండి.'], no: ['సరే, పర్వాలేదు అండి.', 'సరే అండి, అర్థమైంది.'],
-    noted: 'ఆ విషయం మా టీమ్‌కి తెలియజేస్తాను.',
+    noted: 'మంచి ప్రశ్న అండి. ఆ వివరం నా దగ్గర లేదు, మా రిక్రూటర్ మీకు నేరుగా చెప్తారు.',
     reason: 'అర్థమైంది అండి. కారణం చెప్పగలరా? ఏదైనా సమస్య ఉంటే మా టీమ్ కి తెలియజేస్తాను.',
     sorry: ['క్షమించండి, ఇంకోసారి చెప్తారా?', 'సారీ అండి, సరిగ్గా వినపడలేదు. మళ్ళీ చెప్తారా?', 'క్షమించండి, లైన్ సరిగా లేదు. ఇంకోసారి చెప్పండి.'], hear: 'హలో? నేను చెప్పేది వినపడుతోందా?',
   },
   Hindi: {
     ack: ['ठीक है।', 'जी, ठीक है।', 'अच्छा।', 'जी।'], no: ['ठीक है, कोई बात नहीं।', 'जी, समझ गया।'],
-    noted: 'यह बात मैं अपनी टीम को बता दूँगा।',
+    noted: 'अच्छा सवाल है। यह जानकारी अभी मेरे पास नहीं है, हमारे रिक्रूटर आपको सीधे बताएँगे।',
     reason: 'समझ गया। क्या मैं कारण जान सकता हूँ? अगर भूमिका में कोई समस्या है तो मैं अपनी टीम को बता दूँगा।',
     sorry: ['माफ़ कीजिए, एक बार फिर से बोलेंगे?', 'सॉरी, ठीक से सुनाई नहीं दिया। दोबारा बोलिए।', 'माफ़ कीजिए, आवाज़ साफ़ नहीं आ रही। एक बार और बोलिए।'], hear: 'हैलो? आपको मेरी आवाज़ आ रही है?',
   },
@@ -126,14 +126,15 @@ class ScriptDialogue extends D.Dialogue {
   get declineLine() { const t = this.declines[this.language] || this.declines[this.scriptLanguage]; return t ? fillWith(t, this.data) : null; }
 
   // the person's objection (pay, distance, experience, already working, "is this real?") answered once each; experience closes the call kindly
-  objectionFor(text, first = false) {
+  objectionFor(text, first = false, only = null) {
     const st = this.st;
-    const ob = vacancy.objection(this.facts, text, this.language, st.objUsed || []);
+    const ob = vacancy.objection(this.facts, text, this.language, st.objUsed || [], only);
     if (!ob) return null;
     st.objUsed = [...(st.objUsed || []), ob.key];
     st.declineReason = S.clean(text, 120);
     if (ob.key === 'salary') st.salaryPitched = true;
-    if (ob.end) { st.interest = 'no'; return this.endWith('Not Interested', 'experience does not match', ob.say); }
+    if (ob.key === 'family') { st.callback = true; st.callbackWhen = 'in two days (wants to discuss with the family)'; return this.endWith('Call Back Later', ob.why, ob.say); }
+    if (ob.end) { st.interest = 'no'; if (ob.key === 'experience') st.oq = true; return this.endWith('Not Interested', ob.why, ob.say); }
     return { say: this.speak(ob.say), done: false };
   }
 
@@ -148,6 +149,8 @@ class ScriptDialogue extends D.Dialogue {
     this.st.pitchCount = n + 1;
     return pitches[n];
   }
+
+  roleAt(i) { return this.facts ? vacancy.roles(this.facts)[i] || null : null; }
 
   get steps() { return this.byLang[this.language] || this.byLang[this.scriptLanguage]; }
 
@@ -265,6 +268,11 @@ class ScriptDialogue extends D.Dialogue {
       if (k.intent === 'no') { st.wrong = true; return this.endWith('Unclear', 'wrong person', this.P.closeUnclear); }
       st.identity = true;
     } else {
+      const role = this.roleAt(sc.idx);
+      // after the budget was said ("would you still like to proceed?") and after the summary ("is that correct?")
+      let followUp = false; let fixed = false;
+      if (st.budgetAsk) { st.budgetAsk = false; followUp = true; if (k.intent === 'no') { st.interest = 'no'; st.declineReason = 'salary expectation is above the budget'; return this.endWith('Not Interested', 'salary expectation is above the budget', this.declineLine || (this.ackText(k, cur) + (this.steps[this.steps.length - 1].kind === 'closing' ? ` ${this.line(this.steps.length - 1)}` : ''))); } }
+      if (st.summaryAsk) { st.summaryAsk = false; followUp = true; if (k.intent === 'no') { fixed = true; st.corrections = [...(st.corrections || []), S.clean(text, 120)]; } }
       // a question the script cannot answer from verified facts is noted for the recruiter, never answered from memory
       if (this.facts && st.pitchAt !== sc.idx && (k.intent === 'info_q' || k.intent === 'salary_q' || k.intent === 'other_cand' || (k.intent === 'unclear' && vacancy.answer(this.facts, text, this.language, true))) && vacancy.answer(this.facts, text, this.language)) {
         turn.understood = 'question_noted';
@@ -277,6 +285,8 @@ class ScriptDialogue extends D.Dialogue {
         const h = HUMAN[this.language] || HUMAN.English;
         return { say: this.speak(this.facts ? h.noted : '', cur.kind === 'ask' || cur.kind === 'interest' ? this.line(sc.idx) : this.again()), done: false }; // the question again; the person's own question is for the team
       }
+      // "I must discuss with my family", "I am preparing for higher studies", "only work from home": answered by what the person said, whichever the question was
+      if (this.facts && !followUp && (cur.kind === 'ask' || cur.kind === 'interest')) { const ob = this.objectionFor(text, false, ['family', 'studies', 'wfh']); if (ob) return ob; }
       // "do you have a minute / can we talk?" answered with a no: one try to convince, then a kind close
       const permissionAsk = cur.kind === 'ask' && sc.idx === this.steps.findIndex((x) => x.kind === 'ask' || x.kind === 'interest') && /minute|moment|spare|convenient|talk|time/i.test(cur.text);
       if (permissionAsk && k.intent === 'no') {
@@ -312,17 +322,32 @@ class ScriptDialogue extends D.Dialogue {
           st.interest = 'unsure';
         }
       }
-      sc.got.push({ q: this.line(sc.idx), a: S.clean(text, 160) });
+      if (!followUp) {
+        sc.got.push({ q: this.line(sc.idx), a: S.clean(text, 160) });
+        if (role && ['loc', 'exp', 'edu', 'work', 'sal'].includes(role)) { st.ans = st.ans || {}; st.ans[role] = S.clean(text, 50); }
+        if (role === 'lang') { const pick = vacancy.chosenLanguage(text); if (pick && pick !== this.language && this.byLang[pick]) { this.setLanguage(pick); st.switched = (st.switched || 0) + 1; } }
+        // the expected pay is above the budget: said kindly, with a question whether to go on
+        if (role === 'sal' && !st.budgetSaid && vacancy.overBudget(this.facts, text)) { st.budgetSaid = true; st.budgetAsk = true; st.expected = S.clean(text, 80); return { say: this.speak(this.ackText(k, cur), vacancy.budgetLine(this.facts, this.language)), done: false }; }
+      }
+      if (fixed) st.fixedSaid = true;
     }
     // on to the next question (Say lines are spoken with it); no more questions: the closing
     const nxt = this.upTo(sc.idx + 1);
+    // before the last step: what was noted is read back and confirmed
+    const ansKeys = Object.keys(st.ans || {}).filter((x) => st.ans[x] && st.ans[x].length >= 2);
+    if (this.facts && !st.summed && ansKeys.length >= 2 && nxt.closing === undefined && this.roleAt(nxt.stopAt) === 'next') {
+      st.summed = true; st.summaryAsk = true;
+      return { say: this.speak(this.ackText(k, cur), vacancy.summaryLine(st.ans, this.language)), done: false };
+    }
     if (nxt.closing !== undefined || nxt.stopAt >= this.steps.length) {
       const outcome = st.interest === 'no' ? 'Not Interested' : (st.interest === 'yes' ? 'Interested' : 'Unclear');
       return this.endWith(outcome, 'script finished', S.clean([this.ackText(k, cur), ...nxt.parts, nxt.closing].filter(Boolean).join(' '), 3000) || undefined);
     }
     sc.idx = nxt.stopAt;
     sc.silent = 0;
-    const word = this.facts && vacancy.isLocQuestion(cur.text) && vacancy.near(this.facts, text) ? vacancy.nearAck(this.facts, this.language) : this.ackText(k, cur);
+    let word = this.facts && vacancy.isLocQuestion(cur.text) && vacancy.near(this.facts, text) ? vacancy.nearAck(this.facts, this.language) : this.ackText(k, cur);
+    if (this.facts && vacancy.roles(this.facts)[this.steps.indexOf(cur)] === 'work' && vacancy.noticeLong(text)) word = vacancy.noticeLine(this.language);
+    if (st.fixedSaid) { word = vacancy.summaryFix(this.language); st.fixedSaid = false; }
     return { say: this.speak(word, ...nxt.parts), done: false };
   }
 
@@ -336,11 +361,13 @@ class ScriptDialogue extends D.Dialogue {
 
   summaryText() {
     const st = this.st;
-    const code = st.stop ? 'DNC' : (st.wrong ? 'WN' : (st.callback ? 'CB' : (st.interest === 'yes' ? 'INT' : (st.interest === 'no' ? 'NI' : (st.transcript.some((x) => x.who === 'candidate') ? 'NR' : 'NR')))));
+    const code = st.stop ? 'DNC' : (st.wrong ? 'WN' : (st.oq ? 'OQ' : (st.callback ? 'CB' : (st.interest === 'yes' ? 'INT' : (st.interest === 'no' ? 'NI' : (st.transcript.some((x) => x.who === 'candidate') ? 'NR' : 'NR'))))));
     const bits = [`Disposition: ${code}${st.interest === 'no' && st.declineReason ? ` (reason: ${S.clean(st.declineReason, 60)})` : ''}.`, `AI call by the team's script "${this.scriptName}" (${this.language}).`];
     if (st.wrong) bits.push('Wrong person on the line. No details were shared.');
     else bits.push(st.identity ? 'Name confirmed.' : 'The person did not confirm their name.');
     if (st.interest === 'yes') bits.push('Interested.'); else if (st.interest === 'no') bits.push('Not interested.'); else if (st.interest === 'unsure') bits.push('Not sure about the job.');
+    if (st.expected) bits.push(`Expected pay above the budget: "${st.expected}" (for the recruitment team).`);
+    if (st.corrections && st.corrections.length) bits.push(`Correction to the details: ${st.corrections.join(' | ')}.`);
     (st.script.got || []).forEach((g) => bits.push(`${S.clean(g.q, 70)} → "${S.clean(g.a, 70)}".`));
     if (st.callback) bits.push(`Asked for a call back${st.callbackWhen ? `: ${st.callbackWhen}` : ''}.`);
     if (st.human) bits.push('Asked to speak to a recruiter.');
