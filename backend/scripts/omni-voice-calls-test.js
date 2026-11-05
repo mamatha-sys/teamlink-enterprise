@@ -213,11 +213,11 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const vd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(vr.id));
     const fv0 = vd.start().say; const fv1 = (await vd.hear('hello')).say; const fv2 = (await vd.hear('yes tell me')).say;
     const fv3 = (await vd.hear('what is the salary?')).say; const fv4 = (await vd.hear('yes interested')).say;
-    const fvL = (await vd.hear('I stay in Kukatpally')).say; const fvE = (await vd.hear('3 years')).say; const fvQ = (await vd.hear('B.Com')).say; const fvD = (await vd.hear('no doubts')).say;
+    const fvL = (await vd.hear('I stay in Kukatpally')).say; const fvE = (await vd.hear('3 years')).say; const fvQ = (await vd.hear('B.Com')).say; const fvW = (await vd.hear('I am working, my notice period is one month')).say; const fvS = (await vd.hear('current ten thousand, expected twelve thousand')).say; const fvD = (await vd.hear('no doubts')).say;
     const fv5 = await vd.hear('tomorrow at five');
     check('the call is built from the facts: greeting, one minute?, the vacancy, interested?', /^Hello Sravanthi, good morning\. This is an automated AI assistant calling from Teamlink Consultants on behalf of Anil Ravali/.test(fv0) && /one minute/.test(fv1) && /We have an opening for HR Recruiter\. The location is Kukatpally\. The salary is 10 thousand per month/.test(fv2) && /Are you interested in this opportunity\?$/.test(fv2), { fv0, fv1, fv2 });
     check('a question about the salary is answered from the facts, then the question is asked again', /^The salary is 10 thousand per month\. Are you interested/.test(fv3), fv3);
-    check('interested: the candidate is asked where they are, experience, education, doubts - "close to you" when the place is the job place - then the next step and the closing', /Where are you currently located/.test(fv4) && /^That is good, Kukatpally is close to you. How many years of experience/.test(fvL) && /highest qualification/.test(fvE) && /any doubts about this job/.test(fvQ) && /call you to explain the next steps/.test(fvD) && fv5.done === true && /Thank you, Sravanthi\. For any queries, please contact Anil Ravali/.test(fv5.say), { fv4, fvL, fvE, fvQ, fvD, fv5 });
+    check('interested: the candidate is asked where they are, experience, education, doubts - "close to you" when the place is the job place - then the next step and the closing', /Where are you currently located/.test(fv4) && /^That is good, Kukatpally is close to you. How many years of relevant experience/.test(fvL) && /highest qualification/.test(fvE) && /currently working.{1,3}If so, what is your notice period/.test(fvQ) && /current salary, and what do you expect/.test(fvW) && /any doubts about this job/.test(fvS) && /call you to explain the next steps/.test(fvD) && fv5.done === true && /Thank you, Sravanthi\. For any queries, please contact Anil Ravali/.test(fv5.say), { fv4, fvL, fvE, fvQ, fvW, fvS, fvD, fv5 });
     const vr2 = await omni.create({ externalId: 'vac2', toNumber: '9222333302', name: 'Ravi Kumar', script: FACTS }, { ...deps, ami: AMI });
     const vd2 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(vr2.id)); vd2.start();
     const t1 = await vd2.hear('అవును చెప్పండి', { heard: 'clear', lang: 'Telugu' });
@@ -258,7 +258,27 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const ld = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(lr.id)); ld.start();
     const l1 = await ld.hear('', { heard: 'unclear' });
     check('the first reply, even when its words were not caught, goes on to the first question (no "can you hear me?")', /one minute/.test(l1.say) && !/Can you hear me/.test(l1.say), l1);
-    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 24, { before, now: originated.length });
+    // OBJECTIONS by kind, BUSY -> a better time, DISPOSITION codes (the founder's pasted recruiter script, 2026-11-05)
+    const talk = async (ext, num, steps) => {
+      const r0 = await omni.create({ externalId: ext, toNumber: num, name: 'Kiran', script: FACTS + '; Persuasion: this role gives wide exposure to hiring and operations' }, { ...deps, ami: AMI });
+      const dd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(r0.id)); dd.start();
+      const outs = []; for (const t of steps) outs.push(await dd.hear(t)); return { dd, outs };
+    };
+    const o1 = await talk('obj1', '9111222201', ['hello', 'yes', 'no', 'it is too far for me', 'yes I can relocate']);
+    check('"too far": asked if they can relocate; a yes goes on with their details', /May I know what the problem is/.test(o1.outs[2].say) && /relocating for the right opportunity/.test(o1.outs[3].say) && /currently located/.test(o1.outs[4].say), o1.outs.map((x) => x.say));
+    const o2 = await talk('obj2', '9111222202', ['hello', 'yes', 'no', 'I do not have that much experience']);
+    check('"not enough experience": noted kindly and the call ends (Not Interested, with the reason)', o2.outs[3].done === true && /noted that/.test(o2.outs[3].say) && o2.dd.outcome().outcome === 'Not Interested', o2.outs[3]);
+    const o3 = await talk('obj3', '9111222203', ['hello', 'yes', 'no', 'I am already working in a company', 'no']);
+    check('"already working": think of it as exploring, no cost; a no then closes kindly', /just exploring an option/.test(o3.outs[3].say) && o3.outs[4].done === true, o3.outs.map((x) => x.say));
+    const o4 = await talk('obj4', '9111222204', ['hello', 'yes', 'no', 'is this a real job or fake']);
+    check('"is this real?": a confirmed opening, details on WhatsApp to verify', /confirmed opening with Teamlink Consultants in Kukatpally/.test(o4.outs[3].say) && /WhatsApp/.test(o4.outs[3].say), o4.outs[3]);
+    const o5 = await talk('obj5', '9111222205', ['hello', 'yes', 'no', 'the salary is low']);
+    check('"salary low": the recruiter\'s own upside is said, then the interview and the chance of an increase', /wide exposure to hiring and operations/.test(o5.outs[3].say) && /chance of an increase/.test(o5.outs[3].say), o5.outs[3]);
+    const o6 = await talk('bz1', '9111222206', ['hello', 'call me later I am busy', 'tomorrow at five in the evening']);
+    check('busy: asked for a better time, the answer is kept and the call ends (Call Back Later)', /better time to call you back/.test(o6.outs[1].say) && o6.outs[2].done === true && /I will call you then/.test(o6.outs[2].say) && o6.dd.outcome().outcome === 'Call Back Later' && /Disposition: CB/.test(o6.dd.outcome().summary), { a: o6.outs[1].say, b: o6.outs[2].say, s: o6.dd.outcome().summary });
+    const o7 = await talk('dc1', '9111222207', ['hello', 'yes', 'yes interested']);
+    check('the summary starts with the disposition code (INT / NI / CB / WN / DNC / NR)', /^Disposition: INT/.test(o7.dd.outcome().summary) && /^Disposition: NI/.test(o2.dd.outcome().summary), { a: o7.dd.outcome().summary.slice(0, 60), b: o2.dd.outcome().summary.slice(0, 60) });
+    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 31, { before, now: originated.length });
     check('Asterisk refusing the call fails it in words (and leaves a failed row)', await (async () => { const x = await refuse({ toNumber: '9333333333' }, { ...deps, ami: { action: async () => ({ Response: 'Error', Message: 'no trunk' }) } }); return !x.ok && x.code === 'not_dialled'; })());
   } finally {
     await prisma.$disconnect().catch(() => {});

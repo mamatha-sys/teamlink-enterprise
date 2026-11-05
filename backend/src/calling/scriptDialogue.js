@@ -125,9 +125,21 @@ class ScriptDialogue extends D.Dialogue {
   // what is said when the person is not interested (the script's own "Decline" line, in the language of the call)
   get declineLine() { const t = this.declines[this.language] || this.declines[this.scriptLanguage]; return t ? fillWith(t, this.data) : null; }
 
+  // the person's objection (pay, distance, experience, already working, "is this real?") answered once each; experience closes the call kindly
+  objectionFor(text, first = false) {
+    const st = this.st;
+    const ob = vacancy.objection(this.facts, text, this.language, st.objUsed || []);
+    if (!ob) return null;
+    st.objUsed = [...(st.objUsed || []), ob.key];
+    st.declineReason = S.clean(text, 120);
+    if (ob.key === 'salary') st.salaryPitched = true;
+    if (ob.end) { st.interest = 'no'; return this.endWith('Not Interested', 'experience does not match', ob.say); }
+    return { say: this.speak(ob.say), done: false };
+  }
+
   // when the person says no: the script's own "Convince" lines, one at a time; with none, one question - why? - so the reason is heard and noted for the team
   nextPitch() {
-    if (this.st.salaryPitched) return null; // the pay was answered (the interview): no further try
+    if (this.st.salaryPitched || (this.st.objUsed && this.st.objUsed.length)) return null; // the objection was answered: no further try
     const list = this.convinces[this.language] || this.convinces[this.scriptLanguage] || [];
     const own = list.map((t) => fillWith(t, this.data));
     const pitches = own.length ? own.slice(0, 2) : [(HUMAN[this.language] || HUMAN.English).reason];
@@ -233,8 +245,14 @@ class ScriptDialogue extends D.Dialogue {
     if (k.intent === 'stop') { st.stop = true; return this.endWith('Not Interested', 'asked not to be called again', this.P.closeNotInterested); }
     if (k.intent === 'cant_hear') return { say: this.speak(this.again()), done: false };
     if (k.intent === 'repeat') return { say: this.speak(this.again()), done: false };
+    // a call back time that was asked for: the answer is the time
+    if (st.cbAsked && !st.cbDone) {
+      st.cbDone = true; st.callback = true; st.callbackWhen = S.clean(text, 120);
+      return this.endWith('Call Back Later', 'gave a time for a call back', vacancy.callbackOk(this.language));
+    }
     // (when the script itself asks what time suits the person, "tomorrow at five" is the answer to that, not a request to be called later)
     const asksTime = cur.kind === 'ask' && /\b(time|when|convenient|available|slot|which day|what day)\b|సమయం|समय|कब/i.test(cur.text);
+    if (k.intent === 'later' && !asksTime && this.facts && !st.cbAsked) { st.cbAsked = true; return { say: this.speak(vacancy.callbackQuestion(this.language)), done: false }; }
     if (k.intent === 'later' && !asksTime) { st.callback = true; st.callbackWhen = S.clean(text, 120); return this.endWith('Call Back Later', 'asked for a call back', this.P.laterClose); }
     if (k.human || k.intent === 'human') return this.endWith('Call Back Later', 'asked for a recruiter', this.P.humanNoted);
 
@@ -258,8 +276,9 @@ class ScriptDialogue extends D.Dialogue {
       // "do you have a minute / can we talk?" answered with a no: one try to convince, then a kind close
       const permissionAsk = cur.kind === 'ask' && sc.idx === this.steps.findIndex((x) => x.kind === 'ask' || x.kind === 'interest') && /minute|moment|spare|convenient|talk|time/i.test(cur.text);
       if (permissionAsk && k.intent === 'no') {
-        if (st.pitchAt === sc.idx && this.facts && !st.salaryPitched && vacancy.salaryReason(text)) { st.salaryPitched = true; st.declineReason = S.clean(text, 120); return { say: this.speak(vacancy.salaryPitch(this.facts, this.language)), done: false }; }
+        if (st.pitchAt === sc.idx && this.facts) { const ob = this.objectionFor(text); if (ob) return ob; }
         if (st.pitchAt === sc.idx) { st.declineReason = S.clean(text, 120); st.interest = 'no'; return this.endWith('Not Interested', 'did not want to talk', this.declineLine || (this.ackText(k, cur) + (this.steps[this.steps.length - 1].kind === 'closing' ? ` ${this.line(this.steps.length - 1)}` : ''))); }
+        if (this.facts && !st.pitchAt) { const ob = this.objectionFor(text, true); if (ob) { st.pitchAt = sc.idx; return ob; } }
         const pitch = this.nextPitch();
         if (pitch) { st.pitchAt = sc.idx; st.declineReason = S.clean(text, 120); return { say: this.speak(pitch), done: false }; }
       }
@@ -270,7 +289,7 @@ class ScriptDialogue extends D.Dialogue {
           return { say: this.speak((HUMAN[this.language] || HUMAN.English).sorry[0], this.again()), done: false };
         }
         if (st.pitchAt === sc.idx && k.intent !== 'yes' && k.intent !== 'maybe') {
-          if (this.facts && !st.salaryPitched && vacancy.salaryReason(text)) { st.salaryPitched = true; st.declineReason = S.clean(text, 120); return { say: this.speak(vacancy.salaryPitch(this.facts, this.language)), done: false }; }
+          if (this.facts) { const ob = this.objectionFor(text); if (ob) return ob; }
           st.declineReason = S.clean(text, 120);
           const more = this.nextPitch();
           if (more) return { say: this.speak(more), done: false };
@@ -278,6 +297,7 @@ class ScriptDialogue extends D.Dialogue {
           return this.endWith('Not Interested', 'not interested', this.declineLine || (this.ackText(k, cur) + (this.steps[this.steps.length - 1].kind === 'closing' ? ` ${this.line(this.steps.length - 1)}` : '')));
         }
         if (k.intent === 'no') {
+          if (this.facts && st.pitchAt !== sc.idx) { const ob = this.objectionFor(text, true); if (ob) { st.pitchAt = sc.idx; return ob; } }
           const pitch = this.nextPitch();
           if (pitch) { st.pitchAt = sc.idx; st.declineReason = S.clean(text, 120); return { say: this.speak(pitch), done: false }; } st.interest = 'no'; st.declineReason = S.clean(text, 120); sc.got.push({ q: this.line(sc.idx), a: S.clean(text, 160) }); return this.endWith('Not Interested', 'not interested', this.declineLine || (this.ackText(k, cur) + (this.steps[this.steps.length - 1].kind === 'closing' ? ` ${this.line(this.steps.length - 1)}` : ''))); }
         if (k.intent === 'yes') st.interest = 'yes';
@@ -312,7 +332,8 @@ class ScriptDialogue extends D.Dialogue {
 
   summaryText() {
     const st = this.st;
-    const bits = [`AI call by the team's script "${this.scriptName}" (${this.language}).`];
+    const code = st.stop ? 'DNC' : (st.wrong ? 'WN' : (st.callback ? 'CB' : (st.interest === 'yes' ? 'INT' : (st.interest === 'no' ? 'NI' : (st.transcript.some((x) => x.who === 'candidate') ? 'NR' : 'NR')))));
+    const bits = [`Disposition: ${code}${st.interest === 'no' && st.declineReason ? ` (reason: ${S.clean(st.declineReason, 60)})` : ''}.`, `AI call by the team's script "${this.scriptName}" (${this.language}).`];
     if (st.wrong) bits.push('Wrong person on the line. No details were shared.');
     else bits.push(st.identity ? 'Name confirmed.' : 'The person did not confirm their name.');
     if (st.interest === 'yes') bits.push('Interested.'); else if (st.interest === 'no') bits.push('Not interested.'); else if (st.interest === 'unsure') bits.push('Not sure about the job.');
