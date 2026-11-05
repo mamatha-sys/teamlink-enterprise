@@ -264,6 +264,10 @@ class ScriptDialogue extends D.Dialogue {
       }
       if (cur.kind === 'interest') {
         // after a try to convince: a yes goes on; a no, or the reason, gets the next try, and when there is none left the call is closed kindly
+        if (st.pitchAt === sc.idx && k.intent === 'unclear' && !st.pitchRetry && S.clean(text, 200).split(/\s+/).length < 3) {
+          st.pitchRetry = 1;
+          return { say: this.speak((HUMAN[this.language] || HUMAN.English).sorry[0], this.again()), done: false };
+        }
         if (st.pitchAt === sc.idx && k.intent !== 'yes' && k.intent !== 'maybe') {
           if (this.facts && !st.salaryPitched && vacancy.salaryReason(text)) { st.salaryPitched = true; st.declineReason = S.clean(text, 120); return { say: this.speak(vacancy.salaryPitch(this.facts, this.language)), done: false }; }
           st.declineReason = S.clean(text, 120);

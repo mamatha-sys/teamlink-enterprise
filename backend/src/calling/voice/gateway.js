@@ -57,6 +57,7 @@ const MIN_LEVEL = Math.min(800, Math.max(100, num(process.env.AI_VOICE_MIN_LEVEL
 const CITY_HINT = ' Hyderabad, Secunderabad, Bangalore, Chennai, Vijayawada, Visakhapatnam, Warangal, Guntur, Kakinada, Tirupati, Nellore, Karimnagar, Pune, Mumbai, Delhi, Kolkata.';
 // how long a pause ends the answer (founder 2026-11-02: "conversation lo gap theeskuntundhi"): 750 / 1150 ms -> 600 / 950 ms
 const END_YESNO_MS = Math.min(2000, Math.max(400, num(process.env.AI_VOICE_END_YESNO_MS, 600)));
+const END_SCRIPT_MS = Math.min(3000, Math.max(600, num(process.env.AI_VOICE_END_SCRIPT_MS, 1500))); // a script call (Omni-Channel, AI Voice): the pause that ends an answer
 const END_OPEN_MS = Math.min(2500, Math.max(600, num(process.env.AI_VOICE_END_OPEN_MS, 950)));
 // A SHORT "OKAY" WHILE THINKING (2026-11-02): hearing the answer takes ~0.9 s on the server (up to 1.5 s, more when the
 // language is checked again), and a new sentence's voice can take longer still. When the reply is not playing FILLER_MS after
@@ -370,6 +371,9 @@ function handle(sock, engines, opts = {}) {
     if (out.done) {
       ended = true;
       await speaker.whenIdle();
+      // the closing is said; if the person is still talking (or just started) the call waits for them to finish, up to 12 s, and a moment more
+      for (let i = 0; i < 48 && vad.talking; i += 1) await new Promise((r) => { setTimeout(r, 250); }); // eslint-disable-line no-await-in-loop
+      await new Promise((r) => { setTimeout(r, 700); });
       await save();
       hangup();
     }
@@ -558,7 +562,10 @@ function handle(sock, engines, opts = {}) {
     minLevel: MIN_LEVEL,
     strict: () => speaker.busy,
     // a yes / no question: a short pause ends the answer; "how many years / which city / when": people think aloud, wait longer
-    endMs: () => (d && OPEN_STEPS.includes(d.st.step) ? END_OPEN_MS : END_YESNO_MS),
+    endMs: () => {
+      if (d && d.scriptName) return END_SCRIPT_MS + (d.language !== 'English' ? 500 : 0);
+      return d && OPEN_STEPS.includes(d.st.step) ? END_OPEN_MS : END_YESNO_MS;
+    },
     onStart: () => { lastVoice = Date.now(); if (speaker.busy) {
       // what was not said yet (the sentence cut and the ones after it): said again if this turns out to be only "ఆ" / "ok"
       if (current) { const played = speaker.sent; const i = current.ends.findIndex((e) => e > played); interrupted = i >= 0 ? { rest: current.parts.slice(i), at: Date.now() } : null; }

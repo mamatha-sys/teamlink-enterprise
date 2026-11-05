@@ -246,7 +246,14 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const te2 = await ted.hear('శాలరీ ఎంత', { heard: 'clear', lang: 'Telugu' });
     const te3 = await ted.hear('ఉంది', { heard: 'clear', lang: 'Telugu' });
     check('Telugu: the vacancy and the question; the salary question is answered from the facts with only the question again; "ఉంది" is a yes and the details follow', /ఆసక్తిగా ఉందా\?$/.test(te1.say) && /^జీతం 10 వేలు/.test(te2.say) && /ఆసక్తిగా ఉందా\?$/.test(te2.say) && !/పోస్టు ఖాళీగా/.test(te2.say) && /ఎక్కడ/.test(te3.say), { te1: te1.say, te2: te2.say, te3: te3.say });
-    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 22, { before, now: originated.length });
+    // a half heard answer after "what is the problem?" does not close the call: asked once more
+    const wr = await omni.create({ externalId: 'vac12', toNumber: '9222333312', name: 'Kiran', script: FACTS }, { ...deps, ami: AMI });
+    const wd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(wr.id)); wd.start(); await wd.hear('hello'); await wd.hear('yes');
+    await wd.hear('no');
+    const w1 = await wd.hear('సచ్చే', { heard: 'clear' });
+    const w2 = await wd.hear('the location is far', { heard: 'clear' });
+    check('a half heard reply (one odd word) after "what is the problem?" is asked again, the call is not closed on it; a real reply is answered', !w1.done && /May I know what the problem is|Sorry|క్షమించండి|సమస్య/.test(w1.say) && /./.test(w2.say), { w1, w2 });
+    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 23, { before, now: originated.length });
     check('Asterisk refusing the call fails it in words (and leaves a failed row)', await (async () => { const x = await refuse({ toNumber: '9333333333' }, { ...deps, ami: { action: async () => ({ Response: 'Error', Message: 'no trunk' }) } }); return !x.ok && x.code === 'not_dialled'; })());
   } finally {
     await prisma.$disconnect().catch(() => {});
