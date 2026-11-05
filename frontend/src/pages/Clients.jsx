@@ -346,6 +346,12 @@ export default function Clients() {
     return fresh.length ? [...fresh, ...out.filter((c) => !isNewClient(c))] : out;
   }, [listRows, ef, fields, currentSort, sortRev, onlyNew]); // eslint-disable-line react-hooks/exhaustive-deps
   const newCount = useMemo(() => listRows.filter(isNewClient).length, [listRows]);
+  // The work status cards count what the other filters leave (founder 2026-11-05: "filter pettinappudu, running avi kuda vaati related ey raavali"):
+  // the same rule as the filter counts, so pressing Running does not empty the other cards.
+  const deskRows = useMemo(
+    () => listRows.filter((c) => (!onlyNew || isNewClient(c)) && fields.every((f) => f.key === 'desk' || !ef[f.key] || hitField(f, c, ef[f.key]))),
+    [listRows, ef, fields, onlyNew],
+  );
   const paged = usePaged(filtered);
 
   // The bar's options — the same counted facets (names only).
@@ -602,7 +608,7 @@ export default function Clients() {
           {allowedCols.includes('desk') && (
             <div className="clients-desk" role="group" aria-label="Clients by work status">
               {[...DESK_WORDS, DESK_NONE].map((w) => {
-                const n = listRows.filter((c) => (c.deskStatus || DESK_NONE) === w).length;
+                const n = deskRows.filter((c) => (c.deskStatus || DESK_NONE) === w).length;
                 return (
                   <button key={w} type="button" className={`clients-desk-btn tone-${DESK_TONE[w] || 'none'}${filters.desk === w ? ' on' : ''}`} onClick={() => setFilter({ desk: filters.desk === w ? '' : w })}>
                     <span>{w === DESK_NONE ? 'Not set' : w}</span><b>{n}</b>
