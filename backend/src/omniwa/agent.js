@@ -27,6 +27,9 @@ const MAX_STEPS = 5;
 const MODEL_TIMEOUT_MS = 120000;
 const FALLBACK_GAP_MS = 12 * 3600000;
 const clip = (v, n) => S.clip(v, n);
+// founder 2026-11-05: nobody should press a button each time. A chat the AI passed on because it had no answer comes back to it with the person's next message.
+// These stay with people: they asked for a person, were abusive, or the AI used up its replies (Give back to AI, or a recruiter's own message, ends those).
+const STAYS_WITH_PEOPLE = /asked for a person|Abusive|reached its limit/;
 
 const RULES = `Rules you must always follow:
 - Reply in the language the person writes: English, Telugu, Hindi or Tenglish (Telugu in English letters).
@@ -329,6 +332,10 @@ async function runTurn(row, cfg, now = Date.now()) {
 
   if (!cfg.enabled) return { skipped: 'off' };
   if (cfg.testNumbers.length && !cfg.testNumbers.includes(conv.e164)) return { skipped: 'not_a_test_number' };
+  if (conv.mode === 'ai' && conv.state === 'needs_human' && !STAYS_WITH_PEOPLE.test(conv.handoffReason || '')) {
+    await S.run('UPDATE "OmniWaConv" SET state = \'active\', handoffReason = NULL, updatedAt = ? WHERE id = ?', now, conv.id);
+    conv.state = 'active'; conv.handoffReason = null;
+  }
   if (conv.mode !== 'ai' || conv.state !== 'active') return { skipped: conv.state };
   if (await isBlocked(conv.e164)) return { skipped: 'stopped' };
   const human = await humanSentSince(conv);

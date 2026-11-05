@@ -180,6 +180,11 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     stub.down = false;
     conv = await convAt(phoneOf(4));
     check('the model is down: the fallback goes and a recruiter is called', conv.state === 'needs_human' && (await aiMsgs(d.id))[0].body === 'Our team will contact you soon.', conv);
+    await inbound(phoneOf(4), 'are you there?');
+    stub.script = [{ reply: 'Yes, I am here.' }];
+    await run();
+    conv = await convAt(phoneOf(4));
+    check('no button needed: the person writes again and the AI answers by itself', conv.state === 'active' && (await aiMsgs(d.id)).length === 2 && conv.handoffReason === null, conv);
 
     // ---- 5. STOP
     console.log('\n-- stop');
