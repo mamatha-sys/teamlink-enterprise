@@ -531,6 +531,10 @@ function handle(sock, engines, opts = {}) {
         if (pick) { lang = pick[0]; r2 = { text: pick[1], conf: null }; heardAs = 'clear'; found = pick[0]; }
       }
       const { text } = r2;
+      // A SCRIPT CALL ANSWERS ONLY WHAT IT HEARD CLEARLY (founder 2026-11-05: "candidate voice ni clear ga vinaka answer cheyali"): a Telugu / Hindi reply of a word or two that has no real Telugu / Hindi
+      // word and means nothing ("సచ్చే", "The model is in the video" written for a sentence that was not caught) is not an answer: the person is asked to say it once more
+      if (heardAs === 'clear' && d && d.scriptName && ['Telugu', 'Hindi'].includes(lang) && !nativeScore(text, lang) && String(text).trim().split(/s+/).length < 4
+        && ['unclear', 'silence'].includes(require('../dialogue').classify(text).intent)) heardAs = 'unclear'; // eslint-disable-line global-require
       // A LISTENING NOISE OVER THE ASSISTANT (founder 2026-10-30: "matladuthu matladuthu agi pothundhi"): "ఆ", "హా", "ok",
       // "हाँ", a cough - said while the assistant was still explaining - is not an answer. The assistant goes on with the rest of
       // what it was saying. (Over the LAST sentence - the question - a "yes" is the answer and is read as one.)
