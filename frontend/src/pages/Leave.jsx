@@ -3,7 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import api from '../api';
 import { useAuth } from '../context/AuthContext.jsx';
 import TabsPage from '../components/TabsPage.jsx';
-import { Panel, PanelPad, PanelHead, AssignRow, EmptyMini, ScopeNote, TwoCol, Status, Modal } from '../components/proto.jsx';
+import { Panel, PanelPad, PanelHead, AssignRow, EmptyMini, ScopeNote, SectionLabel, TwoCol, Status, Modal } from '../components/proto.jsx';
+import ApprovalChain, { ApprovalChainLine } from '../components/ApprovalChain.jsx';
+import { ChainButton } from './leave/LeaveChainScreen.jsx'; // the Chain screen: who approved, when, the reason
 import { isAdmin, isHR as hasHrmsAdmin, can } from '../permissions';
 import Combo from '../components/Combo.jsx';
 import { HR_STATUSES, hrStatusOf } from '../hrStatus';
@@ -80,9 +82,9 @@ function ApprovalWorkflowModal({ requestId, onClose, onActed }) {
           </div>
           <LeaveFacts leave={leave} handoffs={data.handoffs} early={data.earlyLogout} source={data.source} pulse={data.pulse} handover={data.handover} />
 
-          {/* No chain picture here any more (founder 2026-11-02: "approve/reject unchi and chain thisai"): only who it waits for.
-              APPROVE · REJECT · REASSIGN — the TL rule is decided by the server. */}
-          {wf && wf.currentOwnerName && leave.status === 'Pending' ? <div style={{ margin: '12px 0 4px', fontSize: 13 }}>Waiting for: <b>{wf.currentOwnerName}</b>{wf.currentLabel ? <span className="cell-muted"> ({wf.currentLabel})</span> : null}</div> : null}
+          {/* The chain is shown again (founder 2026-11-05: "leave management lo chain undali approvals cheyadaniki"): who approves, level by
+              level. Who may act has not changed. APPROVE · REJECT · REASSIGN — the TL rule is decided by the server. */}
+          {wf && <><SectionLabel style={{ marginTop: 14 }}>Approval chain</SectionLabel><ApprovalChain workflow={wf} recordStatus={leave.status} /></>}
           <LeaveDecidePanel data={data} onDone={() => { load(); onActed(); }} />
         </>
       )}
@@ -600,10 +602,10 @@ function DashboardTab({ user, isHR, canEditPolicy, canApprove, canConfigure, rel
                         {wf.overdue && <> <span className="status overdue">Overdue</span></>}
                       </div>
                     )}
+                    {wf && <ApprovalChainLine workflow={wf} compact />}
                   </span>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {/* Approve / Reject only (founder 2026-11-02: "approve/reject unchi and chain thisai"): it opens the request with
-                        the reason, the employee's comments, the TL rule, Approve / Reject and the reassign picker. */}
+                    {/* It opens the request with its chain, the reason, the employee's comments, the TL rule, Approve / Reject and the reassign picker. */}
                     <button className={`btn btn-sm${mayDecide ? ' btn-primary' : ''}`} title={mayDecide ? (direct ? 'Approve or reject now - the levels still waiting are skipped' : 'Approve, reject or reassign') : 'See who approves this request'} onClick={() => setChainFor(r.id)}>{mayDecide ? 'Approve / Reject' : 'View'}</button>
                   </span>
                 </AssignRow>
@@ -719,6 +721,7 @@ function DashboardTab({ user, isHR, canEditPolicy, canApprove, canConfigure, rel
           renderActions={(r) => (
             <>
               {canApprove && r.status === 'Pending' && <button className="btn btn-sm btn-primary" onClick={() => setChainFor(r.id)}>Approve / Reject</button>}
+              <ChainButton requestId={r.id} />
               {/* Confirming a cancellation is a DECISION, so it needs the
                   approve permission. */}
               {canApprove && r.status === 'Cancellation Requested' && <button className="btn btn-sm" onClick={() => decide(r, 'Cancelled')}>Confirm Cancel</button>}
@@ -785,6 +788,7 @@ function RequestsTab({ isHR, canApprove, reloadKey, onReload }) {
           renderActions={(r) => (
             <>
               {canApprove && r.status === 'Pending' && <button className="btn btn-sm btn-primary" onClick={() => setOpenId(r.id)}>Approve / Reject</button>}
+              <ChainButton requestId={r.id} />
               {canApprove && r.status === 'Cancellation Requested' && <button className="btn btn-sm" onClick={() => confirmCancel(r)}>Confirm Cancel</button>}
               <OwnCancelButton r={r} onDone={onReload} onError={setError} />
               {!r.mine && !isHR && r.status === 'Approved' && <button className="btn btn-sm" onClick={() => requestCancel(r.id)}>Request Cancellation</button>}
