@@ -58,7 +58,7 @@ function AiForm() {
       <Field label="Only these numbers (for a test)" hint="Leave empty to answer everybody. With numbers here the AI answers only them."><input className="input" value={c.testNumbers} onChange={set('testNumbers')} placeholder="919876543210" /></Field>
       <Field label="Model" hint={`Empty = the app's model${model && model.model ? ` (${model.model})` : ''}`}><input className="input" value={c.model} onChange={set('model')} /></Field>
       <Field label="System prompt" hint="Who the assistant is and how it talks. The safety rules are added by TeamLink and cannot be removed here."><textarea className="input" rows={6} value={c.systemPrompt} onChange={set('systemPrompt')} /></Field>
-      <Field label="Fallback message" hint="Sent when the AI cannot answer, outside working hours and when a chat goes to a person."><textarea className="input" rows={2} value={c.fallbackMessage} onChange={set('fallbackMessage')} /></Field>
+      <Field label="Fallback message" hint="One short message, 300 letters at most. Sent when the AI cannot answer, outside working hours and when a chat goes to a person. Long rules go in the system prompt."><textarea className="input" rows={2} value={c.fallbackMessage} onChange={set('fallbackMessage')} /></Field>
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0' }}><input type="checkbox" checked={c.hoursOn} onChange={set('hoursOn')} /><span>Answer only in working hours (India time)</span></label>
       {c.hoursOn && (
         <div style={{ display: 'flex', gap: 12 }}>
@@ -98,7 +98,7 @@ function NumberCard({ n, saved, onChanged }) {
       {err && <Banner tone="warn">{err}</Banner>}
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0' }}><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /><b>AI replies on this number</b></label>
       <Field label="Instructions for this number" hint="Empty = the system prompt from AI settings."><textarea className="input" rows={6} value={systemPrompt} onChange={(e) => setPrompt(e.target.value)} /></Field>
-      <Field label="Fallback message for this number" hint="Empty = the fallback message from AI settings."><textarea className="input" rows={2} value={fallbackMessage} onChange={(e) => setFallback(e.target.value)} /></Field>
+      <Field label="Fallback message for this number" hint="One short message the candidate reads, 300 letters at most. Empty = the fallback from AI settings. Long rules go in the instructions."><textarea className="input" rows={2} maxLength={700} value={fallbackMessage} onChange={(e) => setFallback(e.target.value)} /></Field>
       <div style={{ display: 'flex', gap: 8 }}>
         <Btn primary onClick={save} disabled={busy}>Save</Btn>
         {saved && <Btn onClick={reset} disabled={busy}>Use the default</Btn>}

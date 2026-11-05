@@ -429,6 +429,11 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     await Cfg.removeProfile(nA.id); await Cfg.removeProfile(nB.id);
     check('Use the default takes the number back to the shared settings', (await Cfg.profiles()).length === 0 && (await Cfg.forNumber({ systemPrompt: 'x' }, nA.id)).systemPrompt === 'x');
 
+    const doc = '# EDUCATION DEPARTMENT \u2013 WHATSAPP AI FALLBACK MESSAGES\n\n*1. Unknown Question*\n\n"Thank you for your message. I\'ll check this information with our team and get back to you shortly."\n\n*2. Question Not Understood*\n\n"Sorry, I could not understand your question."';
+    check('a whole document saved as the fallback: the candidate gets only its first message', Cfg.oneFallback(doc) === "Thank you for your message. I'll check this information with our team and get back to you shortly." && Cfg.oneFallback('Short and fine.') === 'Short and fine.' && Cfg.oneFallback(`# ${'x'.repeat(500)}`) === Cfg.DEFAULT_FALLBACK);
+    const refused = await Cfg.saveProfile(admin, nums[0].id, { enabled: true, fallbackMessage: doc });
+    check('and a new one like that is refused in plain words', refused.status === 400 && /one short message/.test(refused.error), refused);
+
     // ---- 9. promotions, already contacted, the push, the other responders
     console.log('\n-- promotions and the screen');
     await Promo.onStatus({ providerRef: `zzout2${SUFFIX}`, status: 'delivered' });

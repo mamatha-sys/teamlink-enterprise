@@ -11,6 +11,16 @@ const DEFAULTS = { enabled: false, model: '', systemPrompt: DEFAULT_PROMPT, hour
 const HM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const whole = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
 
+// the fallback is ONE message a candidate reads. A whole document pasted there went to a candidate on 2026-11-05: what is saved already is cut to its first quoted line
+const FALLBACK_MAX = 300;
+const FALLBACK_WORDS = `The fallback is one short message for the candidate (${FALLBACK_MAX} letters at most). Put longer rules in the instructions.`;
+function oneFallback(text) {
+  const t = String(text || '').trim();
+  if (t.length <= FALLBACK_MAX && !/^#/.test(t)) return t || DEFAULT_FALLBACK;
+  const quoted = /["\u201c]([^"\u201d\n]{10,300})["\u201d]/.exec(t);
+  return quoted ? quoted[1].trim() : DEFAULT_FALLBACK;
+}
+
 const shape = (r) => (r ? {
   enabled: !!r.enabled, model: r.model || '', systemPrompt: r.systemPrompt || DEFAULT_PROMPT, hoursOn: !!r.hoursOn, hoursFrom: r.hoursFrom || DEFAULTS.hoursFrom, hoursTo: r.hoursTo || DEFAULTS.hoursTo,
   fallbackMessage: r.fallbackMessage || DEFAULT_FALLBACK, maxTurns: Number(r.maxTurns) || DEFAULTS.maxTurns, memoryCount: Number(r.memoryCount) || DEFAULTS.memoryCount,
@@ -41,6 +51,7 @@ async function save(user, b = {}) {
   };
   if (!next.systemPrompt) return { error: 'Write the system prompt first.', status: 400 };
   if (!next.fallbackMessage) return { error: 'Write the fallback message first.', status: 400 };
+  if (b.fallbackMessage !== undefined && (next.fallbackMessage.length > FALLBACK_MAX || /^#/.test(next.fallbackMessage))) return { error: FALLBACK_WORDS, status: 400 };
   if (next.hoursOn && (!HM.test(next.hoursFrom) || !HM.test(next.hoursTo))) return { error: 'Working hours are written like 09:30.', status: 400 };
   await S.run(`INSERT INTO "OmniWaAiConfig" (id, enabled, model, systemPrompt, hoursOn, hoursFrom, hoursTo, fallbackMessage, maxTurns, memoryCount, debounceSeconds, promoDays, testNumbers, updatedByName, updatedAt)
     VALUES ('main',?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled, model=excluded.model, systemPrompt=excluded.systemPrompt, hoursOn=excluded.hoursOn, hoursFrom=excluded.hoursFrom, hoursTo=excluded.hoursTo,
@@ -60,6 +71,7 @@ async function saveProfile(user, numberId, b = {}) {
   if (!row) return { error: 'This WhatsApp number is gone.', status: 404 };
   const systemPrompt = S.clip(String(b.systemPrompt == null ? '' : b.systemPrompt).trim(), 6000) || null;
   const fallbackMessage = S.clip(String(b.fallbackMessage == null ? '' : b.fallbackMessage).trim(), 700) || null;
+  if (fallbackMessage && (fallbackMessage.length > FALLBACK_MAX || /^#/.test(fallbackMessage))) return { error: FALLBACK_WORDS, status: 400 };
   await S.run(`INSERT INTO "OmniWaAiProfile" (numberId, enabled, systemPrompt, fallbackMessage, updatedByName, updatedAt) VALUES (?,?,?,?,?,?)
     ON CONFLICT(numberId) DO UPDATE SET enabled=excluded.enabled, systemPrompt=excluded.systemPrompt, fallbackMessage=excluded.fallbackMessage, updatedByName=excluded.updatedByName, updatedAt=excluded.updatedAt`,
   row.id, b.enabled === false ? 0 : 1, systemPrompt, fallbackMessage, user ? user.name : null, Date.now());
@@ -72,10 +84,11 @@ async function removeProfile(numberId) {
 }
 // the settings one chat runs on: the number's own where it has them, the default for the rest
 async function forNumber(cfg, numberId) {
-  if (!numberId) return cfg;
+  const safe = { ...cfg, fallbackMessage: oneFallback(cfg.fallbackMessage) };
+  if (!numberId) return safe;
   const p = (await S.q('SELECT enabled, systemPrompt, fallbackMessage FROM "OmniWaAiProfile" WHERE numberId = ?', String(numberId)))[0];
-  if (!p) return cfg;
-  return { ...cfg, numberOff: !p.enabled, systemPrompt: p.systemPrompt || cfg.systemPrompt, fallbackMessage: p.fallbackMessage || cfg.fallbackMessage };
+  if (!p) return safe;
+  return { ...safe, numberOff: !p.enabled, systemPrompt: p.systemPrompt || cfg.systemPrompt, fallbackMessage: p.fallbackMessage ? oneFallback(p.fallbackMessage) : safe.fallbackMessage };
 }
 
 // ---- knowledge base ------------------------------------------------------------------------------------------------------------------------------
@@ -117,4 +130,4 @@ async function kbSearch(query, limit = 3, numberId = null) {
   }).filter((r) => r.score > 0).sort((x, y) => y.score - x.score).slice(0, limit).map(({ question, answer }) => ({ question, answer }));
 }
 
-module.exports = { profiles, saveProfile, removeProfile, forNumber, read, save, kbList, kbSave, kbRemove, kbSearch, DEFAULT_PROMPT, DEFAULT_FALLBACK };
+module.exports = { oneFallback, profiles, saveProfile, removeProfile, forNumber, read, save, kbList, kbSave, kbRemove, kbSearch, DEFAULT_PROMPT, DEFAULT_FALLBACK };
