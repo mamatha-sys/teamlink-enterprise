@@ -129,6 +129,17 @@ export function nextActionsFor(user, stage, app = null) {
     } else if (stage === 'TL_REVIEW') {
       // an older candidate still waiting at the old Dept head / TL step: HR (or that TL) books the interview
       if (is('hr', 'tl') && (can(user, 'ats', 'interviews', 'Schedule Interview', 'create') || can(user, 'ats', 'candidates', 'Pipeline Stages', 'edit'))) out.push({ id: 'approve_interview', label: 'Book interview', kind: 'schedule' });
+    } else if (stage === 'SELECTED') {
+      // THE NEXT STEP AFTER SELECTED (founder 2026-11-05: "select ayyaka, step move cheyyadaniki raavteldhu"): "Move step" cannot skip the
+      // offer, so the offer is made here. HR makes it, then approves and sends it on the Offers screen (internal hiring has no TL step).
+      if (is('hr', 'recruiter', 'tl') && can(user, 'ats', 'interviews', 'Offers', 'edit')) {
+        if (app.offerStatus === OFFER_PREPARED) out.push({ id: 'offers', label: 'Approve & send offer (Offers screen)', kind: 'link', href: '/ats/offers' });
+        else out.push({ id: 'prepare_offer', label: 'Prepare offer', kind: 'prepare_offer' });
+      }
+    } else if (stage === 'OFFER') {
+      if (is('hr', 'recruiter', 'tl') && can(user, 'ats', 'interviews', 'Offers', 'view')) out.push({ id: 'offers', label: 'Offer answer (Offers screen)', kind: 'link', href: '/ats/offers' });
+    } else if (stage === 'OFFER_ACCEPTED') {
+      if (is('hr', 'recruiter', 'tl') && can(user, 'ats', 'interviews', 'Joining', 'edit') && app.joiningStatus !== 'Dropped') out.push({ id: 'joined', label: 'Mark joined', kind: 'popup', popup: 'joined', to: 'JOINED' });
     } else if (stage === 'JOINED') {
       if (is('hr') && can(user, 'ats', 'interviews', 'Internal Hiring', 'approve')) out.push({ id: 'hrms', label: 'Add as employee', kind: 'hrms' });
     }
@@ -887,7 +898,7 @@ function PrepareOfferDialog({
     setBusy(true); setError('');
     try {
       const r = await api.post(`/ats/offers/${app.id}/prepare`, { offeredCtc: Number(ctc), joiningDate: joiningDate || undefined, offerNotes: notes, ...(confirmCtc ? { confirmCtc: true } : {}) });
-      await onDone((r.data && r.data.message) || `Saved. The offer for ${name} is waiting for the team lead.`);
+      await onDone((r.data && r.data.message) || (isInternalApp(app) ? `Saved. Approve and send the offer for ${name} from the Offers screen.` : `Saved. The offer for ${name} is waiting for the team lead.`));
     } catch (err) {
       const a = ctcAsk(err);
       if (a) setAsk(a); else setError(err.response?.data?.error || 'Could not save the offer. Please try again.');
@@ -901,7 +912,7 @@ function PrepareOfferDialog({
       footer={ask ? <CtcAskButtons busy={busy} onNo={() => setAsk(null)} onYes={() => save(true)} /> : (
         <>
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn btn-primary" disabled={busy || !(Number(ctc) > 0)} onClick={() => save(false)}>{busy ? 'Saving…' : 'Send for approval'}</button>
+          <button type="button" className="btn btn-primary" disabled={busy || !(Number(ctc) > 0)} onClick={() => save(false)}>{busy ? 'Saving…' : (isInternalApp(app) ? 'Save offer' : 'Send for approval')}</button>
         </>
       )}
     >
@@ -918,7 +929,7 @@ function PrepareOfferDialog({
         <span>Note in the letter (optional)</span>
         <textarea rows="2" maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </label>
-      <div className="small-muted">The team lead checks it on the Offers screen, then the letter goes to the candidate.</div>
+      <div className="small-muted">{isInternalApp(app) ? 'Next: Approve & send on the Offers screen, and the letter goes to the candidate.' : 'The team lead checks it on the Offers screen, then the letter goes to the candidate.'}</div>
       {error && <div className="error-text" style={{ marginTop: 6 }}>{error}</div>}
     </Modal>
   );
