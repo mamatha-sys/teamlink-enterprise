@@ -196,6 +196,16 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     await inbound(phoneOf(5), 'ఆపండి');
     check('a Telugu stop word counts too', G.isStop('ఆపండి') && G.isStop('please unsubscribe') === false ? true : G.isStop('ఆపండి'));
 
+    const free = await Agent.unblock(phoneOf(5), admin, 'ZZTEST asked to hear from us again');
+    const stateAfter = await Agent.blockState(phoneOf(5));
+    await promote(e, 5, `zzback${SUFFIX}`);
+    conv = await convAt(phoneOf(5));
+    await inbound(phoneOf(5), 'I am interested again');
+    stub.script = [{ reply: 'Welcome back.' }];
+    await run();
+    check('an Admin can unblock with a reason: off every list, and the AI answers again', free.ok && stateAfter.blocked === false && !(await delivery.optedOut('WhatsApp', phoneOf(5))) && conv.state === 'active' && (await aiMsgs(e.id)).length === 1, [free, stateAfter, conv.state]);
+    check('no reason, no unblock', (await Agent.unblock(phoneOf(5), admin, 'x')).status === 400);
+
     // ---- 6. leads
     console.log('\n-- a number we do not know');
     const unknown = phoneOf(77);

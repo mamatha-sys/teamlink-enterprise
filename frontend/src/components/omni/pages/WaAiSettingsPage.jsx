@@ -115,6 +115,39 @@ function Knowledge() {
   );
 }
 
+// a number that wrote STOP gets nothing and the AI stays out, until an Admin takes it off the lists with a reason
+function Blocked() {
+  const { toast } = useOmni();
+  const [number, setNumber] = useState('');
+  const [reason, setReason] = useState('');
+  const [state, setState] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const check = async () => {
+    setBusy(true); setErr(''); setState(null);
+    try { const r = await api.get(`${BASE}/blocked`, { params: { number } }); setState(r.data); } catch (e) { setErr(errOf(e, 'The number could not be checked.')); } finally { setBusy(false); }
+  };
+  const unblock = async () => {
+    setBusy(true); setErr('');
+    try { const r = await api.post(`${BASE}/unblock`, { number, reason }); setState(r.data); setReason(''); toast('Unblocked.'); } catch (e) { setErr(errOf(e, 'The number could not be unblocked.')); } finally { setBusy(false); }
+  };
+  return (
+    <Panel title="Blocked numbers" sub="A number that wrote STOP gets no messages and no AI replies. Unblock it only if the person asked to hear from you again.">
+      {err && <Banner tone="warn">{err}</Banner>}
+      <Field label="Mobile number"><input className="input" value={number} onChange={(e) => { setNumber(e.target.value); setState(null); }} placeholder="9876543210" /></Field>
+      <Btn onClick={check} disabled={busy || !number.trim()}>Check</Btn>
+      {state && !state.blocked && <p style={{ marginTop: 10 }}><Pill tone="live">Not blocked</Pill></p>}
+      {state && state.blocked && (
+        <div style={{ marginTop: 10 }}>
+          <p><Pill tone="red">Blocked</Pill> {state.since ? <span className="small-muted">since {fmtDateTime(state.since)}</span> : null}</p>
+          <Field label="Why may they be messaged again?"><input className="input" value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
+          <Btn primary onClick={unblock} disabled={busy || reason.trim().length < 5}>Unblock</Btn>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 function Runs() {
   const [rows, setRows] = useState(null);
   const [open, setOpen] = useState(null);
@@ -151,10 +184,11 @@ export default function WaAiSettingsPage() {
   return (
     <>
       <PageHead title="WhatsApp AI" lead="The AI assistant that answers replies to your promotions." />
-      <Tabs tabs={[['ai', 'AI settings'], ['kb', 'Knowledge base'], ['runs', 'What the AI did'], ['conn', 'Connection']]} value={tab} onChange={setTab} />
+      <Tabs tabs={[['ai', 'AI settings'], ['kb', 'Knowledge base'], ['runs', 'What the AI did'], ['blocked', 'Blocked numbers'], ['conn', 'Connection']]} value={tab} onChange={setTab} />
       {tab === 'ai' && <AiForm />}
       {tab === 'kb' && <Knowledge />}
       {tab === 'runs' && <Runs />}
+      {tab === 'blocked' && <Blocked />}
       {tab === 'conn' && <Connection />}
     </>
   );

@@ -129,6 +129,21 @@ router.get('/knowledge', adminOnly, wrap(async (req, res) => res.json({ entries:
 router.post('/knowledge', adminOnly, wrap(async (req, res) => send(res, await Cfg.kbSave(req.user, null, req.body || {}))));
 router.put('/knowledge/:id', adminOnly, wrap(async (req, res) => send(res, await Cfg.kbSave(req.user, req.params.id, req.body || {}))));
 router.delete('/knowledge/:id', adminOnly, wrap(async (req, res) => send(res, await Cfg.kbRemove(req.params.id))));
+const e164Of = (raw) => { const d = require('../utils/messageDelivery').digitsOf(raw); return d.length === 10 ? `91${d}` : d; }; // eslint-disable-line global-require
+router.get('/blocked', adminOnly, wrap(async (req, res) => {
+  const e164 = e164Of(req.query.number);
+  if (e164.length < 12) return res.status(400).json({ error: 'Type the full mobile number.' });
+  return res.json({ number: e164, ...(await Agent.blockState(e164)) });
+}));
+router.post('/unblock', adminOnly, wrap(async (req, res) => {
+  const b = req.body || {};
+  const e164 = e164Of(b.number);
+  if (e164.length < 12) return res.status(400).json({ error: 'Type the full mobile number.' });
+  const out = await Agent.unblock(e164, req.user, b.reason);
+  if (out.error) return send(res, out);
+  await logAudit({ userId: req.user.id, action: 'WhatsApp number unblocked', entity: 'OmniWaOptOut', entityId: `...${e164.slice(-4)}`, toValue: String(b.reason).slice(0, 300) }).catch(() => {});
+  return res.json({ number: e164, ...(await Agent.blockState(e164)) });
+}));
 router.get('/runs', adminOnly, wrap(async (req, res) => res.json({ runs: await Inbox.runs(req.query) })));
 
 module.exports = router;

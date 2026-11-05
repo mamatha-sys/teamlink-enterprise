@@ -146,6 +146,35 @@ async function isBlocked(e164) {
   return !!(await delivery.optedOut('WhatsApp', e164));
 }
 
+// An Admin takes a number off every stop list, with a written reason (the person asked to hear from us again, or the STOP was a test). What isBlocked and the sending paths read.
+async function blockState(e164) {
+  await ensure();
+  const row = (await S.q('SELECT at, source, text FROM "OmniWaOptOut" WHERE e164 = ?', e164))[0] || null;
+  const legacy = await delivery.optedOut('WhatsApp', e164);
+  const dnc = await prisma.appSetting.findUnique({ where: { key: `bc.dnc.${e164}` } }).catch(() => null);
+  const p = K.phoneOf(`+${e164}`);
+  const supp = p.ok ? await S.q('SELECT at FROM "OutreachSuppression" WHERE addressHash = ? AND channel IN (\'whatsapp\', \'*\') LIMIT 1', S.hashAddress('phone', p.e164)) : [];
+  return { blocked: !!(row || legacy || dnc || supp.length), since: row ? Number(row.at) : (legacy ? legacy.at : null), text: row ? row.text : null };
+}
+async function unblock(e164, user, reason) {
+  await ensure();
+  const why = clip(reason, 300);
+  if (why.length < 5) return { error: 'Write in a few words why this number may be messaged again.', status: 400 };
+  const p = K.phoneOf(`+${e164}`);
+  if (!p.ok) return { error: 'That is not a valid mobile number.', status: 400 };
+  await S.run('DELETE FROM "OmniWaOptOut" WHERE e164 = ?', e164);
+  await prisma.appSetting.deleteMany({ where: { key: { in: [`${delivery.OPTOUT_PREFIX}WhatsApp.${e164}`, `bc.dnc.${e164}`] } } });
+  await S.run('DELETE FROM "OutreachSuppression" WHERE addressHash = ? AND channel = \'whatsapp\'', S.hashAddress('phone', p.e164)).catch(() => {});
+  const found = await K.findByKeys(p.key, null).catch(() => null);
+  for (const c of (Array.isArray(found) ? found : [found]).filter(Boolean)) {
+    await require('../outreach/consent').optIn(c.id, 'whatsapp', { reason: why, by: { id: user.id, name: user.name } }).catch(() => {}); // eslint-disable-line global-require,no-await-in-loop
+  }
+  const now = Date.now();
+  await S.run('UPDATE "OmniWaConv" SET state = \'active\', mode = \'ai\', handoffReason = NULL, pausedByName = NULL, resumedAt = ?, updatedAt = ? WHERE e164 = ?', now, now, e164);
+  Live.changed();
+  return { ok: true };
+}
+
 // ---- memory ----------------------------------------------------------------------------------------------------------------------------------------
 async function memory(conv, n) {
   if (conv.candidateId) {
@@ -388,4 +417,4 @@ function start() {
   if (timer.unref) timer.unref();
 }
 
-module.exports = { onInbound, tick, start, runTurn, sendText, pause, resume, noteHumanSend, ownsChat, optOut, convOf, isBlocked, windowOpen, handoff, AI_NAME, parseMeta };
+module.exports = { blockState, unblock, onInbound, tick, start, runTurn, sendText, pause, resume, noteHumanSend, ownsChat, optOut, convOf, isBlocked, windowOpen, handoff, AI_NAME, parseMeta };
