@@ -24,7 +24,7 @@
 const S = require('./scripts');
 const D = require('./dialogue');
 
-const KINDS = { opening: 'opening', say: 'say', ask: 'ask', interest: 'interest', closing: 'closing', decline: 'decline' };
+const KINDS = { opening: 'opening', say: 'say', ask: 'ask', interest: 'interest', closing: 'closing', decline: 'decline', convince: 'convince' };
 const MAX_STEPS = 14;
 const MAX_LINE = 300;
 
@@ -38,7 +38,7 @@ function parseScript(raw, lim = {}) {
   if (lines.length > maxSteps) return { ok: false, steps: [], error: `A script can have at most ${maxSteps} lines.` };
   const steps = [];
   for (let i = 0; i < lines.length; i += 1) {
-    const m = /^(opening|say|ask|interest|closing|decline)\s*[:\-–]\s*(.*)$/i.exec(lines[i]);
+    const m = /^(opening|say|ask|interest|closing|decline|convince)\s*[:\-–]\s*(.*)$/i.exec(lines[i]);
     const kind = m ? KINDS[m[1].toLowerCase()] : (i === 0 ? 'opening' : 'ask');
     const text = (m ? m[2] : lines[i]).trim();
     if (!text) return { ok: false, steps: [], error: `Line ${i + 1} has a label but no words.` };
@@ -66,14 +66,17 @@ function parseScript(raw, lim = {}) {
 const HUMAN = {
   English: {
     ack: ['Okay.', 'Alright.', 'Sure.', 'Okay, thanks.', 'Right.'], no: ['Alright, no problem.', 'Okay, understood.', 'Sure, that is fine.'],
+    reason: 'I understand. May I ask why? If something about the role is the concern, I will note it for our team.',
     sorry: ['Sorry, could you say that once more?', 'Sorry, I missed that. Could you repeat?', 'Sorry, the line is not clear. One more time please?'], hear: 'Hello? Can you hear me okay?',
   },
   Telugu: {
     ack: ['సరే.', 'సరే అండి.', 'బాగుంది.', 'ఓకే అండి.'], no: ['సరే, పర్వాలేదు అండి.', 'సరే అండి, అర్థమైంది.'],
+    reason: 'అర్థమైంది అండి. కారణం చెప్పగలరా? ఏదైనా సమస్య ఉంటే మా టీమ్ కి తెలియజేస్తాను.',
     sorry: ['క్షమించండి, ఇంకోసారి చెప్తారా?', 'సారీ అండి, సరిగ్గా వినపడలేదు. మళ్ళీ చెప్తారా?', 'క్షమించండి, లైన్ సరిగా లేదు. ఇంకోసారి చెప్పండి.'], hear: 'హలో? నేను చెప్పేది వినపడుతోందా?',
   },
   Hindi: {
     ack: ['ठीक है।', 'जी, ठीक है।', 'अच्छा।', 'जी।'], no: ['ठीक है, कोई बात नहीं।', 'जी, समझ गया।'],
+    reason: 'समझ गया। क्या मैं कारण जान सकता हूँ? अगर भूमिका में कोई समस्या है तो मैं अपनी टीम को बता दूँगा।',
     sorry: ['माफ़ कीजिए, एक बार फिर से बोलेंगे?', 'सॉरी, ठीक से सुनाई नहीं दिया। दोबारा बोलिए।', 'माफ़ कीजिए, आवाज़ साफ़ नहीं आ रही। एक बार और बोलिए।'], hear: 'हैलो? आपको मेरी आवाज़ आ रही है?',
   },
 };
@@ -92,16 +95,17 @@ class ScriptDialogue extends D.Dialogue {
     if (!main.ok) throw new Error(`The agent's script cannot be used: ${main.error}`);
     const first = S.LANGS.includes(opts.scriptLanguage) ? opts.scriptLanguage : (S.LANGS.includes(opts.language) ? opts.language : 'English');
     // a "Decline:" line is what is said when the person is not interested (instead of the Closing); it is not one of the steps
-    const split = (steps) => ({ steps: steps.filter((s) => s.kind !== 'decline'), decline: (steps.find((s) => s.kind === 'decline') || {}).text || null });
+    const split = (steps) => ({ steps: steps.filter((s) => s.kind !== 'decline' && s.kind !== 'convince'), decline: (steps.find((s) => s.kind === 'decline') || {}).text || null, convince: steps.filter((s) => s.kind === 'convince').map((s) => s.text) });
     const mainSplit = split(main.steps);
     this.byLang = { [first]: mainSplit.steps };
     this.declines = { [first]: mainSplit.decline };
+    this.convinces = { [first]: mainSplit.convince };
     const sameShape = (a, b) => a.length === b.length && a.every((x, i) => x.kind === b[i].kind);
     Object.entries(opts.scripts || {}).forEach(([lang, text]) => {
       if (!S.LANGS.includes(lang) || lang === first || !text) return;
       const p = parseScript(text, opts.limits);
       const ps = p.ok ? split(p.steps) : null;
-      if (ps && sameShape(ps.steps, mainSplit.steps)) { this.byLang[lang] = ps.steps; this.declines[lang] = ps.decline; } // a version that does not match line for line is not used
+      if (ps && sameShape(ps.steps, mainSplit.steps)) { this.byLang[lang] = ps.steps; this.declines[lang] = ps.decline; this.convinces[lang] = ps.convince; } // a version that does not match line for line is not used
     });
     this.scriptLanguage = first;
     // no question in the script (only what the AI says): the call says all of it and ends
@@ -115,6 +119,17 @@ class ScriptDialogue extends D.Dialogue {
 
   // what is said when the person is not interested (the script's own "Decline" line, in the language of the call)
   get declineLine() { const t = this.declines[this.language] || this.declines[this.scriptLanguage]; return t ? fillWith(t, this.data) : null; }
+
+  // when the person says no: the script's own "Convince" lines, one at a time; with none, one question - why? - so the reason is heard and noted for the team
+  nextPitch() {
+    const list = this.convinces[this.language] || this.convinces[this.scriptLanguage] || [];
+    const own = list.map((t) => fillWith(t, this.data));
+    const pitches = own.length ? own.slice(0, 2) : [(HUMAN[this.language] || HUMAN.English).reason];
+    const n = this.st.pitchCount || 0;
+    if (n >= pitches.length) return null;
+    this.st.pitchCount = n + 1;
+    return pitches[n];
+  }
 
   get steps() { return this.byLang[this.language] || this.byLang[this.scriptLanguage]; }
 
@@ -219,14 +234,24 @@ class ScriptDialogue extends D.Dialogue {
       st.identity = true;
     } else {
       // a question the script cannot answer from verified facts is noted for the recruiter, never answered from memory
-      if (k.intent === 'info_q' || k.intent === 'salary_q' || k.intent === 'ai_q' || k.intent === 'other_cand') {
+      if (!st.pitchCount && (k.intent === 'info_q' || k.intent === 'salary_q' || k.intent === 'ai_q' || k.intent === 'other_cand')) { // (after a try to convince, what is said is the reason, kept below)
         const q = S.clean(text, 200);
         if (q && !st.pending.includes(q) && st.pending.length < 5) st.pending.push(q);
         turn.understood = 'question_noted';
         return { say: this.speak(this.again()), done: false }; // the question again; the person's own question is for the team
       }
       if (cur.kind === 'interest') {
-        if (k.intent === 'no') { st.interest = 'no'; st.declineReason = S.clean(text, 120); sc.got.push({ q: this.line(sc.idx), a: S.clean(text, 160) }); return this.endWith('Not Interested', 'not interested', this.declineLine || (this.ackText(k, cur) + (this.steps[this.steps.length - 1].kind === 'closing' ? ` ${this.line(this.steps.length - 1)}` : ''))); }
+        // after a try to convince: a yes goes on; a no, or the reason, gets the next try, and when there is none left the call is closed kindly
+        if (this.st.pitchCount && k.intent !== 'yes' && k.intent !== 'maybe') {
+          st.declineReason = S.clean(text, 120);
+          const more = this.nextPitch();
+          if (more) return { say: this.speak(more), done: false };
+          st.interest = 'no'; sc.got.push({ q: this.line(sc.idx), a: S.clean(text, 160) });
+          return this.endWith('Not Interested', 'not interested', this.declineLine || (this.ackText(k, cur) + (this.steps[this.steps.length - 1].kind === 'closing' ? ` ${this.line(this.steps.length - 1)}` : '')));
+        }
+        if (k.intent === 'no') {
+          const pitch = this.nextPitch();
+          if (pitch) { st.declineReason = S.clean(text, 120); return { say: this.speak(pitch), done: false }; } st.interest = 'no'; st.declineReason = S.clean(text, 120); sc.got.push({ q: this.line(sc.idx), a: S.clean(text, 160) }); return this.endWith('Not Interested', 'not interested', this.declineLine || (this.ackText(k, cur) + (this.steps[this.steps.length - 1].kind === 'closing' ? ` ${this.line(this.steps.length - 1)}` : ''))); }
         if (k.intent === 'yes') st.interest = 'yes';
         else if (k.intent === 'maybe') st.interest = 'unsure';
         else { // not a plain yes / no: asked once more, then taken as unsure

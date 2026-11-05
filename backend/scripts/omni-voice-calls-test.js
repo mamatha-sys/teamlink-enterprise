@@ -120,9 +120,10 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const c3 = await cd.hear('...', { heard: 'unclear' });
     const c4 = await cd.hear('yes I am looking');
     const c5 = await cd.hear('no');
+    const c6 = await cd.hear('not really');
     check('nothing heard after the opening: "hello? can you hear me?", not the whole greeting again', /^Hello\? Can you hear me/.test(c1.say) && !/AI assistant/.test(c1.say), c1);
     check('the question is asked after "hello"; an unheard answer gets a short sorry and the question again', /^Are you looking/.test(c2.say) && /^Sorry, .*Are you looking for a job right now\?$/.test(c3.say), { c2, c3 });
-    check('an answer is acknowledged with a short word before the next line, and a "no" with an understanding one', /^(Okay|Alright|Sure|Right)[^.]*\. We have teaching vacancies\. Shall our team call you\?$/.test(c4.say) && /^(Alright, no problem|Okay, understood|Sure, that is fine)\./.test(c5.say) && c5.done === true, { c4, c5 });
+    check('an answer is acknowledged with a short word; a "no" is first asked why (one try to understand), then closed kindly', /^(Okay|Alright|Sure|Right)[^.]*\. We have teaching vacancies\. Shall our team call you\?$/.test(c4.say) && /^I understand\. May I ask why\?/.test(c5.say) && c5.done === false && /^(Alright, no problem|Okay, understood|Sure, that is fine)\./.test(c6.say) && c6.done === true, { c4, c5, c6 });
 
     // THE PERSON'S LANGUAGE: the other versions are made by the local model once and kept; a call with them switches to the language that is spoken
     const SW = 'Opening: Hello {name}, this is the AI assistant of Teamlink.\nAsk: Are you looking for a job right now?\nClosing: Thank you. Goodbye.';
@@ -144,6 +145,21 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const s2 = await swd2.hear('నేను హిందీ లో మాట్లాడతా', { heard: 'clear', lang: 'Hindi' });
     check('a language with no version made (Hindi here) is never switched to: the call stays as it is', swd2.language === 'English', swd2.language);
     check('a translation that is asked for in the background never stops the call', sw.ok && sw2.ok);
+    // CONVINCE: the script's own lines are tried one by one when the person says no (founder 2026-11-05: "not interested ante convince cheyyali")
+    const CV = 'Opening: Hello {name}, this is the AI assistant of Teamlink.\nInterest: Are you interested in a job?\nConvince: This opening has a good salary and the office is near you. Would you like to hear more?\nConvince: Our team can also look at other roles for you. Shall we try?\nDecline: No problem. Have a nice day.\nClosing: Thank you. Goodbye.';
+    const cvr = await omni.create({ externalId: 'cv1', toNumber: '9444444441', name: 'Sravanthi', script: CV }, { ...deps, ami: AMI });
+    const cvd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(cvr.id));
+    cvd.start(); await cvd.hear('hello');
+    const v1 = await cvd.hear('no');
+    const v2 = await cvd.hear('no I am not interested');
+    const v3 = await cvd.hear('no');
+    check('a "no" is answered with the script\'s own Convince lines, one at a time (two tries), then the Decline message', /good salary/.test(v1.say) && !v1.done && /other roles/.test(v2.say) && !v2.done && v3.done === true && /^No problem\. Have a nice day/.test(v3.say), { v1, v2, v3 });
+    const cvr2 = await omni.create({ externalId: 'cv2', toNumber: '9444444442', name: 'Ravi', script: CV }, { ...deps, ami: AMI });
+    const cvd2 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(cvr2.id));
+    cvd2.start(); await cvd2.hear('hello'); await cvd2.hear('no');
+    const y = await cvd2.hear('yes ok tell me');
+    check('if the person says yes after the try, the call goes on (interested)', !/Have a nice day/.test(y.say) && cvd2.st.interest === 'yes', y);
+    check('"do not call me" is never argued with', await (async () => { const cvr3 = await omni.create({ externalId: 'cv3', toNumber: '9444444443', name: 'Asha', script: CV }, { ...deps, ami: AMI }); const d3 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(cvr3.id)); d3.start(); await d3.hear('hello'); const z = await d3.hear('do not call me again'); return z.done === true && !/good salary/.test(z.say); })());
 
     // A SCRIPT PASTED AS ONE BLOCK (the founder's HR Recruiter script): laid out as a conversation, not said in one breath
     const BLOB = 'Opening: Hello {name}, this is an automated call from Teamlink.\nInterest: “Hello, am I speaking with [Candidate Name]? Do you have one minute to talk about a job opportunity?” If yes: Vacancy details “We currently have an opening for HR Recruiter. Location: Kukatpally. Salary: 10K per month.” Interest check “Are you interested in this opportunity?” If interested “Great. Can you confirm a good time for the call?” If not interested / busy “No problem. If you know any graduate who is looking for a job, please share this opportunity.” Closing “Thank you, [Candidate Name]. Have a nice day.”\nClosing: Thank you. Goodbye.';
@@ -162,8 +178,9 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const b2 = await omni.create({ externalId: 'blob2', toNumber: '9999999992', name: 'Ravi Kumar', script: BLOB }, { ...deps, ami: AMI });
     const bd2 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(b2.id));
     bd2.start(); await bd2.hear('hello'); await bd2.hear('yes');
-    const no = await bd2.hear('no');
-    check('"not interested" gets the script\'s own message for it, not the pasted closing', no.done === true && /^No problem\. If you know any graduate/.test(no.say) && !/Have a nice day/.test(no.say), no);
+    const try1 = await bd2.hear('no');
+    const no = await bd2.hear('the salary is low');
+    check('"not interested": first one try (why?), then the script\'s own message for it, not the pasted closing', /^I understand\. May I ask why/.test(try1.say) && try1.done === false && no.done === true && /^No problem\. If you know any graduate/.test(no.say) && !/Have a nice day/.test(no.say), no);
     check('a version in another language is taken as written too', (await refuse({ scripts: { Telugu: 'నమస్కారం' }, toNumber: '9666666665' })).ok === true);
     check('the line not being ready is said in words', await (async () => { const x = await refuse({}, { ...deps, config: LINE({ ready: false, problems: ['The Asterisk manager login is missing.'] }) }); return !x.ok && /not ready/.test(x.reason); })());
     check('in Test mode only the saved test numbers are called', await (async () => { const x = await refuse({ toNumber: '9111111111' }, { ...deps, config: LINE({ mode: 'Test', testNumbers: ['+919030048228'] }) }); return !x.ok && x.code === 'test_number'; })());
@@ -175,7 +192,7 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     svc.setClock(() => new Date('2026-11-04T20:30:00Z')); // 02:00 India time
     check('outside the calling hours nothing is dialled', await (async () => { const x = await refuse({}); return !x.ok && x.code === 'outside_hours'; })());
     svc.setClock(() => new Date('2026-11-04T06:30:00Z'));
-    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 11, { before, now: originated.length });
+    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 14, { before, now: originated.length });
     check('Asterisk refusing the call fails it in words (and leaves a failed row)', await (async () => { const x = await refuse({ toNumber: '9333333333' }, { ...deps, ami: { action: async () => ({ Response: 'Error', Message: 'no trunk' }) } }); return !x.ok && x.code === 'not_dialled'; })());
   } finally {
     await prisma.$disconnect().catch(() => {});

@@ -58,16 +58,19 @@ async function cachedVersion(text, lang) {
   try { const r = await prisma.appSetting.findUnique({ where: { key: trKey(text, lang) } }); return r ? String(JSON.parse(r.value).text || '') || null : null; } catch { return null; }
 }
 
+let chain = Promise.resolve(); // the translations wait for each other
 function warm(text, to, tdeps = {}) {
   const key = trKey(text, to);
   if (inflight.has(key) || (failedAt.get(key) || 0) > Date.now() - 600000) return inflight.get(key) || null;
-  const p = (async () => {
-    const r = await require('./scriptTranslate').translateScript(text, to, { limits: LIMITS, ...tdeps }); // eslint-disable-line global-require
+  const p = (chain = chain.then(async () => {
+    const ST = require('./scriptTranslate'); // eslint-disable-line global-require
+    const base = ST.ollama();
+    const r = await ST.translateScript(text, to, { limits: LIMITS, ...(base ? { config: { ...base, timeoutMs: 600000 } } : {}), ...tdeps });
     if (r.ok) {
       const value = JSON.stringify({ text: r.text, at: new Date().toISOString(), by: 'machine translation (Ollama)' });
       await prisma.appSetting.upsert({ where: { key }, create: { key, value }, update: { value } });
-    } else failedAt.set(key, Date.now());
-  })().catch(() => { failedAt.set(key, Date.now()); }).finally(() => { inflight.delete(key); });
+    } else { failedAt.set(key, Date.now()); console.error(`[omni-voice] ${to} version of a script could not be made: ${r.error}`); } // eslint-disable-line no-console
+  }).catch((e) => { failedAt.set(key, Date.now()); console.error(`[omni-voice] translation failed: ${e && e.message}`); })).finally(() => { inflight.delete(key); }); // eslint-disable-line no-console
   inflight.set(key, p);
   return p;
 }
@@ -102,6 +105,7 @@ const cleanSeg = (t) => String(t).replace(/\[\s*(candidate'?s?\s*name|candidate|
 function kindOfLabel(label, text, state) {
   const L = String(label || '').toLowerCase();
   if (/closing|goodbye|farewell|end of (the )?call/.test(L)) return 'Closing';
+  if (/convinc|persuad|objection|rebuttal|why not/.test(L)) return 'Convince';
   if (/not interested|declin|refus|busy|not available|\bno\b/.test(L)) return 'Decline';
   if (/opening|greeting|intro/.test(L) || (!L && !state.seen)) return state.hasOpening ? (/[?？]/.test(text) ? 'Ask' : 'Say') : 'Opening';
   if (/^(if\s+)?(interested|yes)\b/.test(L) && !/check|question/.test(L)) return /[?？]/.test(text) ? 'Ask' : 'Say';
@@ -112,7 +116,7 @@ function normalizeScript(raw) {
   const lines = String(raw == null ? '' : raw).replace(/\r/g, '').split('\n').map((l) => l.trim()).filter(Boolean);
   const out = [];
   lines.forEach((l) => {
-    const m = /^(opening|say|ask|interest|closing|decline)\s*[:\-–]\s*(.*)$/i.exec(l);
+    const m = /^(opening|say|ask|interest|closing|decline|convince)\s*[:\-–]\s*(.*)$/i.exec(l);
     const body = m ? m[2] : l;
     const segs = [...body.matchAll(/[“"]([^”"]{2,})[”"]/g)];
     if (segs.length < 2) { out.push(l); return; }

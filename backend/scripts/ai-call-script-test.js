@@ -59,6 +59,8 @@ const make = (script = SCRIPT) => new ScriptDialogue({ purpose: 'Screening', lan
 
   d = make(); d.start(); await d.hear('yes'); await d.hear('3 years'); await d.hear('Hyderabad');
   r = await d.hear('no I am not interested');
+  check('a "no" to the interest question is first answered with one try to understand (why?)', !r.done && /May I ask why/.test(r.say), r);
+  r = await d.hear('I have another job');
   o = d.outcome();
   check('"no" to the interest question ends the call: Not Interested, with their reason', r.done && o.outcome === 'Not Interested' && o.interest === 'no' && !!o.declineReason, o);
 
