@@ -26,6 +26,17 @@ router.post('/prepare', async (req, res) => {
   return res.status(r.ok ? 200 : 422).json(r);
 });
 
+// Recruiters Tokens in Omni-Channel: the people, who may see them, and their same-month joinings (outreach/creditUseBridge.js). Read only.
+router.get('/credit-use', async (req, res) => {
+  try {
+    const out = await require('../outreach/creditUseBridge').forOmni(req.query.viewer, req.query.month); // eslint-disable-line global-require
+    return res.set('Cache-Control', 'no-store').json(out);
+  } catch (err) {
+    console.error('[omni-credit-use]', err && err.message); // eslint-disable-line no-console
+    return res.json({ ok: false, code: 'FAILED', error: 'TeamLink could not read the numbers just now.' }); // 200, never 502/503
+  }
+});
+
 router.post('/calls', async (req, res) => {
   const b = req.body || {};
   const r = await omni.create({ externalId: b.externalId, toNumber: b.toNumber, name: b.name, script: b.script, scriptLanguage: b.scriptLanguage, scripts: b.scripts, agentName: b.agentName });
