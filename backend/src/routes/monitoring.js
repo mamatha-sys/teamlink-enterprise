@@ -8,8 +8,10 @@
 //                            { setupCode, deviceName, os, acceptPolicyVersion? }   the same with a one-time code from TeamLink
 //   POST /activity           { records: [{ appName, windowTitle, start, end, isIdle }] }   every 1-5 minutes
 //   POST /heartbeat          -> { settings, consentRequired }   updates last seen
+//   POST /live               { currentApp, title, idle }   the moment the app or tab changes (at most every 2 seconds)
 // THE SCREENS (a TeamLink login; HR / Admin see everyone, anybody else only themselves):
 //   GET  /overview?date=                         the Live Dashboard: HR / Admin everyone, a TL / STL / Manager their team
+//   GET  /live                                   what changes by the second, for the same reach: the page reads it every 2 seconds
 //   GET  /employee/:id?from=&to=                 the same reach, or :id = me (a look at someone else is audited)
 //   GET  /reports?from=&to=&department=&view=employee|daily|team&format=   the same reach (format=xlsx|csv|pdf: the file)
 //   GET  /usage?from=&to=&department=            top apps, top websites, the productive split
@@ -135,6 +137,7 @@ router.post('/heartbeat', agent, wrap(async (req, res) => {
   const update = s.autoUpdate !== false && M.needsUpdate(body.agentVersion) ? { version: M.latestAgent().version, sha256: M.latestAgent().sha256 } : undefined;
   return res.json({ settings: { ...publicSettings(s), ...mine }, consentRequired: !consent, update, ...(consent ? {} : { policyText: s.policyText }) });
 }));
+router.post('/live', agent, wrap(async (req, res) => { await M.liveUpdate(req.device, req.body || {}); res.json({ ok: true }); }));
 // auto-update: the agent script itself; the PC checks its hash against the heartbeat before using it
 router.get('/agent-script', agent, wrap(async (req, res) => {
   res.set('Content-Type', 'application/octet-stream');
@@ -161,6 +164,7 @@ const adminOnly = (req, res, next) => (M.isMonitorAdmin(req.user) ? next() : fai
 const L = require('../utils/monitoringLinks');
 
 router.get('/overview', teamOnly, wrap(async (req, res) => res.json(await M.overview(req.query.date, req.access))));
+router.get('/live', teamOnly, wrap(async (req, res) => res.json(await M.liveRows(req.access))));
 
 router.get('/employee/:id', wrap(async (req, res) => {
   const id = req.params.id === 'me' ? req.user.employeeId : req.params.id;

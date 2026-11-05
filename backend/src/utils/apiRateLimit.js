@@ -21,6 +21,7 @@ const jwt = require('jsonwebtoken');
 const STRICT = [
   // Employee Monitoring agents (routes/monitoring.js): counted per PC, not per office address (one office = one address)
   { name: 'monitor-register', re: /^\/api\/monitoring\/devices\/register\/?$/i, methods: ['POST'], max: 10, byIp: true },
+  { name: 'monitor-live', re: /^\/api\/monitoring\/live\/?$/i, methods: ['POST'], max: 60 }, // at most one every 2 seconds, from the PC itself
   { name: 'monitor-agent', re: /^\/api\/monitoring\/(activity|heartbeat|consent)\/?$/i, methods: ['POST'], max: 30 },
   { name: 'login', re: /^\/api\/auth\/login(\/choose)?\/?$/i, methods: ['POST'], max: 20, byIp: true },
   { name: 'reset', re: /^\/api\/auth\/(forgot-password|reset-password)(\/|$)/i, methods: ['POST'], max: 10, byIp: true },

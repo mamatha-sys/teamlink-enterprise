@@ -346,13 +346,27 @@ async function ingest(device, records) {
   return { status: 200, saved: fresh.length, skipped };
 }
 
-// A heartbeat: what the PC is doing now, for the Live Dashboard (the app's name only, never a title).
+// What is on screen now, for the Live Dashboard: the same cleaning as a record, so no chat, mail or password title, and none at all
+// for someone on app names only.
+async function liveTitle(device, body) {
+  if (!body.title || body.idle === true) return null;
+  const cfg = effective(await settings(), await overrideIndex(), device.employee || { id: device.employeeId });
+  return cfg.trackTitles && !cfg.excluded ? cleanTitle(cleanApp(body.currentApp), body.title) : null;
+}
+// The moment the app or tab changes (founder 2026-11-05: "within sec lo updation jaragali"). The live picture only: records are unchanged.
+async function liveUpdate(device, body = {}) {
+  await prisma.monitoringDevice.update({
+    where: { id: device.id },
+    data: { lastSeenAt: new Date(), currentApp: body.currentApp ? cleanApp(body.currentApp) || null : null, currentIdle: body.idle === true, currentTitle: await liveTitle(device, body) },
+  });
+}
+// A heartbeat: what the PC is doing now, for the Live Dashboard.
 async function heartbeat(device, body = {}) {
   const paused = ['break', 'clockout', 'stopped'].includes(body.paused) ? body.paused : null;
   await prisma.monitoringDevice.update({
     where: { id: device.id },
     data: {
-      lastSeenAt: new Date(), currentApp: body.currentApp ? cleanApp(body.currentApp) || null : null, currentIdle: body.idle === true, pausedState: paused,
+      lastSeenAt: new Date(), currentApp: body.currentApp ? cleanApp(body.currentApp) || null : null, currentIdle: body.idle === true, pausedState: paused, currentTitle: paused ? null : await liveTitle(device, body),
       ...(body.agentVersion ? { agentVersion: String(body.agentVersion).slice(0, 20) } : {}),
     },
   });
@@ -418,6 +432,33 @@ function liveStatus(dev, onLeave, now) {
   return onLeave ? 'On leave' : 'Offline';
 }
 
+// Only what changes by the second, for the Live Dashboard's fast refresh: no activity records, so it stays light.
+async function liveRows(access = null) {
+  const cfg = await settings();
+  const today = todayIst();
+  const now = Date.now();
+  const nowHm = hmOf(now);
+  const [devices, leaves, rules] = await Promise.all([
+    prisma.monitoringDevice.findMany({ where: { isActive: true, ...within(access) }, select: { employeeId: true, lastSeenAt: true, currentApp: true, currentTitle: true, currentIdle: true, pausedState: true, employee: { select: { id: true, department: true } } } }),
+    prisma.leaveRequest.findMany({ where: { status: 'Approved', fromDate: { lte: today }, toDate: { gte: today }, ...within(access) }, select: { employeeId: true } }),
+    overrideIndex(),
+  ]);
+  const onLeave = new Set(leaves.map((l) => l.employeeId));
+  const latest = new Map();
+  devices.forEach((x) => { const cur = latest.get(x.employeeId); if (!cur || new Date(x.lastSeenAt || 0) > new Date(cur.lastSeenAt || 0)) latest.set(x.employeeId, x); });
+  const rows = [];
+  latest.forEach((dev, id) => {
+    const mine = effective(cfg, rules, dev.employee);
+    if (mine.excluded) return;
+    let status = liveStatus(dev, onLeave.has(id), now);
+    if (mine.breakStart && mine.breakStart <= nowHm && nowHm < mine.breakEnd && ['Online', 'Idle'].includes(status)) status = 'On break';
+    const using = ['Online', 'Idle'].includes(status);
+    rows.push({ employeeId: id, status, currentApp: using ? dev.currentApp || null : null, currentTitle: using && status === 'Online' ? dev.currentTitle || null : null, lastHeartbeat: dev.lastSeenAt, online: using });
+  });
+  const count = (s) => rows.filter((r) => r.status === s).length;
+  return { rows, cards: { online: count('Online'), idle: count('Idle'), offline: count('Offline') + count('Stopped'), onBreak: count('On break') + count('Clocked out') } };
+}
+
 // The Live Dashboard / Overview of one day: every employee this login may see who has a registered PC.
 async function overview(day, access = null) {
   const d = validDay(day) ? day : todayIst();
@@ -425,7 +466,7 @@ async function overview(day, access = null) {
   const cfg = await settings();
   const nowHm = hmOf(Date.now());
   const [devices, logs, catOf, leaves, rules] = await Promise.all([
-    prisma.monitoringDevice.findMany({ where: { isActive: true, ...within(access) }, select: { employeeId: true, lastSeenAt: true, currentApp: true, currentIdle: true, pausedState: true } }),
+    prisma.monitoringDevice.findMany({ where: { isActive: true, ...within(access) }, select: { employeeId: true, lastSeenAt: true, currentApp: true, currentTitle: true, currentIdle: true, pausedState: true } }),
     prisma.activityLog.findMany({ where: { day: d, ...within(access) }, select: LOG_SELECT }),
     categoryIndex(),
     prisma.leaveRequest.findMany({ where: { status: 'Approved', fromDate: { lte: d }, toDate: { gte: d }, ...within(access) }, select: { employeeId: true } }),
@@ -451,7 +492,7 @@ async function overview(day, access = null) {
     return {
       employeeId: id, name: e.name, code: e.employeeCode || null, department: e.department || null, team: e.team || null,
       firstSeen: t.first, lastSeen: t.last, activeHours: t.activeHours, idleHours: t.idleHours, breakHours: t.breakHours, productivity: t.productivity,
-      status, currentApp: live && dev && ['Online', 'Idle'].includes(status) ? dev.currentApp || null : null,
+      status, currentApp: live && dev && ['Online', 'Idle'].includes(status) ? dev.currentApp || null : null, currentTitle: live && dev && status === 'Online' ? dev.currentTitle || null : null,
       lastHeartbeat: dev ? dev.lastSeenAt : null, online: status === 'Online' || status === 'Idle',
     };
   }).sort((a, b) => b.activeHours - a.activeHours || String(a.name).localeCompare(String(b.name)));
@@ -692,6 +733,6 @@ function startSweep() {
 }
 
 module.exports = {
-  istTime, hmOf, addDays, validDay, shiftDay, atShift, overrideIndex, effective, saveOverride, listOverrides, removeOverride, latestAgent, needsUpdate, isSuper, isIt, isItIn, canManageDevices, totalsOf, newSetupCode, readSetupCode, endSetupCode, agentSetupFile, agentInstaller, CATEGORIES, DEFAULT_POLICY, AUDIT_ENTITIES, isMonitorAdmin, accessOf, heartbeat, usage, auditRows, settings, saveSettings, hasConsent, recordConsent, hashToken, deviceOf, registerDevice,
+  liveUpdate, liveRows, istTime, hmOf, addDays, validDay, shiftDay, atShift, overrideIndex, effective, saveOverride, listOverrides, removeOverride, latestAgent, needsUpdate, isSuper, isIt, isItIn, canManageDevices, totalsOf, newSetupCode, readSetupCode, endSetupCode, agentSetupFile, agentInstaller, CATEGORIES, DEFAULT_POLICY, AUDIT_ENTITIES, isMonitorAdmin, accessOf, heartbeat, usage, auditRows, settings, saveSettings, hasConsent, recordConsent, hashToken, deviceOf, registerDevice,
   ingest, categoryIndex, overview, employeeDetail, reportRows, uncategorised, pcActivity, purge, startSweep, todayIst, istDay, cleanTitle,
 };

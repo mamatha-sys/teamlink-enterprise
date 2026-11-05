@@ -61,3 +61,5 @@ main:has(.mon){max-width:1680px}
 .mon .mon-tag button{border:0;background:none;cursor:pointer;font-size:15px;line-height:1;padding:0 2px;color:inherit}
 .mon .mon-grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}
 @media (max-width:760px){.mon .mon-grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.mon .mon-now{max-width:280px}
+.mon .mon-now .small-muted{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px}

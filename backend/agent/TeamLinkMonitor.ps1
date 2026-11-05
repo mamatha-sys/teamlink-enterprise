@@ -21,7 +21,7 @@ param(
   [switch]$AfterUpdate       # started by its own older copy, which is closing
 )
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '1.9'
+$AgentVersion = '2.0'
 # older Windows would otherwise try an old, refused kind of secure connection
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, System.Security
@@ -86,7 +86,7 @@ function Load-Config {
 }
 
 # ---------------------------------------------------------------- talking to TeamLink
-function Call-Api($method, $path, $body, $token) {
+function Call-Api($method, $path, $body, $token, $wait = 30) {
   $headers = @{}
   if ($token) { $headers['Authorization'] = "Device $token" }
   # bytes, not a string: Windows PowerShell would send a string in the old Latin encoding and spoil Telugu / Hindi window titles
@@ -94,7 +94,7 @@ function Call-Api($method, $path, $body, $token) {
   [byte[]]$json = $null
   if ($body) { $json = [Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 6 -Compress)) }
   try {
-    $r = Invoke-WebRequest -Method $method -Uri ($script:Server.TrimEnd('/') + '/api/monitoring' + $path) -Headers $headers -Body $json -ContentType 'application/json; charset=utf-8' -UseBasicParsing -TimeoutSec 30
+    $r = Invoke-WebRequest -Method $method -Uri ($script:Server.TrimEnd('/') + '/api/monitoring' + $path) -Headers $headers -Body $json -ContentType 'application/json; charset=utf-8' -UseBasicParsing -TimeoutSec $wait
     $text = [Text.Encoding]::UTF8.GetString($r.RawContentStream.ToArray())
     return @{ status = [int]$r.StatusCode; data = ($text | ConvertFrom-Json) }
   } catch [System.Net.WebException] {
@@ -191,6 +191,9 @@ $current = $null      # the open segment: app, title, idle, brk, start
 $lastSample = $null   # when the PC last looked: a long gap means it was asleep
 $stopping = $false    # the employee pressed Stop recording
 $updateTried = ''     # a version already tried: once a run is enough
+$updating = $false    # the new version is starting: this one closes
+$lastLive = ''        # what TeamLink was last told is in front
+$nextLive = [datetime]::MinValue
 $paused = $false      # stopped by TeamLink (no consent, PC switched off)
 $onBreak = $false     # the employee pressed Pause: only the break itself is timed
 $clockedOutDay = ''   # the employee clocked out: nothing until the next day
@@ -273,6 +276,22 @@ function Sample {
   $script:current = @{ app = $app; title = $title; idle = $idle; brk = $false; start = $from }
   Write-Open
 }
+# THE LIVE DASHBOARD, WITHIN SECONDS: looks at what is in front every 2 seconds and tells TeamLink only when it changed. This is the live
+# picture alone: the records still come from Sample and Flush, so a page that keeps changing its title cannot fill them up.
+function Watch-Front {
+  if ($script:paused -or $script:onBreak -or $script:clockedOutDay -or -not (In-WorkHours)) { return }
+  $now = Get-Date
+  if ($now -lt $script:nextLive) { return }
+  $f = Get-Front
+  $app = $f.app; $title = $f.title
+  $idle = [double][TLWin]::IdleSeconds() -ge ([int]$settings.idleThresholdMinutes * 60)
+  if ($app -in @('LockApp', 'LogonUI')) { $idle = $true; $app = 'Locked' }
+  if ($idle) { $title = '' }
+  $key = "$app|$title|$idle"
+  if ($key -eq $script:lastLive) { return }
+  $r = Call-Api 'POST' '/live' @{ currentApp = $app; title = $title; idle = [bool]$idle } $script:cfg.token 5
+  if ($r.status -eq 200) { $script:lastLive = $key; $script:nextLive = $now.AddSeconds(2) } else { $script:nextLive = $now.AddSeconds(30) }  # no line: try again later, quietly
+}
 function Flush {
   Close-Segment   # send what is done so far
   Sample          # and go straight on: a heartbeat right after this must still say what is in front
@@ -315,16 +334,18 @@ function Apply-Update($u) {
   try { Flush } catch {}
   Start-Process -FilePath "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', "`"$copy`"", '-AfterUpdate')
   $script:tray.Visible = $false
+  $script:updating = $true
   [Windows.Forms.Application]::Exit()
 }
 function Heartbeat {
   # what the Live Dashboard shows: the app's name only, never a title
   $c = $script:current
   $state = if ($script:stopping) { 'stopped' } elseif ($script:clockedOutDay) { 'clockout' } elseif ($script:onBreak) { 'break' } else { $null }
-  $beat = @{ agentVersion = $AgentVersion; paused = $state; currentApp = $(if ($c -and -not $c.brk) { $c.app } else { '' }); idle = [bool]($c -and $c.idle) }
+  $beat = @{ agentVersion = $AgentVersion; paused = $state; currentApp = $(if ($c -and -not $c.brk) { $c.app } else { '' }); title = $(if ($c -and -not $c.brk) { $c.title } else { '' }); idle = [bool]($c -and $c.idle) }
   $r = Call-Api 'POST' '/heartbeat' $beat $script:cfg.token
   if ($r.status -eq 200) {
     $s = $r.data.settings
+    $script:lastLive = ''   # this heartbeat may be up to 15 seconds old: the watcher sets the picture right
     $script:settings = @{ workStart = $s.workStart; workEnd = $s.workEnd; idleThresholdMinutes = $s.idleThresholdMinutes; excluded = [bool]$s.excluded }
     # a new notice: shown at once, and nothing more is recorded until it is accepted
     if ($r.data.consentRequired) { Ask-Consent @{ policyText = $r.data.policyText; policyVersion = $s.policyVersion } }
@@ -358,8 +379,11 @@ try { [void][TLWin]::ShowWindow([TLWin]::GetConsoleWindow(), 0) } catch {}
 
 Sample   # so the very first heartbeat already says what is in front
 Heartbeat
+# an update on this first heartbeat: the message loop has not started, so Exit above did nothing and the new copy is waiting for this one
+if ($updating) { $tray.Dispose(); exit 0 }
 $sampleTimer = New-Object Windows.Forms.Timer; $sampleTimer.Interval = 15000; $sampleTimer.Add_Tick({ try { Sample } catch {} }); $sampleTimer.Start()
 $flushTimer = New-Object Windows.Forms.Timer; $flushTimer.Interval = 120000; $flushTimer.Add_Tick({ try { Flush } catch {} }); $flushTimer.Start()
+$liveTimer = New-Object Windows.Forms.Timer; $liveTimer.Interval = 2000; $liveTimer.Add_Tick({ try { Watch-Front } catch {} }); $liveTimer.Start()
 $beatTimer = New-Object Windows.Forms.Timer; $beatTimer.Interval = 60000; $beatTimer.Add_Tick({ try { Heartbeat } catch {} }); $beatTimer.Start()
 [Windows.Forms.Application]::Run()
 $tray.Dispose()

@@ -103,16 +103,26 @@ function Overview({ onOpen }) {
   const [status, setStatus] = useState('');
   const { data, error, loading, reload } = useGet('/monitoring/overview', { date });
   const live = date === todayIst();
-  // live: refreshes by itself every 30 seconds
+  // live: hours and scores every 30 seconds; who is doing what every 2 seconds, from the light /live (founder: "within sec lo updation jaragali")
+  const [now, setNow] = useState(null);
   useEffect(() => {
-    if (!live) return undefined;
+    if (!live) { setNow(null); return undefined; }
     const t = setInterval(() => { if (!document.hidden) reload(); }, 30000);
-    return () => clearInterval(t);
+    let busy = false;
+    const read = () => {
+      if (document.hidden || busy) return;
+      busy = true;
+      api.get('/monitoring/live').then((r) => setNow(r.data)).catch(() => {}).finally(() => { busy = false; });
+    };
+    read();
+    const fast = setInterval(read, 2000);
+    return () => { clearInterval(t); clearInterval(fast); };
   }, [live, reload]);
-  const rows = useMemo(() => ((data && data.rows) || []).filter((r) => (!dept || r.department === dept) && (!team || r.team === team)
+  const fresh = useMemo(() => new Map(((now && now.rows) || []).map((r) => [r.employeeId, r])), [now]);
+  const rows = useMemo(() => ((data && data.rows) || []).map((r) => ({ ...r, ...(fresh.get(r.employeeId) || {}) })).filter((r) => (!dept || r.department === dept) && (!team || r.team === team)
     && (!status || r.status === status)
-    && (!q.trim() || `${r.name} ${r.code || ''}`.toLowerCase().includes(q.trim().toLowerCase()))), [data, dept, team, status, q]);
-  const c = data && data.cards;
+    && (!q.trim() || `${r.name} ${r.code || ''}`.toLowerCase().includes(q.trim().toLowerCase()))), [data, fresh, dept, team, status, q]);
+  const c = data && data.cards ? { ...data.cards, ...((now && now.cards) || {}) } : null;
   const card = (s) => ({ active: status === s, onClick: live ? () => setStatus(status === s ? '' : s) : undefined });
   return (
     <>
@@ -127,7 +137,7 @@ function Overview({ onOpen }) {
           <option value="">All teams</option>
           {((data && data.teams) || []).map((d) => <option key={d} value={d}>{d}</option>)}
         </Combo>
-        {live && <span className="small-muted" style={{ marginLeft: 'auto' }}>Live: refreshes every 30 seconds</span>}
+        {live && <span className="small-muted" style={{ marginLeft: 'auto' }}>Live: updates within seconds</span>}
       </div>
       {error && <div className="notice red">{error}</div>}
       <KpiRow>
@@ -147,7 +157,7 @@ function Overview({ onOpen }) {
                 <td><b>{r.name}</b>{r.code && <div className="small-muted">{r.code}</div>}</td>
                 <td>{r.department || '—'}{r.team && <div className="small-muted">{r.team}</div>}</td>
                 {live && <td><Pill tone={STATUS_TONE[r.status] || 'slate'}>{r.status || '—'}</Pill></td>}
-                {live && <td>{r.currentApp || <span className="small-muted">—</span>}</td>}
+                {live && <td className="mon-now">{r.currentApp || <span className="small-muted">—</span>}{r.currentTitle && <div className="small-muted" title={r.currentTitle}>{r.currentTitle}</div>}</td>}
                 <td>{tm(r.firstSeen)}</td>
                 <td>{live && r.lastHeartbeat ? dt(r.lastHeartbeat) : tm(r.lastSeen)}</td>
                 <td className="num">{h(r.activeHours)}</td>

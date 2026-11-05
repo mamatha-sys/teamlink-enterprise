@@ -5221,6 +5221,7 @@ model MonitoringDevice {
   // what the last heartbeat said (the Live Dashboard): the app in front (name only), idle, break / clocked out, the agent's version
   agentVersion String?       @map("agent_version")
   currentApp   String?       @map("current_app")
+  currentTitle String?       @map("current_title") // the Live Dashboard: cleaned like any title (no chat, mail or password titles)
   currentIdle  Boolean       @default(false) @map("current_idle")
   pausedState  String?       @map("paused_state") // break | clockout
   activity     ActivityLog[]
