@@ -433,6 +433,7 @@ module.exports = function mountCandidatesBoard(router, deps) {
         name: app.candidate ? app.candidate.name : '',
         stage: app.stage,
         joiningStatus: app.joiningStatus || null,
+        documentsStatus: app.documentsStatus || 'Pending',
         internal,
         // a client placement may be marked Joined from Selected / Offer / Offer accepted (founder 2026-11-04)
         mayJoin: (internal ? ['OFFER_ACCEPTED'] : ['SELECTED', 'OFFER', 'OFFER_ACCEPTED']).includes(app.stage),

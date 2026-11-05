@@ -397,6 +397,16 @@ function JoinedDialog({ app, onClose, onDone }) {
   const internal = terms ? terms.internal : !!app.internal;
   const ctcOk = internal || Number(form.offeredCtc) > 0;
   const feeOk = !terms || !terms.canSetFee || (Number(form.feePercent) > 0 && Number(form.feePercent) <= 50);
+  // AN INTERNAL HIRE'S DOCUMENTS (founder 2026-11-05): the joining date needs them checked, so they are marked here too (same as the Joining screen).
+  const docsNeeded = !!(terms && internal && terms.documentsStatus && terms.documentsStatus !== 'Verified');
+  async function docsChecked() {
+    setBusy(true); setError('');
+    try {
+      await api.post(`/ats/offers/${app.id}/documents`, { documentsStatus: 'Verified' });
+      setTerms((t) => ({ ...t, documentsStatus: 'Verified' }));
+    } catch (err) { setError(errText(err, 'Could not save the documents. Please try again.')); }
+    setBusy(false);
+  }
   // "Did not join" people are not marked joined from here.
   const dropped = !!(terms && terms.joiningStatus === 'Dropped');
   const notYet = !!(terms && terms.stage && (terms.mayJoin === undefined ? terms.stage !== 'OFFER_ACCEPTED' : !terms.mayJoin));
@@ -429,7 +439,7 @@ function JoinedDialog({ app, onClose, onDone }) {
       footer={ask ? <CtcAskButtons busy={busy} onNo={() => setAsk(null)} onYes={() => save(true)} /> : (
         <>
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn btn-primary" disabled={busy || !terms || dropped || notYet || !form.joiningDate || !ctcOk || !feeOk} onClick={() => save(false)}>
+          <button type="button" className="btn btn-primary" disabled={busy || !terms || dropped || notYet || docsNeeded || !form.joiningDate || !ctcOk || !feeOk} onClick={() => save(false)}>
             {busy ? 'Saving…' : 'Save'}
           </button>
         </>
@@ -440,6 +450,12 @@ function JoinedDialog({ app, onClose, onDone }) {
       {!dropped && notYet && <div className="notice">{internal ? <>The offer comes first: press &quot;Prepare offer&quot; on the profile. When the candidate accepts, mark the joining here.</> : <>The candidate is marked Joined once they are Selected. Move them to Selected first.</>}</div>}
       {terms && !dropped && (
         <>
+          {docsNeeded && !notYet && (
+            <div className="notice" style={{ marginBottom: 8 }}>
+              <div style={{ marginBottom: 6 }}>{`Documents: ${terms.documentsStatus === 'Submitted' ? 'received, not checked yet' : 'not received yet'}. Check ${app.name}'s documents first, then press the button.`}</div>
+              <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={docsChecked}>Documents checked ✓</button>
+            </div>
+          )}
           <label className="field">
             <span>Joining date</span>
             <input type="date" value={form.joiningDate} onChange={(e) => setForm({ ...form, joiningDate: e.target.value })} />
