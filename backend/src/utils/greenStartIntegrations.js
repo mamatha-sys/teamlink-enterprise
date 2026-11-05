@@ -478,4 +478,4 @@ function start() {
 }
 async function lastResult() { return (await readState()).last || null; }
 
-module.exports = { sync, connections, schedule, start, lastResult, teamlinkChannels, waMapView, saveWaMap, templatesToOmni, STATE_KEY, TOKEN_DEAD, markWhatsappTokenRejected, pushOne };
+module.exports = { call, signIn, workspacesOf, sync, connections, schedule, start, lastResult, teamlinkChannels, waMapView, saveWaMap, templatesToOmni, STATE_KEY, TOKEN_DEAD, markWhatsappTokenRejected, pushOne };

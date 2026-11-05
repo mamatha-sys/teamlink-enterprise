@@ -1,0 +1,40 @@
+// ---------------------------------------------------------------------------
+// WHATSAPP AI AGENT: did a campaign sent INSIDE Omni-Channel (Green Start) reach this number? Those sends are not in TeamLink's promotion log, but the replies come here
+// (Meta's webhook points at TeamLink), so the agent asks Green Start's GET /campaigns/recent-recipient, workspace by workspace, once for a person it does not know as promoted.
+// A campaign there has no TeamLink job: the agent uses the candidate's latest application, or only the knowledge base. Never throws: no answer = not a promotion.
+// ---------------------------------------------------------------------------
+const GI = require('../utils/greenStartIntegrations');
+
+const TOKEN_MS = 20 * 60000;
+const WAIT_MS = 8000;
+let login = null; // { token, wss, at }
+
+async function session() {
+  if (login && Date.now() - login.at < TOKEN_MS) return login;
+  const { token } = await GI.signIn();
+  login = { token, wss: await GI.workspacesOf(token), at: Date.now() };
+  return login;
+}
+const inTime = (p) => Promise.race([p, new Promise((_, no) => { setTimeout(() => no(new Error('Omni-Channel did not answer')), WAIT_MS); })]);
+
+// -> { campaignId, campaignName, at } | null
+async function recentSend(e164, days) {
+  try {
+    const { token, wss } = await inTime(session());
+    let best = null;
+    for (const ws of wss) {
+      // eslint-disable-next-line no-await-in-loop
+      const r = await inTime(GI.call('GET', `/campaigns/recent-recipient?phone=${encodeURIComponent(e164)}&days=${Number(days) || 7}`, { token, ws: ws.id }));
+      const at = r && r.found ? new Date(r.sentAt).getTime() : 0;
+      if (at && (!best || at > best.at)) best = { campaignId: `gs:${r.campaignId}`, campaignName: r.campaignName, at };
+    }
+    return best;
+  } catch (err) {
+    login = null;
+    console.error('[omni-wa] Green Start campaign check:', err && err.message); // eslint-disable-line no-console
+    return null;
+  }
+}
+const reset = () => { login = null; };
+
+module.exports = { recentSend, reset };

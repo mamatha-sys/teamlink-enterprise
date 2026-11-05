@@ -260,6 +260,55 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     await Cfg.save(admin, { testNumbers: [] });
     check('working hours: inside and outside (India time), over midnight too', G.insideHours({ hoursOn: true, hoursFrom: '09:00', hoursTo: '18:00' }, Date.UTC(2026, 10, 5, 6, 0)) === true && G.insideHours({ hoursOn: true, hoursFrom: '09:00', hoursTo: '18:00' }, Date.UTC(2026, 10, 5, 15, 0)) === false && G.insideHours({ hoursOn: true, hoursFrom: '22:00', hoursTo: '06:00' }, Date.UTC(2026, 10, 5, 18, 0)) === true);
 
+    // ---- 8b. a campaign sent inside Omni-Channel (Green Start): not in TeamLink's log, the replies come here
+    console.log('\n-- a campaign sent from Green Start');
+    const gsSeen = [];
+    const gs = { found: null, broken: false };
+    const gsServer = http.createServer((req, res) => {
+      gsSeen.push({ url: req.url, ws: req.headers['x-workspace-id'], auth: req.headers.authorization });
+      res.writeHead(gs.broken ? 500 : 200, { 'Content-Type': 'application/json' });
+      if (gs.broken) return res.end('{"message":"down"}');
+      const hit = req.headers['x-workspace-id'] === 'ws2' && gs.found;
+      return res.end(JSON.stringify({ success: true, data: hit ? { found: true, campaignId: 'c9', campaignName: 'ZZTEST Nurses', sentAt: new Date().toISOString() } : { found: false } }));
+    });
+    await new Promise((r) => { gsServer.listen(0, '127.0.0.1', r); });
+    process.env.GREENSTART_API_PORT = String(gsServer.address().port);
+    const GI = require(path.join(BACK, 'src/utils/greenStartIntegrations'));
+    const GC = require(path.join(BACK, 'src/omniwa/gsCampaign'));
+    GI.signIn = async () => ({ token: 'zz-gs-token' });
+    GI.workspacesOf = async () => [{ id: 'ws1', name: 'Medical' }, { id: 'ws2', name: 'Education' }];
+    GC.reset();
+    const i = await mkCandidate(10, 'Indu');
+    await inbound(phoneOf(10), 'Hi');
+    stub.calls.length = 0;
+    await run();
+    check('a candidate no campaign reached: Green Start is asked (every workspace, this number), and the AI stays out', gsSeen.length === 2 && gsSeen.every((x) => x.url.includes(`phone=${phoneOf(10)}`) && x.auth === 'Bearer zz-gs-token') && stub.calls.length === 0, gsSeen);
+    gs.found = true;
+    await inbound(phoneOf(10), 'I am interested');
+    stub.script = [{ reply: 'Thank you, let me help.' }];
+    await run();
+    conv = await convAt(phoneOf(10));
+    check('reply to a Green Start campaign: the AI answers, and the chat shows that campaign', (await aiMsgs(i.id)).length === 1 && conv.campaignName === 'ZZTEST Nurses' && conv.campaignId === 'gs:c9' && !!conv.aiStartedAt, conv);
+    gsSeen.length = 0;
+    await inbound(phoneOf(10), 'one more');
+    stub.script = [{ reply: 'Okay.' }];
+    await run();
+    check('a running AI chat does not ask Green Start again', gsSeen.length === 0 && (await aiMsgs(i.id)).length === 2);
+    const leadNo = phoneOf(78);
+    await inbound(leadNo, 'Tell me more', 'ZZTEST Campaign Lead');
+    stub.script = [{ reply: 'Sure, what would you like to know?' }];
+    await run();
+    conv = await convAt(leadNo);
+    check('a number with no candidate that answered a Green Start campaign is a Lead AND gets the AI', conv.personType === 'LEAD' && conv.state === 'active' && !!conv.aiStartedAt, conv);
+    gs.found = false; gs.broken = true;
+    GC.reset();
+    const j = await mkCandidate(11, 'Jaya');
+    await inbound(phoneOf(11), 'Hi');
+    stub.calls.length = 0;
+    await run();
+    check('Green Start not answering: nothing breaks, nobody gets a wrong AI reply', stub.calls.length === 0 && (await aiMsgs(j.id)).length === 0);
+    gsServer.close();
+
     // ---- 9. promotions, already contacted, the push, the other responders
     console.log('\n-- promotions and the screen');
     await Promo.onStatus({ providerRef: `zzout2${SUFFIX}`, status: 'delivered' });

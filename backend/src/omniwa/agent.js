@@ -285,7 +285,16 @@ async function runTurn(row, cfg, now = Date.now()) {
   const human = await humanSentSince(conv);
   if (human) { await pause(conv, human.senderName, now); await stamp('paused', { output: `${human.senderName || 'A recruiter'} is answering this chat.` }); return { skipped: 'human' }; }
   const ongoing = !!conv.aiStartedAt;
-  const promoted = conv.promoAt && Number(conv.promoAt) >= now - cfg.promoDays * 86400000;
+  let promoted = conv.promoAt && Number(conv.promoAt) >= now - cfg.promoDays * 86400000;
+  if (!ongoing && !promoted) {
+    // a campaign sent inside Omni-Channel (Green Start) is not in TeamLink's log: ask there before treating this as a stranger
+    const gs = await require('./gsCampaign').recentSend(conv.e164, cfg.promoDays); // eslint-disable-line global-require
+    if (gs) {
+      promoted = true;
+      Object.assign(conv, { promoAt: gs.at, campaignId: gs.campaignId, campaignName: gs.campaignName });
+      await S.run('UPDATE "OmniWaConv" SET promoAt = ?, campaignId = ?, campaignName = ?, updatedAt = ? WHERE id = ?', gs.at, gs.campaignId, gs.campaignName, now, conv.id);
+    }
+  }
   if (!ongoing && !promoted) {
     if (conv.personType === 'LEAD') { await handoff(conv, 'A new number wrote to us', now); await stamp('lead'); }
     return { skipped: 'not_a_reply_to_a_promotion' };
