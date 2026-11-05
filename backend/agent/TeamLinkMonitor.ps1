@@ -19,7 +19,7 @@ param(
   [string]$Server = 'https://teamlink.teamlinks.in'
 )
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '1.3'
+$AgentVersion = '1.4'
 # older Windows would otherwise try an old, refused kind of secure connection
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, System.Security
@@ -116,17 +116,21 @@ function Show-Notice($text, $version) {
   $f.Controls.AddRange(@($t, $ok, $no)); $f.AcceptButton = $ok; $f.CancelButton = $no
   return ($f.ShowDialog() -eq 'OK')
 }
+$script:lastEmail = ''
 function Ask-Login {
   $f = New-Object Windows.Forms.Form
-  $f.Text = 'TeamLink - sign in to set up this PC'; $f.Width = 420; $f.Height = 230; $f.StartPosition = 'CenterScreen'; $f.TopMost = $true
+  $f.Text = 'TeamLink - sign in to set up this PC'; $f.Width = 420; $f.Height = 260; $f.StartPosition = 'CenterScreen'; $f.TopMost = $true
   $l1 = New-Object Windows.Forms.Label; $l1.Text = 'Your TeamLink email'; $l1.Left = 20; $l1.Top = 18; $l1.Width = 360
-  $e = New-Object Windows.Forms.TextBox; $e.Left = 20; $e.Top = 40; $e.Width = 360
+  $e = New-Object Windows.Forms.TextBox; $e.Left = 20; $e.Top = 40; $e.Width = 360; $e.Text = $script:lastEmail
   $l2 = New-Object Windows.Forms.Label; $l2.Text = 'Password'; $l2.Left = 20; $l2.Top = 72; $l2.Width = 360
   $p = New-Object Windows.Forms.TextBox; $p.Left = 20; $p.Top = 94; $p.Width = 360; $p.UseSystemPasswordChar = $true
-  $ok = New-Object Windows.Forms.Button; $ok.Text = 'Set up this PC'; $ok.Left = 20; $ok.Top = 135; $ok.Width = 160; $ok.DialogResult = 'OK'
-  $no = New-Object Windows.Forms.Button; $no.Text = 'Cancel'; $no.Left = 200; $no.Top = 135; $no.Width = 100; $no.DialogResult = 'Cancel'
-  $f.Controls.AddRange(@($l1, $e, $l2, $p, $ok, $no)); $f.AcceptButton = $ok; $f.CancelButton = $no
+  $show = New-Object Windows.Forms.CheckBox; $show.Text = 'Show password'; $show.Left = 20; $show.Top = 122; $show.Width = 200
+  $show.Add_CheckedChanged({ $p.UseSystemPasswordChar = -not $show.Checked }.GetNewClosure())
+  $ok = New-Object Windows.Forms.Button; $ok.Text = 'Set up this PC'; $ok.Left = 20; $ok.Top = 158; $ok.Width = 160; $ok.DialogResult = 'OK'
+  $no = New-Object Windows.Forms.Button; $no.Text = 'Cancel'; $no.Left = 200; $no.Top = 158; $no.Width = 100; $no.DialogResult = 'Cancel'
+  $f.Controls.AddRange(@($l1, $e, $l2, $p, $show, $ok, $no)); $f.AcceptButton = $ok; $f.CancelButton = $no
   if ($f.ShowDialog() -ne 'OK') { return $null }
+  $script:lastEmail = $e.Text.Trim()
   return @{ email = $e.Text.Trim(); password = $p.Text }
 }
 

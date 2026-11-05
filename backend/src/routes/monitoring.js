@@ -43,23 +43,39 @@ router.post('/devices/register', wrap(async (req, res) => {
   const email = String(b.email || '').trim();
   const pw = String(b.password || '');
   if (!email || !pw) return fail(res, 400, 'Type your TeamLink email and password.');
-  const { isLocked } = require('../utils/passwordPolicy'); // eslint-disable-line global-require
+  const { isLocked, MAX_FAILED_LOGINS, LOCK_MINUTES } = require('../utils/passwordPolicy'); // eslint-disable-line global-require
   const { accounts } = await require('../utils/loginAccounts').resolveIdentifier(email); // eslint-disable-line global-require
-  let user = null;
-  for (const u of accounts) {
-    if (isLocked(u)) continue; // eslint-disable-line no-continue
-    // eslint-disable-next-line no-await-in-loop
-    if (u.passwordHash && await bcrypt.compare(pw, u.passwordHash)) { user = u; break; }
+  // the same rules as the website's sign-in: a locked login says so, and wrong tries lock it
+  if (accounts.length && accounts.every(isLocked)) {
+    const until = accounts.map((u) => new Date(u.lockedUntil).getTime()).sort((a, b) => a - b)[0];
+    const mins = Math.max(1, Math.ceil((until - Date.now()) / 60000));
+    return fail(res, 423, `This login is locked after too many wrong passwords. Try again in ${mins} minute${mins === 1 ? '' : 's'}.`);
   }
-  if (!user) {
-    if (accounts.length === 1 && !isLocked(accounts[0])) {
-      await prisma.user.update({ where: { id: accounts[0].id }, data: { failedLoginCount: (accounts[0].failedLoginCount || 0) + 1 } }).catch(() => {});
+  const matched = [];
+  for (const u of accounts) {
+    // eslint-disable-next-line no-await-in-loop
+    if (!isLocked(u) && u.passwordHash && await bcrypt.compare(pw, u.passwordHash)) matched.push(u);
+  }
+  if (!matched.length) {
+    if (accounts.length === 1) {
+      const failed = (accounts[0].failedLoginCount || 0) + 1;
+      const lock = failed >= MAX_FAILED_LOGINS;
+      await prisma.user.update({ where: { id: accounts[0].id }, data: lock ? { failedLoginCount: 0, lockedUntil: new Date(Date.now() + LOCK_MINUTES * 60000) } : { failedLoginCount: failed } }).catch(() => {});
     }
     await logAudit({ action: 'Monitoring agent: wrong sign-in', entity: 'User', toValue: email.slice(0, 120), reason: `IP ${ipOf(req)}` }).catch(() => {});
-    return fail(res, 401, 'The email or password is not right.');
+    return fail(res, 401, 'The email or password is not right. Use the same email and password as the TeamLink website.');
   }
-  const idn = await resolveIdentity(user.id);
+  // several logins on one email and password: the one with an employee record (a PC belongs to an employee)
+  let user = matched[0];
+  let idn = await resolveIdentity(user.id);
+  for (const u of matched.slice(1)) {
+    if (idn && idn.employeeId) break;
+    // eslint-disable-next-line no-await-in-loop
+    const other = await resolveIdentity(u.id);
+    if (other && other.employeeId) { user = u; idn = other; }
+  }
   if (!idn || (idn.status && idn.status !== 'Active') || require('../utils/leftLogin').hasLeft(idn)) return fail(res, 403, 'This login is not active.'); // eslint-disable-line global-require
+  if (user.failedLoginCount) await prisma.user.update({ where: { id: user.id }, data: { failedLoginCount: 0 } }).catch(() => {});
   if (!idn.employeeId) return fail(res, 403, 'This is a service login with no employee record. Sign in with the TeamLink login of the employee who uses this PC.');
   const s = await M.settings();
   // NO HIDDEN MODE: the employee accepts the notice (this version) before the PC is registered
