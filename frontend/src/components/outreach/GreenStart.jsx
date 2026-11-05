@@ -368,7 +368,10 @@ export default function GreenStart({ full = false }) {
     api.post('/omni-gs/sso-ticket').then((r) => {
       if (r.data && r.data.blocked) { setBlocked(r.data.reason || 'Omni-Channel is not open for your department yet.'); setSso(null); return; }
       const t = r.data && r.data.ticket;
-      setSso(t ? `${gsOrigin(st && st.port)}/auth/teamlink#ticket=${encodeURIComponent(t)}&next=${encodeURIComponent(r.data.next || '/app')}` : null);
+      // a Green Start page can send someone here for a fresh sign-in (/green-start?next=/app/recruiters-tokens) and get them back to that page
+      const back = new URLSearchParams(window.location.search).get('next');
+      const next = /^\/app\/[\w/-]*$/.test(back || '') ? back : (r.data.next || '/app');
+      setSso(t ? `${gsOrigin(st && st.port)}/auth/teamlink#ticket=${encodeURIComponent(t)}&next=${encodeURIComponent(next)}` : null);
     }).catch(() => setSso(null));
   }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
   const loginUrl = `${gsOrigin(st && st.port)}/login`; // the product signs you in here (and goes on to its dashboard if you already are)
