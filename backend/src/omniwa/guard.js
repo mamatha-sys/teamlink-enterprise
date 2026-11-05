@@ -32,6 +32,14 @@ function promiseProblem(reply, factsText) {
   return null;
 }
 
+// with no job in the chat the model knows nothing about openings: a sentence that says what is open, filled or not found was invented
+const JOB_WORD = /\b(jobs?|positions?|openings?|vacanc(?:y|ies)|roles?)\b/i;
+const JOB_STATE = /\b(available|filled|open|closed|no longer|couldn'?t find|could not find|not find|don'?t have|do not have|we have)\b/i;
+function jobClaim(reply) {
+  const hit = String(reply || '').split(/(?<=[.!?\n।])\s*/).find((s) => JOB_WORD.test(s) && JOB_STATE.test(s));
+  return hit ? `Says something about openings with no job in the chat: "${hit.trim().slice(0, 120)}"` : null;
+}
+
 // only links TeamLink itself made may leave: a link typed by the model is taken out
 function stripLinks(reply, allowed = []) {
   const ok = new Set(allowed);
@@ -59,4 +67,4 @@ function insideHours(cfg, now = Date.now()) {
   return a < b ? n >= a && n < b : n >= a || n < b;
 }
 
-module.exports = { isStop, wantsHuman, isAbusive, promiseProblem, stripLinks, clipReply, insideHours };
+module.exports = { jobClaim, isStop, wantsHuman, isAbusive, promiseProblem, stripLinks, clipReply, insideHours };

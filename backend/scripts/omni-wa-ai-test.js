@@ -226,6 +226,21 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     const leadMsgs = await Inbox.leadMessages(conv.id);
     check('a person can answer a lead inside 24 hours and the chat keeps both messages', leadSend.ok && leadMsgs.length === 2 && leadMsgs[1].by === admin.name, leadSend);
 
+    // ---- 6a. the first live test: no job in the chat
+    console.log('\n-- no job in the chat');
+    check('with no job, words about what is open or filled are stopped; a plain question passes', !!G.jobClaim('We have a few staff nurse positions available, but they are currently filled.') && !!G.jobClaim("Sorry, we couldn't find any job openings.") && G.jobClaim('Which city do you want to work in?') === null);
+    const noJobNo = phoneOf(79);
+    await inbound(noJobNo, 'I need a job', 'ZZTEST No Job');
+    await S.run('UPDATE "OmniWaConv" SET aiStartedAt = ?, state = \'active\', handoffReason = NULL, pendingAt = ? WHERE e164 = ?', Date.now(), Date.now() - 60000, noJobNo);
+    await S.run('UPDATE "OmniWaMessage" SET consumedAt = NULL WHERE e164 = ?', noJobNo);
+    stub.script = [{ reply: 'The staff nurse positions are currently filled.' }];
+    stub.calls.length = 0;
+    await run();
+    conv = await convAt(noJobNo);
+    const sysNoJob = stub.calls[0] ? stub.calls[0].messages[0].content : '';
+    const leadOut = await Inbox.leadMessages(conv.id);
+    check('the model is told there is no job and who it talks to; the invented line never leaves, a recruiter takes over', /NO JOB is linked/.test(sysNoJob) && /not you/.test(sysNoJob) && conv.state === 'needs_human' && !leadOut.some((m) => /filled/.test(m.text)), [conv.state, leadOut]);
+
     // ---- 6b. one number on a candidate and an employee
     console.log('\n-- a number shared with an employee');
     const s1 = await mkCandidate(20, 'Sravya');

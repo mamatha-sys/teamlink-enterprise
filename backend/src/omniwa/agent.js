@@ -285,8 +285,11 @@ async function askModel(conv, cfg, input) {
   const calls = [];
   const job = await T.jobFacts(conv.requirementId).catch(() => ({ available: false }));
   ctx.facts.push(JSON.stringify(job));
-  const name = conv.name ? `The person's name: ${conv.name}.` : '';
-  const system = `${cfg.systemPrompt}\n\n${RULES}\n\n${T.TOOL_HELP}\n\n${name}\nThe job they replied to: ${JSON.stringify(job)}\nWhat you already collected: ${conv.collected}`;
+  // first live test 2026-11-05: the model called itself by the candidate's name, and with no job it said positions were "filled"
+  const name = conv.name ? `You are talking TO ${conv.name}. That is the candidate, not you. You are the assistant of the company.` : '';
+  ctx.noJob = !job.available;
+  const noJob = ctx.noJob ? 'NO JOB is linked to this chat: you do not know which jobs are open. Never say a job or position is available, open, filled or closed, and never say you could not find one. Collect what they want, then use handoff_to_recruiter so a recruiter can check.' : `The job they replied to: ${JSON.stringify(job)}`;
+  const system = `${cfg.systemPrompt}\n\n${RULES}\n\n${T.TOOL_HELP}\n\n${name}\n${noJob}\nWhat you already collected: ${conv.collected}`;
   const history = await memory(conv, cfg.memoryCount);
   if (!history.length) history.push({ role: 'user', content: clip(input, 1500) });
   for (let step = 0; step < MAX_STEPS; step += 1) {
@@ -370,7 +373,7 @@ async function runTurn(row, cfg, now = Date.now()) {
   // the tools did their work and the model gave no words: the plain sentence, never silence
   const noWords = !got.reply && (ctx.handoff || ctx.links.length);
   let reply = G.clipReply(G.stripLinks(got.reply || (noWords ? cfg.fallbackMessage : ''), ctx.links));
-  const broken = !reply ? 'The AI gave no usable answer' : G.promiseProblem(reply, `${ctx.facts.join('\n')}`);
+  const broken = !reply ? 'The AI gave no usable answer' : (G.promiseProblem(reply, `${ctx.facts.join('\n')}`) || (ctx.noJob ? G.jobClaim(reply) : null));
   if (broken) {
     const s = await sayFallback();
     await handoff(conv, reply ? 'The AI wanted to say something that is not in the job data' : broken, now);
