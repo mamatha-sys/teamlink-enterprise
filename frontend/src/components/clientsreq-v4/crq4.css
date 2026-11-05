@@ -315,3 +315,14 @@ main:has(> .crq4) > .tabs .tab.active{background:var(--navy);border-color:var(--
 /* ---- Names fit (2026-10-17): rank-list names wrap to 2 lines instead of "..." ---- */
 .crq4-rank-name{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;line-height:1.25}
 .crq4-attn-label,.crq4-share-lbl{white-space:normal;overflow-wrap:anywhere;line-height:1.25}
+/* the Clients list: work status at a glance */
+.clients-desk{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:0 0 12px}
+.clients-desk-btn{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;background:#fff;border:1px solid var(--line);border-left-width:4px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;color:var(--ink-soft)}
+.clients-desk-btn b{font-size:18px;color:var(--ink)}
+.clients-desk-btn.tone-green{border-left-color:#22a06b}
+.clients-desk-btn.tone-amber{border-left-color:#e59a1a}
+.clients-desk-btn.tone-red{border-left-color:#c2362b}
+.clients-desk-btn.tone-grey{border-left-color:#64748b}
+.clients-desk-btn.on{background:var(--navy);border-color:var(--navy);color:#fff}
+.clients-desk-btn.on b{color:#fff}
+@media (max-width:760px){.clients-desk{grid-template-columns:repeat(2,minmax(0,1fr))}}

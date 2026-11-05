@@ -270,11 +270,11 @@ const LIST_COLUMNS = {
   // ATS layout v3 (2026-10-03): Client · Department · BDE · Open jobs ·
   // Joined · Agreement (Signed / Unsigned) by default; the rest one tick away.
   bde: {
-    defaults: ['department', 'bde', 'activeReqs', 'joined', 'agreement'],
+    defaults: ['department', 'bde', 'desk', 'activeReqs', 'joined', 'agreement'],
     extra: ['submitted', 'selected', 'status', 'code', 'industry', 'contact', 'location', 'candidates', 'interviews', 'lastActivity', 'health', 'fee', 'terms', 'guarantee', 'invoiceStatus', 'next'],
   },
   tl: {
-    defaults: ['department', 'bde', 'activeReqs', 'joined', 'status'],
+    defaults: ['department', 'bde', 'desk', 'activeReqs', 'joined', 'status'],
     extra: ['submitted', 'interviews', 'selected', 'code', 'industry', 'location', 'candidates', 'lastActivity', 'health', 'next'],
   },
   accounts: {
@@ -282,7 +282,7 @@ const LIST_COLUMNS = {
     extra: ['code', 'industry', 'location', 'bde', 'status', 'agreement', 'lastActivity', 'health'],
   },
   admin: {
-    defaults: ['department', 'bde', 'activeReqs', 'joined', 'agreement'],
+    defaults: ['department', 'bde', 'desk', 'activeReqs', 'joined', 'agreement'],
     extra: ['submitted', 'selected', 'status', 'code', 'industry', 'revenue', 'health', 'legal', 'location', 'tax', 'contact', 'terms', 'fee', 'candidates', 'interviews', 'pending',
       'invoiced', 'received', 'outstanding', 'overdueDays', 'guarantee', 'lastActivity', 'owner', 'next'],
   },
@@ -292,7 +292,7 @@ LIST_COLUMNS.mgmt = LIST_COLUMNS.admin;
 // without the rupee columns (money stays Admin / Management / Accounts); the invoice STATUS instead.
 const MONEY_COLUMNS = ['revenue', 'invoiced', 'received', 'outstanding', 'overdueDays'];
 LIST_COLUMNS.bdetl = { defaults: LIST_COLUMNS.admin.defaults, extra: [...LIST_COLUMNS.admin.extra.filter((k) => !MONEY_COLUMNS.includes(k)), 'invoiceStatus'] };
-LIST_COLUMNS.am = { defaults: ['bde', 'department', 'activeReqs', 'agreement', 'status'], extra: ['code', 'industry', 'location'] };
+LIST_COLUMNS.am = { defaults: ['bde', 'department', 'desk', 'activeReqs', 'agreement', 'status'], extra: ['code', 'industry', 'location'] };
 LIST_COLUMNS.stl = LIST_COLUMNS.tl;
 LIST_COLUMNS.client = { defaults: ['activeReqs', 'agreement', 'status'], extra: [] };
 // §4 — the filters per role.
@@ -805,6 +805,12 @@ router.get('/', async (req, res) => {
   }
   // Same name, other location: "Name - Location" on the row (a unique name has no placeLabel).
   { const labels = await scopeLabelMap(req.user); rowsOut.forEach((r) => { const l = labels.get(r.id); if (l) r.placeLabel = l; }); }
+  // Running / On hold / Stopped / No requirement: set on the client's Follow-ups or read from the BDE sheets (founder 2026-11-05: "ivi ekkada vundhi, yela telsuthadhi")
+  if (roleOf(req.user) !== 'client' && rowsOut.length) {
+    const marks = await prisma.appSetting.findMany({ where: { key: { startsWith: 'clientwork.' } }, select: { key: true, value: true } });
+    const byClient = new Map(marks.map((m) => { try { return [m.key.slice('clientwork.'.length), JSON.parse(m.value).status]; } catch { return [m.key, null]; } }));
+    rowsOut.forEach((r) => { r.deskStatus = byClient.get(r.id) || null; });
+  }
   // The step each agreement is at (a chip) and "Waiting for me" (?waiting=1). A TL / Recruiter / HR login gets neither.
   if (!require('../utils/agreementPrivacy').blindTo(req.user)) {
     await AWF.decorate(req.user, rowsOut);

@@ -84,7 +84,7 @@ const COL_LABELS = {
   code: 'Client ID', industry: 'Industry', location: 'Location', legal: 'Legal name', tax: 'GSTIN / PAN',
   contact: 'Contact', bde: 'Client manager (BDE)', activeReqs: 'Open requirements', candidates: 'Candidates',
   submitted: 'People sent', interviews: 'Interviews', selected: 'Selected', joined: 'Joined',
-  pending: 'Waiting for client', agreement: 'Agreement', status: 'Status', health: 'Health', department: 'Department',
+  pending: 'Waiting for client', agreement: 'Agreement', desk: 'Work status', status: 'Status', health: 'Health', department: 'Department',
   fee: 'Fee %', terms: 'Payment terms', guarantee: 'Guarantee', invoiced: 'Invoiced', received: 'Received',
   outstanding: 'Outstanding', overdueDays: 'Days late', revenue: 'Revenue', invoiceStatus: 'Invoice status',
   lastActivity: 'Last update', owner: 'Account manager', next: 'Next step',
@@ -156,8 +156,12 @@ const SIGNED_LABEL = { yes: 'Signed', no: 'Unsigned' };
 const NO_DEPT = '__none__';
 const EMPTY_FILTERS = {
   search: '', industry: '', status: '', owner: '', expiring: '', unassigned: '', department: '', location: '',
-  agreement: '', hasOpen: '', outstanding: '', overdue: '', signed: '', waiting: '',
+  agreement: '', hasOpen: '', outstanding: '', overdue: '', signed: '', waiting: '', desk: '',
 };
+// the work status of a client, from its Follow-ups or the BDE sheets
+const DESK_WORDS = ['Running', 'On hold', 'Stopped', 'No requirement'];
+const DESK_NONE = '__notset';
+const DESK_TONE = { Running: 'green', 'On hold': 'amber', Stopped: 'red', 'No requirement': 'grey' };
 const ymd = (d) => d.toISOString().slice(0, 10);
 
 // Filter option labels (spec 2026-10-03 §B — Clients filters).
@@ -238,9 +242,9 @@ export default function Clients() {
 
   // Columns: only what this role may see (§4); defaults are the spec's list.
   const allowedCols = meta?.columns || [];
-  // Max 7 columns on screen by default (user, 2026-10-05): Client + 5 + Actions.
+  // Max 8 columns on screen by default (user, 2026-10-05; Work status added 2026-11-05): Client + 6 + Actions.
   // The rest stay one tick away under ⚙ Columns.
-  const defaultCols = (meta?.defaultColumns || []).slice(0, 5);
+  const defaultCols = (meta?.defaultColumns || []).slice(0, 6);
   // v4 key: ATS layout v3 defaults (Department · BDE · Open jobs · Joined · Agreement).
   const [cols, setCols] = useColumns(`tl.clientcols4.${user?.id || 'anon'}.${role || 'x'}`, allowedCols, defaultCols);
   const visibleCols = allowedCols.filter((k) => cols.includes(k));
@@ -295,6 +299,7 @@ export default function Clients() {
       { key: 'expiring', get: (c) => expiryOf(c, expiringIds, today, in30), label: (v) => EXPIRY_LABEL[v] || v },
       { key: 'hasOpen', get: (c) => (c.openRequirements > 0 ? 'yes' : 'no'), label: (v) => HAS_OPEN_LABEL[v] || v },
       { key: 'status', get: (c) => statusOf(c), label: (v) => (v === 'Prospect' ? 'New (no requirement yet)' : v) },
+      { key: 'desk', get: (c) => c.deskStatus || DESK_NONE, label: (v) => (v === DESK_NONE ? 'Not set' : v) },
       { key: 'outstanding', get: (c) => (c.invoiceSummary?.outstanding > 0.5 ? '1' : null), label: () => 'Has unpaid invoices' },
       { key: 'overdue', get: (c) => OVERDUE_STEPS.filter((d) => (c.invoiceSummary?.overdueDays || 0) >= Number(d)), label: (v) => `Late ${v}+ days` },
     ];
@@ -363,6 +368,7 @@ export default function Clients() {
     { key: 'search', label: 'Search', value: filters.search, onRemove: () => setFilter({ search: '' }) },
     { key: 'industry', label: 'Industry', value: filters.industry, onRemove: () => setFilter({ industry: '' }) },
     { key: 'status', label: 'Status', value: filters.status === 'Prospect' ? 'New (no requirement yet)' : filters.status, onRemove: () => setFilter({ status: '' }) },
+    { key: 'desk', label: 'Work status', value: filters.desk === DESK_NONE ? 'Not set' : filters.desk, onRemove: () => setFilter({ desk: '' }) },
     { key: 'unassigned', label: 'Client manager', value: filters.unassigned ? 'Nobody yet' : '', onRemove: () => setFilter({ unassigned: '' }) },
     { key: 'expiring', label: 'Agreement ends', value: filters.expiring ? (EXPIRY_LABEL[filters.expiring] || filters.expiring) : '', onRemove: () => setFilter({ expiring: '' }) },
     { key: 'signed', label: 'Agreement', value: SIGNED_LABEL[filters.signed] || '', onRemove: () => setFilter({ signed: '' }) },
@@ -429,6 +435,7 @@ export default function Clients() {
           </td>
         );
       }
+      case 'desk': return <td key={key}>{c.deskStatus ? <StatusChip status={c.deskStatus} tone={DESK_TONE[c.deskStatus]} /> : <span className="cell-muted">Not set</span>}</td>;
       case 'status': return <td key={key}><StatusChip status={statusWord(statusOf(c))} tone={statusOf(c) === 'Active' ? 'green' : statusOf(c) === 'Prospect' ? 'blue' : 'amber'} title={statusOf(c) === 'Prospect' ? NEW_HELP : (c.workStatus || c.status || '')} /></td>;
       case 'health':
         return (
@@ -583,6 +590,7 @@ export default function Clients() {
         }}
       >
         <PageFilterBar value={pf} onChange={setPf} options={barOptions} show={{ department: true, dateRange: true, client: true, people: role !== 'tl' && role !== 'accounts' }} />
+        {allowedCols.includes('desk') && <FacetSelect label="Work status" value={filters.desk} onChange={(v) => setFilter({ desk: v })} options={facets.desk} allLabel="Any work status" />}
         {has('status') && <FacetSelect label="Status" value={filters.status} onChange={(v) => setFilter({ status: v })} options={statusFacets.status} allLabel="Any status" />}
         {(has('agreement') || seeAgreement) && <FacetSelect label="Signed?" value={filters.signed} onChange={(v) => setFilter({ signed: v })} options={facets.signed} allLabel="Signed or not" />}
         {has('location') && <FacetSelect label="Location" value={filters.location} onChange={(v) => setFilter({ location: v })} options={facets.location} allLabel="All locations" />}
@@ -590,6 +598,19 @@ export default function Clients() {
 
       {loaded && clients.length > 0 && (
         <>
+          {/* Running, On hold, Stopped, No requirement at a glance; press one to list those clients */}
+          {allowedCols.includes('desk') && (
+            <div className="clients-desk" role="group" aria-label="Clients by work status">
+              {[...DESK_WORDS, DESK_NONE].map((w) => {
+                const n = listRows.filter((c) => (c.deskStatus || DESK_NONE) === w).length;
+                return (
+                  <button key={w} type="button" className={`clients-desk-btn tone-${DESK_TONE[w] || 'none'}${filters.desk === w ? ' on' : ''}`} onClick={() => setFilter({ desk: filters.desk === w ? '' : w })}>
+                    <span>{w === DESK_NONE ? 'Not set' : w}</span><b>{n}</b>
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <KpiRow className="crq4-kpis">
             <KpiTile icon="building" tone="blue" label="Total Clients" value={filtered.length} sub="In the list below" onClick={toTable} title="Go to the list" />
             <KpiTile icon="check" tone="green" label="Active" value={activeN} sub="Working with them" active={filters.status === 'Active'} onClick={has('status') ? () => setFilter({ status: filters.status === 'Active' ? '' : 'Active' }) : undefined} />
