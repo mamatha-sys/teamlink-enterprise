@@ -186,7 +186,8 @@ router.get('/eligible', async (req, res) => {
   if (t.error) return res.status(t.error.status).json(t.error.body);
   if (!t.employee) return res.status(404).json({ error: 'No employee record linked to this account' });
   const s = await getSettings();
-  const plan = await planFor(t.employee, date, { kind: req.query.kind }, s).catch((e) => ({ error: e.message }));
+  // the time typed goes in too (2026-11-05): without it "I will be late" always answered 'Type the time' and Send stayed off
+  const plan = await planFor(t.employee, date, { kind: req.query.kind, expectedTime: req.query.expectedTime }, s).catch((e) => ({ error: e.message }));
   const clash = ready() && ISO.test(date) ? await prisma.latePermission.findFirst({ where: { employeeId: t.employee.id, date, status: { not: 'Cancelled' } } }) : null;
   res.json({
     date, kind: plan.kind || null, arrivedAt: plan.arrivedAt || null, canApply: !plan.error && !clash,

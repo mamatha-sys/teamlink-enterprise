@@ -49,11 +49,14 @@ export function TellWhyDialog({ date: dateIn, kind = 'Explain', employeeId = '',
   const explain = kind === 'Explain';
 
   useEffect(() => { api.get('/late-permissions/settings').then((r) => setSettings(r.data)).catch(() => {}); }, []);
+  useEffect(() => { setFacts(null); }, [date, kind, employeeId]);
+  // asked again as the time is typed, so "I will be late" follows the time in the box (founder 2026-11-05: the time was not taken)
   useEffect(() => {
-    setFacts(null);
-    api.get('/late-permissions/eligible', { params: { date, kind, ...(employeeId ? { employeeId } : {}) } })
-      .then((r) => setFacts(r.data)).catch((e) => setFacts({ canApply: false, why: e.response?.data?.error || 'Could not check that day.' }));
-  }, [date, kind, employeeId]);
+    let on = true;
+    api.get('/late-permissions/eligible', { params: { date, kind, ...(explain ? {} : { expectedTime }), ...(employeeId ? { employeeId } : {}) } })
+      .then((r) => { if (on) setFacts(r.data); }).catch((e) => { if (on) setFacts({ canApply: false, why: e.response?.data?.error || 'Could not check that day.' }); });
+    return () => { on = false; };
+  }, [date, kind, employeeId, explain, expectedTime]);
 
   async function send() {
     setError('');
