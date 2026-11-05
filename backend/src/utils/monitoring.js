@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // EMPLOYEE MONITORING (2026-11-04) - how office PCs are used in work hours (routes/monitoring.js, the tables at the end of
-// prisma/schema.prisma). A small desktop agent the employee installs (agent/TeamLinkMonitor.ps1) sends what app is in front,
+// prisma/schema.prisma). A small desktop agent the employee installs (backend/agent/TeamLinkMonitor.ps1) sends what app is in front,
 // its window title and whether the PC is idle; HR / Admin see the totals, every employee sees their own.
 //
 // PRIVACY - the rules this file keeps:

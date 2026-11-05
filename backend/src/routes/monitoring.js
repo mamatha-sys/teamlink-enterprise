@@ -15,8 +15,10 @@
 //   GET/PUT /settings                            HR / Admin (GET is open to everyone: work hours and the notice)
 //   GET  /devices, PUT /devices/:id/deactivate   HR / Admin all; an employee their own PCs
 //   GET  /me, POST /me/consent                   my notice, my consent, my PCs
+//   GET  /agent                                  the PC agent file (backend/agent/TeamLinkMonitor.ps1), for any TeamLink login
 // The general API limit counts an agent per device (utils/apiRateLimit.js), with its own strict limits.
 // ---------------------------------------------------------------------------
+const path = require('path');
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const prisma = require('../db');
@@ -197,6 +199,9 @@ router.get('/pc-activity', wrap(async (req, res) => {
   const map = await M.pcActivity(ids, from, to);
   res.json({ rows: Object.fromEntries(map) });
 }));
+
+// --- the agent itself: any TeamLink login downloads it from Settings / My activity (it records nothing until its own set-up)
+router.get('/agent', (req, res) => res.download(path.join(__dirname, '..', '..', 'agent', 'TeamLinkMonitor.ps1'), 'TeamLinkMonitor.ps1'));
 
 // --- me
 router.get('/me', wrap(async (req, res) => {

@@ -11,7 +11,7 @@ import './monitoring.css';
 
 // ---------------------------------------------------------------------------
 // HRMS -> EMPLOYEE MONITORING (2026-11-04). How office PCs are used in work hours, from the TeamLink desktop agent the
-// employee installs and agrees to (backend: routes/monitoring.js, utils/monitoring.js; the agent: agent/TeamLinkMonitor.ps1).
+// employee installs and agrees to (backend: routes/monitoring.js, utils/monitoring.js; the agent: backend/agent/TeamLinkMonitor.ps1).
 //   HR / Admin  Overview · Employee (opened from a row) · App categories · Reports · Devices · Settings · My activity
 //   everyone    My activity: their own day, their PCs and the notice they accepted
 // Only the app name, window title and active / idle time are recorded - never keystrokes, passwords, the clipboard,
@@ -381,6 +381,34 @@ function Devices({ manage = false }) {
   );
 }
 
+// ------------------------------------------------------------------------------------------------ Setting up a PC (Settings, My activity)
+function SetUpPc() {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  async function download() {
+    setBusy(true); setErr('');
+    try {
+      const r = await api.get('/monitoring/agent', { responseType: 'blob' });
+      const href = URL.createObjectURL(r.data);
+      const a = document.createElement('a');
+      a.href = href; a.download = 'TeamLinkMonitor.ps1'; document.body.appendChild(a); a.click();
+      a.remove(); setTimeout(() => URL.revokeObjectURL(href), 2000);
+    } catch { setErr('Could not download the file. Please try again.'); } finally { setBusy(false); }
+  }
+  return (
+    <Panel title="Setting up an office PC" sub="Windows only. Takes about a minute on each PC.">
+      <ol className="mon-steps">
+        <li>On the office PC, sign in to TeamLink and press <b>Download the PC agent</b>.</li>
+        <li>Right-click the downloaded file <b>TeamLinkMonitor.ps1</b> → <b>Run with PowerShell</b>. If Windows asks, choose <b>Run anyway</b>.</li>
+        <li>The employee signs in with their own TeamLink email and password, reads the notice and accepts it.</li>
+        <li>Done. A TeamLink icon stays next to the clock, it starts with Windows, and the PC appears under <b>Devices</b>.</li>
+      </ol>
+      <button type="button" className="btn btn-primary" style={{ marginTop: 10 }} disabled={busy} onClick={download}>{busy ? 'Downloading…' : 'Download the PC agent'}</button>
+      {err && <div className="notice red" style={{ marginTop: 8 }}>{err}</div>}
+    </Panel>
+  );
+}
+
 // ------------------------------------------------------------------------------------------------ Settings
 function Settings() {
   const { data, error } = useGet('/monitoring/settings');
@@ -409,13 +437,7 @@ function Settings() {
       <Panel title={`Consent notice (version ${data.policyVersion})`} sub="Every employee reads and accepts this before anything is recorded. Changing it makes a new version that everyone accepts again.">
         <textarea rows={10} value={form.policyText} onChange={(e) => setForm({ ...form, policyText: e.target.value })} aria-label="Consent notice" style={{ width: '100%' }} />
       </Panel>
-      <Panel title="Setting up a PC">
-        <ol className="mon-steps">
-          <li>Copy <b>TeamLinkMonitor.ps1</b> (from the TeamLink repository, folder <code>agent</code>) to the office PC.</li>
-          <li>Right-click it → <b>Run with PowerShell</b>. It shows this notice; the employee reads it and signs in with their own TeamLink email and password.</li>
-          <li>The PC appears under <b>Devices</b>. A small TeamLink icon stays next to the clock while it records.</li>
-        </ol>
-      </Panel>
+      <SetUpPc />
       {msg && <div className="notice green">{msg}</div>}
       {err && <div className="notice red">{err}</div>}
       <button type="button" className="btn btn-primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
@@ -443,6 +465,7 @@ function Mine({ me }) {
       <EmployeeDetail id="me" own />
       <h3 className="mon-h3">My PCs</h3>
       <Devices />
+      <div style={{ marginTop: 14 }}><SetUpPc /></div>
     </>
   );
 }

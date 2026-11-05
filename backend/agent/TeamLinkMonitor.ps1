@@ -12,13 +12,15 @@
   in work hours"); its menu shows what is recorded and lets the employee stop it.
 
   Run: right-click -> Run with PowerShell   (or: powershell -ExecutionPolicy Bypass -File TeamLinkMonitor.ps1)
-  To start it with Windows: put a shortcut to it in shell:startup.
+  After set-up it starts with Windows by itself (the icon menu has "Do not start with Windows").
   Settings: %APPDATA%\TeamLinkMonitor\config.json (the device token is encrypted for this Windows user, DPAPI).
 #>
 param(
   [string]$Server = 'https://teamlink.teamlinks.in'
 )
 $ErrorActionPreference = 'Stop'
+# older Windows would otherwise try an old, refused kind of secure connection
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, System.Security
 Add-Type @'
 using System;
@@ -30,6 +32,8 @@ public static class TLWin {
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [StructLayout(LayoutKind.Sequential)] public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
   [DllImport("user32.dll")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO p);
+  [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
   public static uint IdleSeconds() {
     LASTINPUTINFO l = new LASTINPUTINFO(); l.cbSize = (uint)Marshal.SizeOf(l);
     if (!GetLastInputInfo(ref l)) return 0;
@@ -42,6 +46,18 @@ $Dir = Join-Path $env:APPDATA 'TeamLinkMonitor'
 $ConfigFile = Join-Path $Dir 'config.json'
 $QueueFile = Join-Path $Dir 'queue.json'
 New-Item -ItemType Directory -Force -Path $Dir | Out-Null
+
+# ---------------------------------------------------------------- starting with Windows (the employee can switch it off in the icon's menu)
+$StartupLink = Join-Path ([Environment]::GetFolderPath('Startup')) 'TeamLink Monitor.lnk'
+function Add-Startup {
+  $copy = Join-Path $Dir 'TeamLinkMonitor.ps1'
+  if ($PSCommandPath -and ($PSCommandPath -ne $copy)) { Copy-Item -Path $PSCommandPath -Destination $copy -Force }
+  $s = (New-Object -ComObject WScript.Shell).CreateShortcut($StartupLink)
+  $s.TargetPath = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
+  $s.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$copy`""
+  $s.Description = 'TeamLink Monitor: records PC use in work hours (app names, window titles, active and idle time)'
+  $s.Save()
+}
 
 # ---------------------------------------------------------------- config (token encrypted for this Windows user)
 function Save-Config($cfg) {
@@ -62,10 +78,14 @@ function Load-Config {
 function Call-Api($method, $path, $body, $token) {
   $headers = @{}
   if ($token) { $headers['Authorization'] = "Device $token" }
-  $json = if ($body) { $body | ConvertTo-Json -Depth 6 -Compress } else { $null }
+  # bytes, not a string: Windows PowerShell would send a string in the old Latin encoding and spoil Telugu / Hindi window titles
+  # (a typed byte[]: an if-expression would unroll it into a list of numbers)
+  [byte[]]$json = $null
+  if ($body) { $json = [Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 6 -Compress)) }
   try {
     $r = Invoke-WebRequest -Method $method -Uri ($script:Server.TrimEnd('/') + '/api/monitoring' + $path) -Headers $headers -Body $json -ContentType 'application/json; charset=utf-8' -UseBasicParsing -TimeoutSec 30
-    return @{ status = [int]$r.StatusCode; data = ($r.Content | ConvertFrom-Json) }
+    $text = [Text.Encoding]::UTF8.GetString($r.RawContentStream.ToArray())
+    return @{ status = [int]$r.StatusCode; data = ($text | ConvertFrom-Json) }
   } catch [System.Net.WebException] {
     $resp = $_.Exception.Response
     if ($resp) {
@@ -119,7 +139,8 @@ function Register {
     if ($r.status -eq 201) {
       $cfg = @{ server = $script:Server; token = $r.data.deviceToken; employee = $r.data.employee }
       Save-Config $cfg
-      [Windows.Forms.MessageBox]::Show("This PC is set up for $($r.data.employee). A TeamLink icon next to the clock shows that work hours are recorded.", 'TeamLink') | Out-Null
+      try { Add-Startup } catch {}
+      [Windows.Forms.MessageBox]::Show("This PC is set up for $($r.data.employee). It starts with Windows, and a TeamLink icon next to the clock shows that work hours are recorded. You can stop it from that icon.", 'TeamLink') | Out-Null
       return $cfg
     }
     $msg = if ($r.data -and $r.data.error) { $r.data.error } elseif ($r.status -eq 0) { 'TeamLink could not be reached. Check the internet connection.' } else { "TeamLink said no ($($r.status))." }
@@ -212,8 +233,11 @@ $menu = New-Object Windows.Forms.ContextMenuStrip
 $who = $menu.Items.Add("Set up for $($cfg.employee)"); $who.Enabled = $false
 [void]$menu.Items.Add('What is recorded (open TeamLink)', $null, { Start-Process ($script:Server.TrimEnd('/') + '/monitoring?tab=mine') })
 [void]$menu.Items.Add('Stop recording and close', $null, { Flush; $script:tray.Visible = $false; [Windows.Forms.Application]::Exit() })
+[void]$menu.Items.Add('Do not start with Windows', $null, { Remove-Item -Path $StartupLink -ErrorAction SilentlyContinue; $script:tray.ShowBalloonTip(5000, 'TeamLink', 'It will not start with Windows any more.', 'Info') })
 $tray.ContextMenuStrip = $menu
 $tray.ShowBalloonTip(6000, 'TeamLink', 'Recording PC use in work hours: app names, window titles, active and idle time. Nothing you type is recorded.', 'Info')
+# the icon above is what shows it is running: the black window goes, so closing it by mistake does not stop the agent
+try { [void][TLWin]::ShowWindow([TLWin]::GetConsoleWindow(), 0) } catch {}
 
 Heartbeat
 $sampleTimer = New-Object Windows.Forms.Timer; $sampleTimer.Interval = 15000; $sampleTimer.Add_Tick({ try { Sample } catch {} }); $sampleTimer.Start()
