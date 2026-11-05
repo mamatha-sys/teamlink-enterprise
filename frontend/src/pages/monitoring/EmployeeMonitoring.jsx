@@ -663,16 +663,17 @@ function SetUpCode({ pick = false }) {
   );
 }
 
+// The download is the .cmd. Windows Defender quarantines the unsigned .exe as a Trojan (2026-11-05): it comes back only once it is code signed.
 function SetUpPc({ pick = false }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  async function download(kind = 'exe') {
+  async function download() {
     setBusy(true); setErr('');
     try {
-      const r = await api.get('/monitoring/agent', { responseType: 'blob', params: { kind } });
+      const r = await api.get('/monitoring/agent', { responseType: 'blob' });
       const href = URL.createObjectURL(r.data);
       const a = document.createElement('a');
-      a.href = href; a.download = `TeamLinkMonitorSetup.${kind}`; document.body.appendChild(a); a.click();
+      a.href = href; a.download = 'TeamLinkMonitorSetup.cmd'; document.body.appendChild(a); a.click();
       a.remove(); setTimeout(() => URL.revokeObjectURL(href), 2000);
     } catch { setErr('Could not download the file. Please try again.'); } finally { setBusy(false); }
   }
@@ -680,14 +681,12 @@ function SetUpPc({ pick = false }) {
     <Panel title="Setting up an office PC" sub="Windows only. Takes about a minute on each PC.">
       <ol className="mon-steps">
         <li>On the office PC, sign in to TeamLink and press <b>Download the PC agent</b>. If the browser warns about the file, choose <b>Keep</b>.</li>
-        <li>Double-click the downloaded file <b>TeamLinkMonitorSetup.exe</b>. If Windows shows a blue box, press <b>More info</b> → <b>Run anyway</b>. No admin rights are needed.</li>
+        <li>Double-click the downloaded file <b>TeamLinkMonitorSetup.cmd</b>. If Windows shows a blue box, press <b>More info</b> → <b>Run anyway</b>. No admin rights are needed.</li>
         <li>Type the <b>set-up code</b> below into the agent, or sign in with the employee&apos;s own TeamLink email and password.</li>
         <li>The employee reads the notice and accepts it.</li>
         <li>Done. A TeamLink icon stays next to the clock, it starts with Windows, and the PC appears under <b>Devices</b>.</li>
       </ol>
-      <button type="button" className="btn btn-primary" style={{ marginTop: 10 }} disabled={busy} onClick={() => download('exe')}>{busy ? 'Downloading…' : 'Download the PC agent'}</button>{' '}
-      <button type="button" className="btn btn-ghost" style={{ marginTop: 10 }} disabled={busy} onClick={() => download('cmd')}>The .exe is blocked? Get the .cmd</button>
-      <div className="small-muted" style={{ marginTop: 6 }}>IT can pass the code: <code>TeamLinkMonitorSetup.exe /code=XXXX-XXXX</code>. The employee still reads and accepts the notice.</div>
+      <button type="button" className="btn btn-primary" style={{ marginTop: 10 }} disabled={busy} onClick={download}>{busy ? 'Downloading…' : 'Download the PC agent'}</button>
       {err && <div className="notice red" style={{ marginTop: 8 }}>{err}</div>}
       <SetUpCode pick={pick} />
     </Panel>
