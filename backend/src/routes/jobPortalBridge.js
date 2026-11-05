@@ -88,4 +88,21 @@ router.post('/sms', async (req, res) => {
   }
 });
 
+// THE PORTAL'S AI INTERVIEW HEARS AND SPEAKS WITH THE AI CALLING VOICES (founder 2026-11-05): utils/interviewVoice.js. Server to server with the
+// bridge secret; the audio never leaves this server. Always 200 with ready:false when the engines are not set up, and on a failure: the screen
+// then works from the browser alone.
+router.post('/interview-voice', express.raw({ type: 'application/octet-stream', limit: '1mb' }), async (req, res) => {
+  if (!bridge.secretMatches(req.get('x-job-portal-secret'))) return res.status(401).json({ error: 'Invalid or missing job portal secret' });
+  const V = require('../utils/interviewVoice'); // eslint-disable-line global-require
+  try {
+    if (req.query.op === 'hear') return res.json(await V.hear(Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0), req.query.lang));
+    const out = await V.say(req.body && req.body.text, req.query.lang);
+    if (!out.ready) return res.json({ ready: false });
+    res.set('Content-Type', 'audio/wav');
+    return res.send(out.wav);
+  } catch (err) {
+    return res.json({ ready: false, error: String((err && err.message) || err).slice(0, 200) });
+  }
+});
+
 module.exports = router;

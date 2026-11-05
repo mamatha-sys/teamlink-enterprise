@@ -565,6 +565,42 @@ export function teamlinkFrontRouter({ root, express }) {
   }));
 
   /*
+   * THE INTERVIEW IN THE CANDIDATE'S LANGUAGE (founder 2026-11-05, embed/interview-language.mjs, add-on section 5): the questions in Telugu / Hindi,
+   * an answer put into English for the portal's scoring, which language was spoken and the question in that language's voice (the AI calling
+   * engines on TeamLink, routes/jobPortalBridge.js). Only the candidate, only their own interview; the portal's questions and scores are not changed.
+   */
+  const language = () => import(pathToFileURL(join(import.meta.dirname, 'interview-language.mjs')).href);
+  const voiceApi = () => ({ url: teamlinkApi(), secret: pushSecret() });
+  const ownOnly = (fn) => wrap(async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const L = await language();
+    const { withUser } = await portal();
+    const refused = await L.ownInterview({ root: ROOT, req, withUser, interviewId: String(req.params.id) });
+    if (refused) return res.status(refused.status).json(refused.body);
+    const lang = L.LANGS[String((req.body || {}).lang)] ? String(req.body.lang) : 'en';
+    return res.json(await fn(L, req.body || {}, lang));
+  });
+  r.post('/api/tl-interview/:id/translate', json, ownOnly(async (L, b, lang) => {
+    const texts = (Array.isArray(b.texts) ? b.texts : []).slice(0, 40).map((t) => String(t).slice(0, 600));
+    if (lang === 'en') return { items: texts.map((text) => ({ text, done: true })) };
+    return { items: await Promise.all(texts.map((t) => L.translateQuestion(ROOT, t, lang))) };
+  }));
+  r.post('/api/tl-interview/:id/to-english', json, ownOnly(async (L, b, lang) => L.answerToEnglish(ROOT, String(b.text || ''), lang)));
+  r.post('/api/tl-interview/:id/hear', json, ownOnly(async (L, b, lang) => {
+    const pcm = Buffer.from(String(b.pcm || ''), 'base64');
+    if (pcm.length < 16000 || pcm.length > 700000) return { ready: true, lang, changed: false };
+    return L.hear(voiceApi(), pcm, lang);
+  }));
+  r.post('/api/tl-interview/:id/say', json, ownOnly(async (L, b, lang) => L.say(voiceApi(), String(b.text || ''), lang)));
+  r.get('/api/tl-interview/audio/:key', wrap(async (req, res) => {
+    const wav = (await language()).soundOf(String(req.params.key));
+    if (!wav) return res.status(404).end();
+    res.set('Content-Type', 'audio/wav');
+    res.set('Cache-Control', 'private, max-age=600');
+    return res.send(wav);
+  }));
+
+  /*
    * EVERY HRMS RECRUITER / TL IS A PORTAL RECRUITER (founder 2026-10-29: "ahh positions lo new ga add ina employee
    * kanipinchadamledhu"). TeamLink sends its active Recruiters / TLs / STLs (backend/src/utils/jobPortalRecruiters.js);
    * one without a portal login of the same email gets one through the portal's own staff_recruiter_create (0035, the

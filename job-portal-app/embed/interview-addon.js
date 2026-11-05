@@ -37,6 +37,17 @@
       #/tl-interview-result/<interview id>.
    4. The last answer recordings finish uploading before the interview is
       closed (they used to arrive after it, too late to be used).
+   5. THE CANDIDATE'S LANGUAGE (founder 2026-11-05: "ai interview lo language
+      switch avali, candidates aa language lo matladithey aa language ki
+      switch avali"). The interview starts in the candidate's Preferred
+      language. While they answer, a few seconds of their voice go to the
+      AI calling engines (embed/interview-language.mjs): when they are
+      speaking Telugu, Hindi or English, live capture moves to that language
+      at once, the words already said are written again in it, and the next
+      questions come in it - on screen and in that language's voice. The
+      three buttons do the same by hand. The portal keeps its own questions
+      and keeps scoring English: an answer in Telugu / Hindi is put into
+      English before it is saved. See the header of that file.
    ===================================================================== */
 (function () {
   'use strict';
@@ -47,6 +58,12 @@
   var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
   var A = function () { return window.AIIV || null; };
   var session = function () { var s = window.TL && window.TL.__aiivSession; var a = A(); return s && (!a || !a.appId || s.appId === a.appId) ? s : null; };
+  /* the interview's language: section 5 (here because the recogniser in section 1 reads it) */
+  var LG = {
+    cur: 'en', manual: false, iv: null, code: { en: 'en-IN', te: 'te-IN', hi: 'hi-IN' }, words: { en: 'English', te: 'తెలుగు', hi: 'हिन्दी' },
+    serverHears: true, answer: null, checks: 0, busy: false, unsure: false, chunks: [], voicedMs: 0, proc: null, procStream: null,
+    en: {}, says: {}, answers: {}, audio: null,
+  };
 
   /* ------------------------------------------------------------------ *
    * a small notice at the top of the screen (plain words, no figures)
@@ -61,6 +78,7 @@
     el.innerHTML = '<span>' + esc(text) + '</span><button type="button" aria-label="Close">×</button>';
     el.querySelector('button').onclick = function () { el.remove(); };
     document.body.appendChild(el);
+    return el;
   }
 
   /* ================================================================== *
@@ -121,7 +139,7 @@
     };
     TLSpeech.prototype._apply = function () {
       var r = this._inner;
-      r.lang = this.lang; r.continuous = this.continuous; r.interimResults = this.interimResults;
+      r.lang = LG.code[LG.cur] || this.lang; r.continuous = this.continuous; r.interimResults = this.interimResults;
       try { r.maxAlternatives = this.maxAlternatives; } catch (e) { /* not in every browser */ }
     };
     TLSpeech.prototype.start = function () { this._stopped = false; this._fails = 0; this._apply(); this._inner.start(); };
@@ -282,6 +300,11 @@
     var css = ''
       + '.tladd-note{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:99999;max-width:min(640px,calc(100vw - 32px));background:#fff7ed;color:#7c2d12;border:1px solid #fdba74;border-radius:10px;padding:10px 40px 10px 14px;font:14px/1.45 system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.12)}'
       + '.tladd-note button{position:absolute;right:8px;top:6px;border:0;background:none;font-size:20px;cursor:pointer;color:inherit}'
+      + '#tllang{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;justify-content:center;margin-top:12px;font:13px/1.4 system-ui,sans-serif;color:#0f172a}'
+      + '#tllang.tllang-float{position:fixed;right:16px;bottom:16px;z-index:9400;margin:0;max-width:calc(100vw - 32px);background:#fff;border:1px solid #cbd5e1;border-radius:12px;padding:8px 10px;box-shadow:0 4px 16px rgba(15,23,42,.15)}'
+      + '#tllang .tllang-t{font-size:12px;color:#475569}#tllang .tllang-b{display:flex;gap:6px}'
+      + '#tllang button{border:1px solid #cbd5e1;background:#fff;color:#0f172a;border-radius:8px;padding:5px 12px;min-height:34px;cursor:pointer;font:inherit}'
+      + '#tllang button.on{background:#166534;border-color:#166534;color:#fff;font-weight:700}'
       + '.tlcoach{text-align:left;margin:18px auto 6px;max-width:760px;font:14px/1.5 system-ui,sans-serif;color:#0f172a}'
       + '.tlcoach h3{font-size:18px;margin:0 0 8px}.tlcoach .tlc-score{display:flex;gap:16px;align-items:center;flex-wrap:wrap;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:14px 16px}'
       + '.tlcoach .tlc-big{font-size:34px;font-weight:800;color:#166534}.tlcoach .tlc-subs{display:flex;gap:10px;flex-wrap:wrap}.tlcoach .tlc-sub{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:4px 10px;font-size:13px}'
@@ -363,6 +386,283 @@
   window.addEventListener('hashchange', openFromHash);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', openFromHash); else openFromHash();
 
+  /* ================================================================== *
+   * 5. the candidate's language
+   * ================================================================== */
+  var TE_RX = /[ఀ-౿]/g, HI_RX = /[ऀ-ॿ]/g;
+  var scriptOf = function (t) {
+    var te = (String(t).match(TE_RX) || []).length, hi = (String(t).match(HI_RX) || []).length;
+    return te + hi < 3 ? null : (te >= hi ? 'te' : 'hi');
+  };
+  var ROMAN = {
+    te: /\b(nenu|naa|maa|meeru|mee|peru|chesanu|chesthunnanu|chestunna|undi|unnanu|ledu|kaani|ante|avunu|emi|enti|ela|telugu|cheppandi|nundi|lo|ki)\b/gi,
+    hi: /\b(mera|meri|mujhe|maine|main|hoon|hun|hai|nahi|nahin|kya|aur|kaam|tha|thi|hindi|kiya|karta|karti|mein|ko|se)\b/gi,
+  };
+  function post(path, body) {
+    return fetch(API_BASE() + '/tl-interview/' + encodeURIComponent(LG.iv) + path, {
+      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }).then(function (r) { return r.ok ? r.json() : null; });
+  }
+  /* what the words alone say, for a server without the voice engines: only clear proof moves the language */
+  function fromWords(text, cur) {
+    var t = String(text || ''); var n = t.split(/\s+/).filter(Boolean).length;
+    if (n < 6) return null;
+    if (cur !== 'en') {
+      var latin = (t.match(/[A-Za-z]/g) || []).length, all = (t.match(/\p{L}/gu) || []).length;
+      return all && latin / all > 0.8 ? 'en' : null;
+    }
+    var te = (t.match(ROMAN.te) || []).length, hi = (t.match(ROMAN.hi) || []).length, s = scriptOf(t);
+    if (s) return s;
+    if (te >= 3 && te > hi * 2) return 'te';
+    if (hi >= 3 && hi > te * 2) return 'hi';
+    return null;
+  }
+
+  /* ---- the questions ---- */
+  function questionsOf(s) { return (s && s.questions) || []; }
+  function applyQuestions(s) {
+    var lang = LG.cur, qs = questionsOf(s);
+    qs.forEach(function (q) { if (q.__en == null) q.__en = q.q; });
+    if (s.speech) s.speech.tts = 'browser'; // the portal's server voice reads its own English text
+    if (lang === 'en') { qs.forEach(function (q) { q.q = q.__en; }); paintBar(); return Promise.resolve(); }
+    return post('/translate', { lang: lang, texts: qs.map(function (q) { return q.__en; }) }).then(function (r) {
+      if (LG.cur !== lang || !r || !r.items) return;
+      qs.forEach(function (q, i) { var it = r.items[i]; q.q = it && it.done ? it.text : q.__en; });
+      paintBar(); prefetchNext(s);
+    }, function () { /* the questions stay in English */ });
+  }
+
+  /* ---- the bar: the language now, and the three buttons ---- */
+  function paintBar() {
+    var a = A(), bar = document.getElementById('tllang');
+    if (!a || a.phase !== 'interview') { if (bar) bar.remove(); return; }
+    styles();
+    if (!bar) {
+      bar = document.createElement('div'); bar.id = 'tllang';
+      bar.setAttribute('role', 'group'); bar.setAttribute('aria-label', 'Interview language');
+      bar.innerHTML = '<span class="tllang-t">Speak in your language. The interview follows you.</span><span class="tllang-b">'
+        + ['en', 'te', 'hi'].map(function (l) { return '<button type="button" data-l="' + l + '">' + esc(LG.words[l]) + '</button>'; }).join('') + '</span>';
+      bar.addEventListener('click', function (e) {
+        var b = e.target && e.target.closest ? e.target.closest('button[data-l]') : null;
+        if (!b) return;
+        LG.manual = true; // their own choice: the automatic check stops for this interview
+        if (b.getAttribute('data-l') !== LG.cur) switchTo(b.getAttribute('data-l'), '');
+      });
+      document.body.appendChild(bar);
+    }
+    /* in the page, just above Submit / Skip (on a phone those stick to the bottom, a floating bar would cover them) */
+    var ctl = document.querySelector ? document.querySelector('.tlvi-controls') : null;
+    if (ctl && ctl.parentNode && bar.nextSibling !== ctl) ctl.parentNode.insertBefore(bar, ctl);
+    bar.classList.toggle('tllang-float', !ctl);
+    Array.prototype.forEach.call(bar.querySelectorAll('button'), function (b) {
+      var on = b.getAttribute('data-l') === LG.cur;
+      b.className = on ? 'on' : ''; b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+
+  function switchTo(lang, heard) {
+    var a = A(), s = session();
+    if (!a || !s || lang === LG.cur) return;
+    LG.cur = lang;
+    try { localStorage.setItem('tl_iv_lang_' + LG.iv, lang); } catch (e) { /* only a convenience */ }
+    /* the answer in progress: what was heard in the old language was the wrong words */
+    var rec = a.rec;
+    if (rec && rec._inner) {
+      rec._interim = '';
+      try { rec._inner.abort(); } catch (e) { /* its end handler starts it again, in the new language */ }
+    }
+    if (heard) {
+      a.sttFinal = heard + ' '; a.sttText = heard; a.confSum = 0; a.confN = 0;
+      if (window.TLVI && window.TLVI.transcript && window.TLVI.transcript.live) window.TLVI.transcript.live(heard);
+    }
+    applyQuestions(s);
+    noticeShown.lang = false;
+    if (LG.note) LG.note.remove();
+    var say = { en: 'We will continue in English.', te: 'ఇప్పుడు తెలుగులో కొనసాగుతుంది. తదుపరి ప్రశ్నలు తెలుగులో వస్తాయి.', hi: 'अब हिन्दी में जारी रहेगा। अगले सवाल हिन्दी में आएँगे।' };
+    LG.note = notice('lang', say[lang]);
+  }
+
+  /* ---- the candidate's voice, for the language check ---- */
+  function ensureCapture(a) {
+    if (LG.proc && LG.procStream === a.stream) return;
+    if (!a.stream || !a.audioCtx || !a.audioCtx.createScriptProcessor) return;
+    try {
+      var ctx = a.audioCtx, src = ctx.createMediaStreamSource(a.stream), p = ctx.createScriptProcessor(4096, 1, 1), mute = ctx.createGain();
+      mute.gain.value = 0;
+      p.onaudioprocess = function (e) {
+        var x = A();
+        if (!x || !x.listening || x.micOff) return;
+        var d = new Float32Array(e.inputBuffer.getChannelData(0));
+        var sum = 0; for (var i = 0; i < d.length; i++) sum += d[i] * d[i];
+        var ms = (d.length / ctx.sampleRate) * 1000;
+        if (Math.sqrt(sum / d.length) > 0.015) LG.voicedMs += ms;
+        LG.chunks.push(d);
+        var keep = Math.ceil((ctx.sampleRate * 9) / d.length);
+        if (LG.chunks.length > keep) LG.chunks.shift();
+      };
+      src.connect(p); p.connect(mute); mute.connect(ctx.destination);
+      LG.proc = p; LG.procStream = a.stream; LG.rate = ctx.sampleRate;
+    } catch (e) { LG.proc = null; }
+  }
+  /* the kept seconds as 16 kHz 16-bit mono, base64 */
+  function pcm16k() {
+    var n = 0, i, k; LG.chunks.forEach(function (c) { n += c.length; });
+    var step = (LG.rate || 48000) / 16000, out = new Int16Array(Math.floor(n / step)), all = new Float32Array(n), at = 0;
+    LG.chunks.forEach(function (c) { all.set(c, at); at += c.length; });
+    for (i = 0; i < out.length; i++) { k = all[Math.floor(i * step)]; out[i] = Math.max(-1, Math.min(1, k)) * 32767; }
+    var bytes = new Uint8Array(out.buffer), s = '';
+    for (i = 0; i < bytes.length; i += 8192) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+    return btoa(s);
+  }
+  function check(key) {
+    LG.busy = true; LG.checks += 1;
+    post('/hear', { lang: LG.cur, pcm: pcm16k() }).then(function (r) {
+      LG.busy = false;
+      if (!r) return;
+      if (r.ready === false) { LG.serverHears = false; return; }
+      LG.unsure = !r.changed;
+      if (r.changed && !LG.manual && LG.answer === key && r.lang) switchTo(r.lang, r.text || '');
+    }, function () { LG.busy = false; });
+  }
+
+  /* ---- a question in Telugu / Hindi is spoken by the server's voice ---- */
+  function chunksOf(line) { /* the same sentences the page's speak() makes */
+    var parts = String(line).match(/[^.!?]+[.!?]*\s*/g) || [line], out = [], buf = '';
+    parts.forEach(function (x) { if ((buf + x).length > 180 && buf) { out.push(buf.trim()); buf = x; } else { buf += x; } });
+    if (buf.trim()) out.push(buf.trim());
+    return out;
+  }
+  function soundFor(text) {
+    if (LG.says[text]) return LG.says[text];
+    var p = post('/say', { lang: scriptOf(text) || LG.cur, text: text }).then(function (r) {
+      if (r && r.ready && r.key) return API_BASE() + '/tl-interview/audio/' + r.key;
+      delete LG.says[text]; return null;
+    }, function () { delete LG.says[text]; return null; });
+    LG.says[text] = p;
+    return p;
+  }
+  function prefetchNext(s) {
+    if (LG.cur === 'en') return;
+    var a = A(), q = questionsOf(s)[(a ? a.idx : 0) + 1], cur = questionsOf(s)[a ? a.idx : 0];
+    [cur, q].forEach(function (x) { if (x && scriptOf(x.q)) chunksOf(x.q).forEach(soundFor); });
+  }
+  function stopVoice() {
+    var v = LG.audio; LG.audio = null;
+    if (v) { try { v.onended = null; v.onerror = null; v.pause(); } catch (e) { /* gone */ } var a = A(); if (a && a.audio === v) a.audio = null; }
+  }
+  var synth = window.speechSynthesis;
+  var realSpeak = synth && synth.speak ? synth.speak.bind(synth) : null;
+  var realCancel = synth && synth.cancel ? synth.cancel.bind(synth) : null;
+  function browserVoice(u, lang) {
+    var want = LG.code[lang], v = (synth.getVoices() || []).filter(function (x) { return String(x.lang).replace('_', '-').toLowerCase().indexOf(want.slice(0, 2)) === 0; })[0];
+    if (v) { u.voice = v; u.lang = v.lang; realSpeak(u); return; }
+    notice('novoice', 'The question is on the screen. Please read it, then answer aloud.');
+    setTimeout(function () { if (u.onend) u.onend({}); }, 300);
+  }
+  function speakIndic(u) {
+    var lang = scriptOf(u.text) || LG.cur, a = A();
+    soundFor(u.text).then(function (url) {
+      if (!url) { browserVoice(u, lang); return; }
+      stopVoice();
+      var v = new window.Audio(url);
+      LG.audio = v; if (a) a.audio = v;      // the page's "the interviewer is speaking" check sees it
+      v.onended = function () { if (LG.audio === v) { stopVoice(); } if (u.onend) u.onend({}); };
+      v.onerror = function () { if (LG.audio === v) { stopVoice(); browserVoice(u, lang); } };
+      var p = v.play(); if (p && p.catch) p.catch(function () { if (LG.audio === v) { stopVoice(); browserVoice(u, lang); } });
+    });
+  }
+  try {
+    if (realSpeak) {
+      synth.speak = function (u) { if (u && scriptOf(u.text)) { speakIndic(u); return undefined; } return realSpeak(u); };
+      synth.cancel = function () { stopVoice(); return realCancel(); };
+    }
+  } catch (e) { /* the page's own voice keeps working */ }
+
+  /* ---- the answer the portal scores, in English ---- */
+  function browserToEnglish(text, lang) {
+    if (!window.Translator || !window.Translator.create) return Promise.resolve(null);
+    return window.Translator.create({ sourceLanguage: lang, targetLanguage: 'en' })
+      .then(function (t) { return t.translate(text); }).then(function (x) { return x || null; }, function () { return null; });
+  }
+  function toEnglish(text) {
+    if (LG.answers[text]) return LG.answers[text];
+    var lang = scriptOf(text);
+    var p = browserToEnglish(text, lang).then(function (t) {
+      if (t) return { ok: true, text: t };
+      return post('/to-english', { lang: lang, text: text }).then(function (r) { return r || { ok: false }; }, function () { return { ok: false }; });
+    }).then(function (r) { if (!r.ok) delete LG.answers[text]; return r; });
+    LG.answers[text] = p;
+    return p;
+  }
+  function wrapApi() {
+    var t = window.TL;
+    if (!t || !t.api || !t.api.post || t.api.post.__tlLang) return;
+    var orig = t.api.post;
+    var wrapped = function (path, body) {
+      var self = this, rest = Array.prototype.slice.call(arguments, 2);
+      if (!/\/ai-interviews\/[^/]+\/answer$/.test(String(path)) || !body) return orig.apply(self, arguments);
+      var lang = body.transcript ? scriptOf(body.transcript) : null;
+      var ready = lang ? toEnglish(body.transcript) : Promise.resolve(null);
+      return ready.then(function (r) {
+        var b = body;
+        if (r && r.ok) {
+          b = Object.assign({}, body, { transcript: String(r.text).slice(0, 19900) + ' (Spoken in ' + (lang === 'te' ? 'Telugu' : 'Hindi') + '; translated to English by machine.)' });
+        } else if (r) {
+          /* no translator answered: the words stay as spoken, and the portal's own rule asks a person to hear the recording */
+          b = Object.assign({}, body, { confidence: Math.min(0.5, body.confidence == null ? 0.5 : body.confidence) });
+        }
+        return orig.apply(self, [path, b].concat(rest));
+      }).then(function (res) {
+        /* the server's one follow-up, in the candidate's language */
+        if (!res || !res.followUp || LG.cur === 'en') return res;
+        return post('/translate', { lang: LG.cur, texts: [res.followUp] }).then(function (x) {
+          var it = x && x.items && x.items[0];
+          return it && it.done ? Object.assign({}, res, { followUp: it.text }) : res;
+        }, function () { return res; });
+      });
+    };
+    wrapped.__tlLang = true;
+    t.api.post = wrapped;
+  }
+
+  function preferred() {
+    try {
+      var c = window.STATE && STATE.session && window.DATA && DATA.candidateById ? DATA.candidateById(STATE.session.id) : null;
+      var v = c && c.preferredLanguage; return v === 'te' || v === 'hi' ? v : 'en';
+    } catch (e) { return 'en'; }
+  }
+  function langTick() {
+    var a = A(), s = session();
+    wrapApi();
+    if (!a || a.phase !== 'interview' || !s) { paintBar(); return; }
+    if (LG.iv !== s.interviewId) {
+      LG.iv = s.interviewId; LG.manual = false; LG.serverHears = true;
+      var saved = null;
+      try { saved = localStorage.getItem('tl_iv_lang_' + LG.iv); } catch (e) { /* none */ }
+      LG.cur = saved === 'te' || saved === 'hi' || saved === 'en' ? saved : preferred();
+      if (LG.cur !== 'en') applyQuestions(s);
+    }
+    paintBar();
+    if (!a.listening) return;
+    stopEcho(a);
+    var key = (a.idx || 0) + '|' + (a.part || 'main');
+    if (LG.answer !== key) {
+      LG.answer = key; LG.checks = 0; LG.unsure = false; LG.chunks = []; LG.voicedMs = 0;
+      prefetchNext(s);
+    }
+    if (LG.manual || a.micOff) return;
+    if (LG.serverHears) {
+      ensureCapture(a);
+      if (LG.proc && !LG.busy && ((LG.checks === 0 && LG.voicedMs >= 3500) || (LG.checks === 1 && LG.unsure && LG.voicedMs >= 8000))) check(key);
+    } else {
+      var w = fromWords(a.sttText, LG.cur);
+      if (w) switchTo(w, '');
+    }
+  }
+  /* the mic is open for the answer: a voice still playing would be heard as the candidate */
+  function stopEcho(a) { if (LG.audio) stopVoice(); }
+  setInterval(langTick, 400);
+
   /* for tests */
-  window.__tlInterviewAddonTest = { wrapRecognition: wrapRecognition, pitch: pitch, V: V, tick: tick };
+  window.__tlInterviewAddonTest = { wrapRecognition: wrapRecognition, pitch: pitch, V: V, tick: tick, LG: LG, langTick: langTick, fromWords: fromWords, switchTo: switchTo, scriptOf: scriptOf };
 })();

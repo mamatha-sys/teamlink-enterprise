@@ -34,7 +34,7 @@ const words = (t) => String(t || '').trim().split(/\s+/).filter(Boolean).length;
 const clean = (t) => String(t || '').replace(/\s+/g, ' ').trim();
 
 /* ---- the portal's own session cookie ---- */
-function cookieOf(req, name) {
+export function cookieOf(req, name) {
   const raw = String(req.headers.cookie || '');
   for (const part of raw.split(';')) {
     const i = part.indexOf('=');
