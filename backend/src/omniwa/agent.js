@@ -322,8 +322,9 @@ async function askModel(conv, cfg, input) {
   return { ctx, calls, reply: '' };
 }
 
-async function runTurn(row, cfg, now = Date.now()) {
+async function runTurn(row, defaults, now = Date.now()) {
   const conv = row;
+  const cfg = await Cfg.forNumber(defaults, conv.numberId);
   const waiting = await S.q('SELECT id, body FROM "OmniWaMessage" WHERE convId = ? AND direction = \'IN\' AND consumedAt IS NULL ORDER BY at ASC', conv.id);
   if (!waiting.length) return { skipped: 'nothing_waiting' };
   await S.run(`UPDATE "OmniWaMessage" SET consumedAt = ? WHERE id IN (${waiting.map(() => '?').join(',')})`, now, ...waiting.map((m) => m.id));
@@ -331,6 +332,7 @@ async function runTurn(row, cfg, now = Date.now()) {
   const stamp = (outcome, extra = {}) => log(conv, { input, outcome, ...extra });
 
   if (!cfg.enabled) return { skipped: 'off' };
+  if (cfg.numberOff) return { skipped: 'number_off' };
   if (cfg.testNumbers.length && !cfg.testNumbers.includes(conv.e164)) return { skipped: 'not_a_test_number' };
   if (conv.mode === 'ai' && conv.state === 'needs_human' && !STAYS_WITH_PEOPLE.test(conv.handoffReason || '')) {
     await S.run('UPDATE "OmniWaConv" SET state = \'active\', handoffReason = NULL, updatedAt = ? WHERE id = ?', now, conv.id);

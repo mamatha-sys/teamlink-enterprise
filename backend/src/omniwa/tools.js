@@ -156,7 +156,7 @@ async function run(name, args, conv, ctx) {
   switch (name) {
     case 'get_candidate_profile': return profileFacts(conv);
     case 'get_job_details': return jobFacts(conv.requirementId);
-    case 'search_knowledge_base': { const hits = await Cfg.kbSearch(a.query); return hits.length ? { found: hits } : { found: [], note: 'Nothing in the knowledge base: hand off to a recruiter.' }; }
+    case 'search_knowledge_base': { const hits = await Cfg.kbSearch(a.query, 3, conv.numberId); return hits.length ? { found: hits } : { found: [], note: 'Nothing in the knowledge base: hand off to a recruiter.' }; }
     case 'search_open_jobs': ctx.noJob = false; return offerJobs(conv, a.query);
     case 'select_job': return selectJob(conv, a, ctx);
     case 'save_candidate_data': return saveData(conv, a, ctx);

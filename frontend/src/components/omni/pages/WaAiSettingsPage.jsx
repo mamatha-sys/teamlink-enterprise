@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../../api';
+import Combo from '../../Combo.jsx';
 import { useOmni } from '../omniContext.js';
 import { PageHead, Panel, Field, Btn, Banner, Pill, Tabs, GsModal, ConfirmModal, Empty, fmtDateTime } from '../ui.jsx';
 import { errOf } from '../omniApi.js';
@@ -76,8 +77,55 @@ function AiForm() {
   );
 }
 
+// one WhatsApp number's own switch, instructions and fallback. Empty boxes = the default from AI settings.
+function NumberCard({ n, saved, onChanged }) {
+  const { toast } = useOmni();
+  const [enabled, setEnabled] = useState(saved ? saved.enabled : true);
+  const [systemPrompt, setPrompt] = useState((saved && saved.systemPrompt) || '');
+  const [fallbackMessage, setFallback] = useState((saved && saved.fallbackMessage) || '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const save = async () => {
+    setBusy(true); setErr('');
+    try { await api.put(`${BASE}/profiles/${n.id}`, { enabled, systemPrompt, fallbackMessage }); toast('Saved.'); onChanged(); } catch (e) { setErr(errOf(e, 'This could not be saved.')); } finally { setBusy(false); }
+  };
+  const reset = async () => {
+    setBusy(true); setErr('');
+    try { await api.delete(`${BASE}/profiles/${n.id}`); setEnabled(true); setPrompt(''); setFallback(''); toast('This number uses the default settings now.'); onChanged(); } catch (e) { setErr(errOf(e, 'This could not be changed.')); } finally { setBusy(false); }
+  };
+  return (
+    <Panel title={n.label} sub={n.display}>
+      {err && <Banner tone="warn">{err}</Banner>}
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0' }}><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /><b>AI replies on this number</b></label>
+      <Field label="Instructions for this number" hint="Empty = the system prompt from AI settings."><textarea className="input" rows={6} value={systemPrompt} onChange={(e) => setPrompt(e.target.value)} /></Field>
+      <Field label="Fallback message for this number" hint="Empty = the fallback message from AI settings."><textarea className="input" rows={2} value={fallbackMessage} onChange={(e) => setFallback(e.target.value)} /></Field>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Btn primary onClick={save} disabled={busy}>Save</Btn>
+        {saved && <Btn onClick={reset} disabled={busy}>Use the default</Btn>}
+      </div>
+    </Panel>
+  );
+}
+
+function ByNumber() {
+  const [numbers, setNumbers] = useState(null);
+  const [saved, setSaved] = useState({});
+  const [err, setErr] = useState('');
+  const load = useCallback(() => Promise.all([api.get(`${BASE}/connection`), api.get(`${BASE}/profiles`)]).then(([c, p]) => {
+    setNumbers(c.data.numbers);
+    setSaved(Object.fromEntries(p.data.profiles.map((x) => [x.numberId, x])));
+  }).catch((e) => setErr(errOf(e, 'The numbers could not be read.'))), []);
+  useEffect(() => { load(); }, [load]);
+  if (err) return <Banner tone="warn">{err}</Banner>;
+  if (!numbers) return <div className="small-muted">Loading…</div>;
+  if (!numbers.length) return <Empty title="No numbers yet">Add WhatsApp numbers in Administration &gt; Integrations.</Empty>;
+  return numbers.map((n) => <NumberCard key={`${n.id}${saved[n.id] ? saved[n.id].updatedAt : ''}`} n={n} saved={saved[n.id]} onChanged={load} />);
+}
+
 function Knowledge() {
   const { toast } = useOmni();
+  const [numbers, setNumbers] = useState([]);
+  useEffect(() => { api.get(`${BASE}/connection`).then((r) => setNumbers(r.data.numbers)).catch(() => setNumbers([])); }, []);
   const [rows, setRows] = useState(null);
   const [edit, setEdit] = useState(null);
   const [gone, setGone] = useState(null);
@@ -98,7 +146,7 @@ function Knowledge() {
       {rows && rows.length === 0 && <Empty title="No entries yet">Add the questions candidates ask most. Without entries the AI passes those questions to a recruiter.</Empty>}
       {(rows || []).map((r) => (
         <div key={r.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--line, #e5e7eb)' }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}><b style={{ flex: 1 }}>{r.question}</b>{!r.active && <Pill>Off</Pill>}<Btn small onClick={() => setEdit(r)}>Edit</Btn><Btn small danger onClick={() => setGone(r)}>Delete</Btn></div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}><b style={{ flex: 1 }}>{r.question}</b><Pill>{(numbers.find((n) => n.id === r.numberId) || {}).label || 'All numbers'}</Pill>{!r.active && <Pill>Off</Pill>}<Btn small onClick={() => setEdit(r)}>Edit</Btn><Btn small danger onClick={() => setGone(r)}>Delete</Btn></div>
           <div className="small-muted" style={{ whiteSpace: 'pre-wrap' }}>{r.answer}</div>
         </div>
       ))}
@@ -107,6 +155,12 @@ function Knowledge() {
           {err && <Banner tone="warn">{err}</Banner>}
           <Field label="Question"><input className="input" value={edit.question} onChange={(e) => setEdit({ ...edit, question: e.target.value })} /></Field>
           <Field label="Answer"><textarea className="input" rows={5} value={edit.answer} onChange={(e) => setEdit({ ...edit, answer: e.target.value })} /></Field>
+          <Field label="Which WhatsApp number?">
+            <Combo value={edit.numberId || ''} onChange={(e) => setEdit({ ...edit, numberId: e.target.value })} emptyText="No such number">
+              <option value="">All numbers</option>
+              {numbers.map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}
+            </Combo>
+          </Field>
           <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={edit.active !== false} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} />In use</label>
         </GsModal>
       )}
@@ -184,8 +238,9 @@ export default function WaAiSettingsPage() {
   return (
     <>
       <PageHead title="WhatsApp AI" lead="The AI assistant that answers replies to your promotions." />
-      <Tabs tabs={[['ai', 'AI settings'], ['kb', 'Knowledge base'], ['runs', 'What the AI did'], ['blocked', 'Blocked numbers'], ['conn', 'Connection']]} value={tab} onChange={setTab} />
+      <Tabs tabs={[['ai', 'AI settings'], ['numbers', 'By number'], ['kb', 'Knowledge base'], ['runs', 'What the AI did'], ['blocked', 'Blocked numbers'], ['conn', 'Connection']]} value={tab} onChange={setTab} />
       {tab === 'ai' && <AiForm />}
+      {tab === 'numbers' && <ByNumber />}
       {tab === 'kb' && <Knowledge />}
       {tab === 'runs' && <Runs />}
       {tab === 'blocked' && <Blocked />}

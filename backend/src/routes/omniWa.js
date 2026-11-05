@@ -125,6 +125,13 @@ router.get('/connection', adminOnly, wrap(async (req, res) => {
   }
   res.json({ numbers, webhook: await delivery.seenOf('whatsapp') });
 }));
+router.get('/profiles', adminOnly, wrap(async (req, res) => res.json({ profiles: await Cfg.profiles() })));
+router.put('/profiles/:numberId', adminOnly, wrap(async (req, res) => {
+  const out = await Cfg.saveProfile(req.user, req.params.numberId, req.body || {});
+  if (!out.error) await logAudit({ userId: req.user.id, action: 'WhatsApp AI settings of a number changed', entity: 'OmniWaAiProfile', entityId: req.params.numberId, toValue: (req.body || {}).enabled === false ? 'Off' : 'On' }).catch(() => {});
+  return send(res, out);
+}));
+router.delete('/profiles/:numberId', adminOnly, wrap(async (req, res) => send(res, await Cfg.removeProfile(req.params.numberId))));
 router.get('/knowledge', adminOnly, wrap(async (req, res) => res.json({ entries: await Cfg.kbList() })));
 router.post('/knowledge', adminOnly, wrap(async (req, res) => send(res, await Cfg.kbSave(req.user, null, req.body || {}))));
 router.put('/knowledge/:id', adminOnly, wrap(async (req, res) => send(res, await Cfg.kbSave(req.user, req.params.id, req.body || {}))));

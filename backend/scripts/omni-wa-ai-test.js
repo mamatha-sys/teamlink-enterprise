@@ -391,6 +391,36 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     check('Green Start not answering: nothing breaks, nobody gets a wrong AI reply', stub.calls.length === 0 && (await aiMsgs(j.id)).length === 0);
     gsServer.close();
 
+    // ---- 8c. each WhatsApp number its own instructions and knowledge
+    console.log('\n-- each number its own instructions');
+    const WN = require(path.join(BACK, 'src/utils/waNumbers'));
+    const nums = (await WN.listRows()).filter((n) => !n.removedAt);
+    check('the test database has two numbers', nums.length >= 2, nums.length);
+    const [nA, nB] = nums;
+    const onNumber = (numberId, from, text) => { provider += 1; return delivery.applyInbound({ channel: 'WhatsApp', from, text, id: `wamid.ZZn${SUFFIX}${provider}`, at: new Date(), name: 'ZZTEST', numberId }); };
+    await Cfg.saveProfile(admin, nA.id, { enabled: true, systemPrompt: 'ZZMEDICAL assistant instructions', fallbackMessage: 'ZZ medical team will call you.' });
+    await Cfg.saveProfile(admin, nB.id, { enabled: false });
+    await Cfg.kbSave(admin, null, { question: 'What are the hostel charges?', answer: 'ZZ medical hostel answer', numberId: nA.id });
+    await Cfg.kbSave(admin, null, { question: 'What are the hostel charges for education?', answer: 'ZZ education hostel answer', numberId: nB.id });
+    const k = await mkCandidate(30, 'Kiran');
+    await promote(k, 30);
+    await onNumber(nA.id, phoneOf(30), 'Hi there');
+    stub.script = [{ tool: 'search_knowledge_base', args: { query: 'hostel charges' } }, { reply: 'Okay.' }];
+    stub.calls.length = 0;
+    await run();
+    const sysA = stub.calls[0] ? stub.calls[0].messages[0].content : '';
+    const toolAnswer = stub.calls[1] ? JSON.stringify(stub.calls[1].messages) : '';
+    check('a chat on a number uses THAT number\'s instructions, TeamLink\'s rules stay, the default prompt does not', /ZZMEDICAL assistant/.test(sysA) && /Answer only from the job data/.test(sysA) && !/You help candidates\./.test(sysA), sysA.slice(0, 200));
+    check('the knowledge base gives that number\'s entries, not another number\'s', toolAnswer.includes('ZZ medical hostel answer') && !toolAnswer.includes('ZZ education hostel answer'), toolAnswer.slice(-300));
+    const m = await mkCandidate(31, 'Mani');
+    await promote(m, 31);
+    await onNumber(nB.id, phoneOf(31), 'Hello');
+    stub.calls.length = 0;
+    await run();
+    check('a number switched off: no AI on it, even with AI on for the others', stub.calls.length === 0 && (await aiMsgs(m.id)).length === 0);
+    await Cfg.removeProfile(nA.id); await Cfg.removeProfile(nB.id);
+    check('Use the default takes the number back to the shared settings', (await Cfg.profiles()).length === 0 && (await Cfg.forNumber({ systemPrompt: 'x' }, nA.id)).systemPrompt === 'x');
+
     // ---- 9. promotions, already contacted, the push, the other responders
     console.log('\n-- promotions and the screen');
     await Promo.onStatus({ providerRef: `zzout2${SUFFIX}`, status: 'delivered' });

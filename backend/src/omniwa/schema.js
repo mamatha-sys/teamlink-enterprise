@@ -8,7 +8,8 @@
 //   OmniWaMessage    every WhatsApp message the agent saw or sent, and every promotion: candidate, job, campaign, template, recruiter, status.
 //                    A number with no candidate (a lead) has its messages ONLY here. UNIQUE provider id = one message is handled once.
 //   OmniWaCampaign   one row per bulk promotion
-//   OmniWaAiConfig   the Admin's AI settings (one row)        OmniWaKnowledge  the FAQ entries        OmniWaOptOut  STOP / unsubscribe
+//   OmniWaAiConfig   the Admin's AI settings (one row)        OmniWaKnowledge  the FAQ entries (numberId empty = every number)        OmniWaOptOut  STOP / unsubscribe
+//   OmniWaAiProfile  one WhatsApp number's own switch, instructions and fallback (no row = the default settings)
 //   OmniWaAiRun      one row per AI run: input, tool calls, output, errors
 // Times are epoch milliseconds in BIGINT columns (Prisma raw reads cannot take them from an INTEGER column).
 // ---------------------------------------------------------------------------
@@ -34,6 +35,7 @@ const DDL = [
     "fallbackMessage" TEXT, "maxTurns" INTEGER NOT NULL DEFAULT 12, "memoryCount" INTEGER NOT NULL DEFAULT 12, "debounceSeconds" INTEGER NOT NULL DEFAULT 10, "promoDays" INTEGER NOT NULL DEFAULT 7, "testNumbers" TEXT,
     "updatedByName" TEXT, "updatedAt" BIGINT)`,
   `CREATE TABLE IF NOT EXISTS "OmniWaKnowledge" ("id" TEXT NOT NULL PRIMARY KEY, "question" TEXT NOT NULL, "answer" TEXT NOT NULL, "active" INTEGER NOT NULL DEFAULT 1, "updatedByName" TEXT, "createdAt" BIGINT NOT NULL, "updatedAt" BIGINT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS "OmniWaAiProfile" ("numberId" TEXT NOT NULL PRIMARY KEY, "enabled" INTEGER NOT NULL DEFAULT 1, "systemPrompt" TEXT, "fallbackMessage" TEXT, "updatedByName" TEXT, "updatedAt" BIGINT)`,
   `CREATE TABLE IF NOT EXISTS "OmniWaOptOut" ("e164" TEXT NOT NULL PRIMARY KEY, "candidateId" TEXT, "source" TEXT, "text" TEXT, "at" BIGINT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS "OmniWaAiRun" ("id" TEXT NOT NULL PRIMARY KEY, "convId" TEXT, "e164" TEXT, "input" TEXT, "toolCalls" TEXT, "output" TEXT, "outcome" TEXT, "error" TEXT, "model" TEXT, "ms" INTEGER, "at" BIGINT NOT NULL)`,
   'CREATE INDEX IF NOT EXISTS "OmniWaAiRun_at" ON "OmniWaAiRun"("at")',
@@ -42,7 +44,11 @@ const DDL = [
 let ready = null;
 function ensure() {
   if (!ready) {
-    ready = (async () => { for (const sql of DDL) await S.run(sql); })().catch((e) => { ready = null; throw e; }); // eslint-disable-line no-await-in-loop
+    ready = (async () => {
+      for (const sql of DDL) await S.run(sql); // eslint-disable-line no-await-in-loop
+      const cols = await S.q('SELECT name FROM pragma_table_info(\'OmniWaKnowledge\')');
+      if (!cols.some((c) => c.name === 'numberId')) await S.run('ALTER TABLE "OmniWaKnowledge" ADD COLUMN "numberId" TEXT'); // the table went live before entries could belong to one number
+    })().catch((e) => { ready = null; throw e; });
   }
   return ready;
 }

@@ -49,10 +49,39 @@ async function save(user, b = {}) {
   return { ok: true, config: await read() };
 }
 
+// ---- one WhatsApp number's own settings (founder 2026-11-05: each number its own instructions) ----------------------------------------------------------
+async function profiles() {
+  await ensure();
+  return (await S.q('SELECT numberId, enabled, systemPrompt, fallbackMessage, updatedByName, updatedAt FROM "OmniWaAiProfile"')).map((r) => ({ ...r, enabled: !!r.enabled, updatedAt: r.updatedAt ? Number(r.updatedAt) : null }));
+}
+async function saveProfile(user, numberId, b = {}) {
+  await ensure();
+  const row = await require('../utils/waNumbers').getRow(numberId); // eslint-disable-line global-require
+  if (!row) return { error: 'This WhatsApp number is gone.', status: 404 };
+  const systemPrompt = S.clip(String(b.systemPrompt == null ? '' : b.systemPrompt).trim(), 6000) || null;
+  const fallbackMessage = S.clip(String(b.fallbackMessage == null ? '' : b.fallbackMessage).trim(), 700) || null;
+  await S.run(`INSERT INTO "OmniWaAiProfile" (numberId, enabled, systemPrompt, fallbackMessage, updatedByName, updatedAt) VALUES (?,?,?,?,?,?)
+    ON CONFLICT(numberId) DO UPDATE SET enabled=excluded.enabled, systemPrompt=excluded.systemPrompt, fallbackMessage=excluded.fallbackMessage, updatedByName=excluded.updatedByName, updatedAt=excluded.updatedAt`,
+  row.id, b.enabled === false ? 0 : 1, systemPrompt, fallbackMessage, user ? user.name : null, Date.now());
+  return { ok: true };
+}
+async function removeProfile(numberId) {
+  await ensure();
+  await S.run('DELETE FROM "OmniWaAiProfile" WHERE numberId = ?', String(numberId));
+  return { ok: true };
+}
+// the settings one chat runs on: the number's own where it has them, the default for the rest
+async function forNumber(cfg, numberId) {
+  if (!numberId) return cfg;
+  const p = (await S.q('SELECT enabled, systemPrompt, fallbackMessage FROM "OmniWaAiProfile" WHERE numberId = ?', String(numberId)))[0];
+  if (!p) return cfg;
+  return { ...cfg, numberOff: !p.enabled, systemPrompt: p.systemPrompt || cfg.systemPrompt, fallbackMessage: p.fallbackMessage || cfg.fallbackMessage };
+}
+
 // ---- knowledge base ------------------------------------------------------------------------------------------------------------------------------
 async function kbList() {
   await ensure();
-  return (await S.q('SELECT id, question, answer, active, updatedByName, updatedAt FROM "OmniWaKnowledge" ORDER BY updatedAt DESC')).map((r) => ({ ...r, active: !!r.active, updatedAt: Number(r.updatedAt) }));
+  return (await S.q('SELECT id, question, answer, active, numberId, updatedByName, updatedAt FROM "OmniWaKnowledge" ORDER BY updatedAt DESC')).map((r) => ({ ...r, active: !!r.active, updatedAt: Number(r.updatedAt) }));
 }
 async function kbSave(user, id, b = {}) {
   await ensure();
@@ -61,13 +90,14 @@ async function kbSave(user, id, b = {}) {
   if (!question || !answer) return { error: 'Write the question and its answer.', status: 400 };
   const now = Date.now();
   const active = b.active === false ? 0 : 1;
+  const numberId = b.numberId ? String(b.numberId) : null; // empty = every number
   if (id) {
-    const n = await S.run('UPDATE "OmniWaKnowledge" SET question = ?, answer = ?, active = ?, updatedByName = ?, updatedAt = ? WHERE id = ?', question, answer, active, user ? user.name : null, now, String(id));
+    const n = await S.run('UPDATE "OmniWaKnowledge" SET question = ?, answer = ?, active = ?, numberId = ?, updatedByName = ?, updatedAt = ? WHERE id = ?', question, answer, active, numberId, user ? user.name : null, now, String(id));
     if (!n) return { error: 'This entry is gone.', status: 404 };
     return { ok: true, id: String(id) };
   }
   const newId = S.newId('wak');
-  await S.run('INSERT INTO "OmniWaKnowledge" (id, question, answer, active, updatedByName, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?)', newId, question, answer, active, user ? user.name : null, now, now);
+  await S.run('INSERT INTO "OmniWaKnowledge" (id, question, answer, active, numberId, updatedByName, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?,?)', newId, question, answer, active, numberId, user ? user.name : null, now, now);
   return { ok: true, id: newId };
 }
 async function kbRemove(id) {
@@ -75,16 +105,16 @@ async function kbRemove(id) {
   await S.run('DELETE FROM "OmniWaKnowledge" WHERE id = ?', String(id));
   return { ok: true };
 }
-// the entries closest to the question (shared words, longer words count more)
-async function kbSearch(query, limit = 3) {
+// the entries closest to the question (shared words, longer words count more): those for every number and those of this chat's number
+async function kbSearch(query, limit = 3, numberId = null) {
   await ensure();
   const words = [...new Set(String(query || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2))];
   if (!words.length) return [];
-  const rows = await S.q('SELECT question, answer FROM "OmniWaKnowledge" WHERE active = 1');
+  const rows = await S.q('SELECT question, answer FROM "OmniWaKnowledge" WHERE active = 1 AND (numberId IS NULL OR numberId = ?)', numberId || '');
   return rows.map((r) => {
     const q = String(r.question).toLowerCase(); const a = String(r.answer).toLowerCase();
     return { ...r, score: words.reduce((n, w) => n + (q.includes(w) ? 2 * w.length : 0) + (a.includes(w) ? w.length : 0), 0) };
   }).filter((r) => r.score > 0).sort((x, y) => y.score - x.score).slice(0, limit).map(({ question, answer }) => ({ question, answer }));
 }
 
-module.exports = { read, save, kbList, kbSave, kbRemove, kbSearch, DEFAULT_PROMPT, DEFAULT_FALLBACK };
+module.exports = { profiles, saveProfile, removeProfile, forNumber, read, save, kbList, kbSave, kbRemove, kbSearch, DEFAULT_PROMPT, DEFAULT_FALLBACK };
