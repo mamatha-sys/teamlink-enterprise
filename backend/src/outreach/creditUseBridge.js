@@ -9,6 +9,8 @@
 //   company     every seat holder's tokens + joinings, only for the "costly" yardstick. Green Start never shows these rows.
 //   workspaces  Green Start workspace id -> department (utils/omniDeptLogins.js), for the sends no person can be named for.
 //   channels    (founder 2026-11-05) tokens per way of sending: { whatsapp, sms, email, call }, from the ledger, on every person and past row.
+//   aiReplies   (founder 2026-11-05: "aa login nunchi send chestey aa login name ravali") the WhatsApp AI's automatic replies are charged to the chat's owner in the ledger, but
+//               that person sent nothing, so here they leave the person's numbers and stand in their own row by department.
 //   aiCalls     AI phone calls that really talked (AiCall live + completed, browser talks left out): ONE source for every AI call, because Green Start only keeps a
 //               history copy of them. Counted to who started the call or its campaign; calls with no such person go to noPersonCalls. Tokens = calls x the Credits "call" cost.
 // A login that is not active here is refused. Reads only; writes nothing.
@@ -57,9 +59,25 @@ async function interviewsBy(ids, from, to) {
   return out;
 }
 
-/** Ledger tokens per way of sending. -> userId -> { whatsapp, sms, email, call } (live, not failed; test messages use no tokens) */
+const AI_LABEL = 'AI assistant'; // omniwa/agent.js AI_NAME
+
+/** The WhatsApp AI's automatic replies. -> { byUser: Map(userId -> { credits, sent }), rows: [{ department, credits, sent, channels }] } */
+async function aiRepliesBy(from, to) {
+  const rows = await prisma.$queryRawUnsafe('SELECT userId u, department d, channel c, COUNT(*) n, COALESCE(SUM(credits),0) t FROM "OmniCreditLedger" WHERE at >= ? AND at < ? AND mode = \'live\' AND result <> \'failed\' AND templateLabel = ? GROUP BY userId, department, channel', from, to, AI_LABEL);
+  const byUser = new Map(); const byDept = new Map();
+  rows.forEach((r) => {
+    if (r.u) { const o = byUser.get(r.u) || { credits: 0, sent: 0 }; o.credits += num(r.t); o.sent += num(r.n); byUser.set(r.u, o); }
+    const k = r.d || 'No department';
+    const d = byDept.get(k) || { department: k, credits: 0, sent: 0, channels: {} };
+    d.credits += num(r.t); d.sent += num(r.n); d.channels[r.c] = (d.channels[r.c] || 0) + num(r.t);
+    byDept.set(k, d);
+  });
+  return { byUser, rows: [...byDept.values()] };
+}
+
+/** Ledger tokens per way of sending. -> userId -> { whatsapp, sms, email, call } (live, not failed; test messages use no tokens; the AI's replies are not the person's) */
 async function channelsBy(from, to) {
-  const rows = await prisma.$queryRawUnsafe('SELECT userId u, channel c, COALESCE(SUM(credits),0) t FROM "OmniCreditLedger" WHERE at >= ? AND at < ? AND mode = \'live\' AND result <> \'failed\' AND userId IS NOT NULL GROUP BY userId, channel', from, to);
+  const rows = await prisma.$queryRawUnsafe('SELECT userId u, channel c, COALESCE(SUM(credits),0) t FROM "OmniCreditLedger" WHERE at >= ? AND at < ? AND mode = \'live\' AND result <> \'failed\' AND userId IS NOT NULL AND COALESCE(templateLabel,\'\') <> ? GROUP BY userId, channel', from, to, AI_LABEL);
   const out = new Map();
   rows.forEach((r) => { const o = out.get(r.u) || {}; o[r.c] = (o[r.c] || 0) + num(r.t); out.set(r.u, o); });
   return out;
@@ -104,6 +122,8 @@ async function forOmni(viewerId, month) {
   const intBy = await interviewsBy(ids, from, to);
   await Cr.ensureTables();
   const chanBy = await channelsBy(from, to);
+  const aiReplies = await aiRepliesBy(from, to);
+  const notAi = (id) => aiReplies.byUser.get(id) || { credits: 0, sent: 0 };
   const companyIds = new Set([...holders.keys(), ...ids]);
   const calls = await aiCallsBy(from, to, new Set(everybody.rows.map((r) => r.userId)));
   const perCall = num(act.rules.cost.call);
@@ -111,10 +131,10 @@ async function forOmni(viewerId, month) {
   const persons = rows.map((r) => {
     const h = holders.get(r.userId);
     const ai = aiOf(r.userId);
-    return { userId: r.userId, name: r.name, code: r.code || null, seat: h ? h.seat : null, department: (h && h.department) || r.department || 'No department', credits: r.used + ai.tokens, sent: r.sent, replies: replyBy.get(r.userId) || 0, interviews: intBy.get(r.userId) || 0, joinings: r.joinings, channels: chanBy.get(r.userId) || {}, aiCalls: ai };
+    return { userId: r.userId, name: r.name, code: r.code || null, seat: h ? h.seat : null, department: (h && h.department) || r.department || 'No department', credits: r.used - notAi(r.userId).credits + ai.tokens, sent: r.sent - notAi(r.userId).sent, replies: replyBy.get(r.userId) || 0, interviews: intBy.get(r.userId) || 0, joinings: r.joinings, channels: chanBy.get(r.userId) || {}, aiCalls: ai };
   });
 
-  const ledger = await prisma.$queryRawUnsafe('SELECT userId u, department d, COUNT(*) n, COALESCE(SUM(credits),0) c FROM "OmniCreditLedger" WHERE at >= ? AND at < ? AND mode = \'live\' AND result <> \'failed\' AND userId IS NOT NULL GROUP BY userId, department', from, to);
+  const ledger = await prisma.$queryRawUnsafe('SELECT userId u, department d, COUNT(*) n, COALESCE(SUM(credits),0) c FROM "OmniCreditLedger" WHERE at >= ? AND at < ? AND mode = \'live\' AND result <> \'failed\' AND userId IS NOT NULL AND COALESCE(templateLabel,\'\') <> ? GROUP BY userId, department', from, to, AI_LABEL);
   const pastBy = new Map();
   ledger.filter((r) => !holders.has(r.u) && !ids.includes(r.u)).forEach((r) => {
     const k = r.d || 'No department';
@@ -131,7 +151,8 @@ async function forOmni(viewerId, month) {
     cost: act.rules.cost,
     persons,
     past: [...pastBy.values()],
-    company: [...everybody.rows, ...rows].filter((r, i, all) => companyIds.has(r.userId) && all.findIndex((x) => x.userId === r.userId) === i).map((r) => ({ userId: r.userId, credits: r.used + aiOf(r.userId).tokens, joinings: r.joinings })),
+    company: [...everybody.rows, ...rows].filter((r, i, all) => companyIds.has(r.userId) && all.findIndex((x) => x.userId === r.userId) === i).map((r) => ({ userId: r.userId, credits: r.used - notAi(r.userId).credits + aiOf(r.userId).tokens, joinings: r.joinings })),
+    aiReplies: aiReplies.rows,
     noPersonCalls: { ...calls.none, tokens: calls.none.calls * perCall },
     workspaces: await workspaceDepartments(),
   };

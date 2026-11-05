@@ -74,6 +74,12 @@ const ask = (viewer, month = Cr.thisMonth()) => Z.call('GET', `/api/public/omni-
     const m2 = me2.persons && me2.persons[0];
     Z.check('B7 tokens per way of sending, AI calls counted only when they talked, a call with no person goes apart', m2 && m2.channels.whatsapp === 3 && m2.aiCalls.calls === 1 && m2.aiCalls.seconds === 90 && m2.aiCalls.tokens === 0 && me2.noPersonCalls.calls >= 1, m2 ? { c: m2.channels, ai: m2.aiCalls, none: me2.noPersonCalls } : me2);
 
+    await Cr.record({ userId: r1.id, channel: 'whatsapp', ok: true, templateLabel: 'AI assistant', source: 'zz-scb', now });
+    const withAi = (await ask(admin.id)).body;
+    const p1 = (withAi.persons || []).find((p) => p.userId === r1.id);
+    const aiRow = (withAi.aiReplies || []).find((x) => x.department === DEPT);
+    Z.check('B8 the WhatsApp AI reply on a person\'s chat is not that person\'s: their numbers stay 3, it stands in the AI row of the department', p1 && p1.credits === 3 && p1.sent === 3 && p1.channels.whatsapp === 3 && aiRow && aiRow.credits === 1 && aiRow.channels.whatsapp === 1, { p: p1 && [p1.credits, p1.sent, p1.channels], aiRow });
+
     Z.check('B2 a Recruiter: scope me, ONLY their row, 3 tokens, department Education from the seat code, no department list', me.ok === true && me.viewer.scope === 'me' && me.persons.length === 1 && mine.userId === r1.id && mine.credits === 3 && mine.department === 'Education' && mine.seat === `EDU-ZZ${Z.RUN}` && me.viewer.departments.length === 0, me.ok ? { v: me.viewer, mine } : me);
 
     const team = (await ask(lead.id)).body;
