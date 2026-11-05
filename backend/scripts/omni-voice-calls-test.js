@@ -297,7 +297,14 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     await omni.applyResult(dr2.id, ddr2.outcome(), ddr2.transcript(), {});
     await svc.setRow(dr2.id, { status: 'completed', endedAt: new Date().toISOString() });
     check('a call that finished by itself is not dropped', (await omni.status(dr2.id)).dropped === false);
-    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 35, { before, now: originated.length });
+    // a call that was going on when the server restarted is reported as dropped (rung again), one that never answered is just not answered
+    const rs1 = await omni.create({ externalId: 'restart1', toNumber: '9111222212', name: 'Kiran', script: FACTS }, { ...deps, ami: AMI });
+    await svc.setRow(rs1.id, { providerStatus: 'answered' });
+    const rs2 = await omni.create({ externalId: 'restart2', toNumber: '9111222213', name: 'Kiran', script: FACTS }, { ...deps, ami: AMI });
+    await sip.sweep(Date.now() + 3 * 3600000);
+    const rt1 = await omni.status(rs1.id); const rt2 = await omni.status(rs2.id);
+    check('a call cut off by a server restart is dropped (rung again); one that never answered is not', rt1.ended && rt1.dropped === true && rt1.status === 'failed' && rt2.status === 'no-answer' && rt2.dropped === false, { rt1: rt1.status + '/' + rt1.dropped, rt2: rt2.status + '/' + rt2.dropped });
+    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 37, { before, now: originated.length });
     check('Asterisk refusing the call fails it in words (and leaves a failed row)', await (async () => { const x = await refuse({ toNumber: '9333333333' }, { ...deps, ami: { action: async () => ({ Response: 'Error', Message: 'no trunk' }) } }); return !x.ok && x.code === 'not_dialled'; })());
   } finally {
     await prisma.$disconnect().catch(() => {});

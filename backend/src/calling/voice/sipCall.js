@@ -362,7 +362,8 @@ async function sweep(now = Date.now()) {
     if (dialing && now - at > STUCK_MS) {
       await svc.setRow(r.id, { status: 'no-answer', failReason: 'The candidate did not answer.', endedAt: new Date(now).toISOString() }); // eslint-disable-line no-await-in-loop
     } else if (!dialing && now - at > 30 * 60000) {
-      await svc.setRow(r.id, { status: 'failed', failReason: 'The call was cut off (the server restarted).', endedAt: new Date(now).toISOString() }); // eslint-disable-line no-await-in-loop
+      // (a call to an Omni-Channel contact that was cut by a restart is reported as dropped: Omni-Channel rings the person again)
+      await svc.setRow(r.id, { status: 'failed', failReason: 'The call was cut off (the server restarted).', endedAt: new Date(now).toISOString(), ...(String(r.candidateId || '').startsWith('omni:') ? { nextAction: 'dropped' } : {}) }); // eslint-disable-line no-await-in-loop
     }
   }
 }
