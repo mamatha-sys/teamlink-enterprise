@@ -127,6 +127,7 @@ class ScriptDialogue extends D.Dialogue {
 
   // when the person says no: the script's own "Convince" lines, one at a time; with none, one question - why? - so the reason is heard and noted for the team
   nextPitch() {
+    if (this.st.salaryPitched) return null; // the pay was answered (the interview): no further try
     const list = this.convinces[this.language] || this.convinces[this.scriptLanguage] || [];
     const own = list.map((t) => fillWith(t, this.data));
     const pitches = own.length ? own.slice(0, 2) : [(HUMAN[this.language] || HUMAN.English).reason];
@@ -240,7 +241,7 @@ class ScriptDialogue extends D.Dialogue {
       st.identity = true;
     } else {
       // a question the script cannot answer from verified facts is noted for the recruiter, never answered from memory
-      if (this.facts && (k.intent === 'info_q' || k.intent === 'salary_q' || k.intent === 'other_cand') && vacancy.answer(this.facts, text, this.language)) {
+      if (this.facts && st.pitchAt !== sc.idx && (k.intent === 'info_q' || k.intent === 'salary_q' || k.intent === 'other_cand') && vacancy.answer(this.facts, text, this.language)) {
         turn.understood = 'question_noted';
         return { say: this.speak(vacancy.answer(this.facts, text, this.language), cur.kind === 'ask' || cur.kind === 'interest' ? this.line(sc.idx) : this.again()), done: false }; // answered from the facts, then the question again
       }
@@ -254,6 +255,7 @@ class ScriptDialogue extends D.Dialogue {
       // "do you have a minute / can we talk?" answered with a no: one try to convince, then a kind close
       const permissionAsk = cur.kind === 'ask' && sc.idx === this.steps.findIndex((x) => x.kind === 'ask' || x.kind === 'interest') && /minute|moment|spare|convenient|talk|time/i.test(cur.text);
       if (permissionAsk && k.intent === 'no') {
+        if (st.pitchAt === sc.idx && this.facts && !st.salaryPitched && vacancy.salaryReason(text)) { st.salaryPitched = true; st.declineReason = S.clean(text, 120); return { say: this.speak(vacancy.salaryPitch(this.facts, this.language)), done: false }; }
         if (st.pitchAt === sc.idx) { st.declineReason = S.clean(text, 120); st.interest = 'no'; return this.endWith('Not Interested', 'did not want to talk', this.declineLine || (this.ackText(k, cur) + (this.steps[this.steps.length - 1].kind === 'closing' ? ` ${this.line(this.steps.length - 1)}` : ''))); }
         const pitch = this.nextPitch();
         if (pitch) { st.pitchAt = sc.idx; st.declineReason = S.clean(text, 120); return { say: this.speak(pitch), done: false }; }
@@ -261,6 +263,7 @@ class ScriptDialogue extends D.Dialogue {
       if (cur.kind === 'interest') {
         // after a try to convince: a yes goes on; a no, or the reason, gets the next try, and when there is none left the call is closed kindly
         if (st.pitchAt === sc.idx && k.intent !== 'yes' && k.intent !== 'maybe') {
+          if (this.facts && !st.salaryPitched && vacancy.salaryReason(text)) { st.salaryPitched = true; st.declineReason = S.clean(text, 120); return { say: this.speak(vacancy.salaryPitch(this.facts, this.language)), done: false }; }
           st.declineReason = S.clean(text, 120);
           const more = this.nextPitch();
           if (more) return { say: this.speak(more), done: false };
@@ -288,7 +291,8 @@ class ScriptDialogue extends D.Dialogue {
     }
     sc.idx = nxt.stopAt;
     sc.silent = 0;
-    return { say: this.speak(this.ackText(k, cur), ...nxt.parts), done: false };
+    const word = this.facts && vacancy.isLocQuestion(cur.text) && vacancy.near(this.facts, text) ? vacancy.nearAck(this.facts, this.language) : this.ackText(k, cur);
+    return { say: this.speak(word, ...nxt.parts), done: false };
   }
 
   // the short word a person says before going on (nothing after the opening: they only said hello)

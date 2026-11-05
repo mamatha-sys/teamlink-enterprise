@@ -28,7 +28,7 @@ const omni = require('../src/calling/omniCalls');
 const sip = require('../src/calling/voice/sipCall');
 
 let failed = 0;
-const check = (name, ok, detail) => { if (!ok) failed += 1; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${!ok && detail !== undefined ? `  -> ${JSON.stringify(detail).slice(0, 300)}` : ''}`); };
+const check = (name, ok, detail) => { if (!ok) failed += 1; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${!ok && detail !== undefined ? `  -> ${JSON.stringify(detail).slice(0, Number(process.env.DETAIL) || 300)}` : ''}`); };
 
 const token = (over = {}, secret = process.env.GREENSTART_SSO_SECRET) => {
   const now = Math.floor(Date.now() / 1000);
@@ -212,10 +212,12 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const vr = await omni.create({ externalId: 'vac1', toNumber: '9222333301', name: 'Sravanthi Rao', script: FACTS }, { ...deps, ami: AMI });
     const vd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(vr.id));
     const fv0 = vd.start().say; const fv1 = (await vd.hear('hello')).say; const fv2 = (await vd.hear('yes tell me')).say;
-    const fv3 = (await vd.hear('what is the salary?')).say; const fv4 = (await vd.hear('yes interested')).say; const fv5 = await vd.hear('tomorrow at five');
+    const fv3 = (await vd.hear('what is the salary?')).say; const fv4 = (await vd.hear('yes interested')).say;
+    const fvL = (await vd.hear('I stay in Kukatpally')).say; const fvE = (await vd.hear('3 years')).say; const fvQ = (await vd.hear('B.Com')).say; const fvD = (await vd.hear('no doubts')).say;
+    const fv5 = await vd.hear('tomorrow at five');
     check('the call is built from the facts: greeting, one minute?, the vacancy, interested?', /^Hello Sravanthi, good morning\. This is an automated AI assistant calling from Teamlink Consultants on behalf of Anil Ravali/.test(fv0) && /one minute/.test(fv1) && /We have an opening for HR Recruiter\. The location is Kukatpally\. The salary is 10 thousand per month/.test(fv2) && /Are you interested in this opportunity\?$/.test(fv2), { fv0, fv1, fv2 });
     check('a question about the salary is answered from the facts, then the question is asked again', /^The salary is 10 thousand per month\. Are you interested/.test(fv3), fv3);
-    check('interested: the next step, then the closing with the contact', /call you to explain the next steps/.test(fv4) && fv5.done === true && /Thank you, Sravanthi\. For any queries, please contact Anil Ravali/.test(fv5.say), { fv4, fv5 });
+    check('interested: the candidate is asked where they are, experience, education, doubts - "close to you" when the place is the job place - then the next step and the closing', /Where are you currently located/.test(fv4) && /^That is good, Kukatpally is close to you. How many years of experience/.test(fvL) && /highest qualification/.test(fvE) && /any doubts about this job/.test(fvQ) && /call you to explain the next steps/.test(fvD) && fv5.done === true && /Thank you, Sravanthi\. For any queries, please contact Anil Ravali/.test(fv5.say), { fv4, fvL, fvE, fvQ, fvD, fv5 });
     const vr2 = await omni.create({ externalId: 'vac2', toNumber: '9222333302', name: 'Ravi Kumar', script: FACTS }, { ...deps, ami: AMI });
     const vd2 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(vr2.id)); vd2.start();
     const t1 = await vd2.hear('అవును చెప్పండి', { heard: 'clear', lang: 'Telugu' });
@@ -226,7 +228,17 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     check('"Language: Hindi" starts the call in Hindi', /नमस्ते Asha जी/.test(vd3.start().say), vd3.language);
     const vp = await omni.prepare(FACTS);
     check('nothing is translated for a vacancy: all three languages are ready at once', vp.ok && vp.ready.length === 3 && vp.pending.length === 0, vp);
-    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 19, { before, now: originated.length });
+    const nr = await omni.create({ externalId: 'vac9', toNumber: '9222333309', name: 'Kiran', script: FACTS }, { ...deps, ami: AMI });
+    const nd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(nr.id)); nd.start(); await nd.hear('hello'); await nd.hear('yes');
+    const n1 = await nd.hear('no');
+    const n2 = await nd.hear('the salary is low');
+    const n3 = await nd.hear('no');
+    check('"not interested": first "what is the problem?"; if pay is the problem: it can be talked about in the interview, a chance of an increase; then a kind close', /May I know what the problem is/.test(n1.say) && !n1.done && /chance of an increase/.test(n2.say) && /attend the interview/.test(n2.say) && !n2.done && n3.done === true && /^No problem. Thank you for your time/.test(n3.say), { n1, n2, n3 });
+    const nr2 = await omni.create({ externalId: 'vac10', toNumber: '9222333310', name: 'Kiran', script: FACTS }, { ...deps, ami: AMI });
+    const nd2 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(nr2.id)); nd2.start(); await nd2.hear('hello'); await nd2.hear('yes'); await nd2.hear('no'); await nd2.hear('the salary is low');
+    const n4 = await nd2.hear('yes I will attend');
+    check('and if the person agrees to the interview, the call goes on with their details', /^(Okay|Alright|Sure|Right)[^.]*. Where are you currently located/.test(n4.say) || /Where are you currently located/.test(n4.say), n4);
+    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 21, { before, now: originated.length });
     check('Asterisk refusing the call fails it in words (and leaves a failed row)', await (async () => { const x = await refuse({ toNumber: '9333333333' }, { ...deps, ami: { action: async () => ({ Response: 'Error', Message: 'no trunk' }) } }); return !x.ok && x.code === 'not_dialled'; })());
   } finally {
     await prisma.$disconnect().catch(() => {});

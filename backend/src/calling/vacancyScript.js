@@ -42,8 +42,14 @@ const L = {
     perm: () => 'Do you have one minute to talk about a job opportunity?',
     say: (f) => `We have an opening for ${f.role}.${f.location ? ` The location is ${f.location}.` : ''}${f.salary ? ` The salary is ${f.salary}.` : ''}${f.qualification ? ` The qualification needed is ${f.qualification}.` : ''}${f.experience ? ` Experience: ${f.experience}.` : ''}${f.details ? ` The work is ${f.details}.` : ''}${f.benefits ? ` Benefits: ${f.benefits}.` : ''}`,
     interest: () => 'Are you interested in this opportunity?',
+    loc: () => 'Where are you currently located?',
+    exp: () => 'How many years of experience do you have?',
+    edu: () => 'What is your highest qualification?',
+    doubt: () => 'Do you have any doubts about this job?',
+    near: (f) => `That is good, ${f.location} is close to you.`,
+    salaryPitch: () => 'I understand. The salary can be discussed in the interview, and if you do well in the interview there is a chance of an increase. Would you like to attend the interview?',
     next: (f) => `Great. ${f.next ? `${cap(f.next)}.` : `${f.contact ? `I can have ${f.contact} call you to explain the next steps, or you` : 'You'} can share your updated resume on WhatsApp.`} What would be a good time for a call?`,
-    c1: (f) => `It is a good opportunity: ${f.role}${f.location ? ` in ${f.location}` : ''}${f.salary ? `, ${f.salary}` : ''}. It will only take a minute. Shall I tell you a little more?`,
+    c1: () => 'May I know what the problem is? If something about the job is a concern, please tell me.',
     c2: () => 'If the location or the salary is a concern, I can note it for our team. What would you prefer?',
     decline: () => 'No problem. Thank you for your time. If you know anyone who is looking for a job, please share this opportunity with them. Have a great day.',
     close: (f) => `Thank you, {name}.${f.contact ? ` For any queries, please contact ${f.contact}.` : ''} Have a nice day.`,
@@ -53,8 +59,14 @@ const L = {
     perm: () => 'మీకు ఒక నిమిషం మాట్లాడే సమయం ఉందా? ఒక ఉద్యోగ అవకాశం గురించి చెప్పాలి.',
     say: (f) => `${f.role} పోస్టు ఖాళీగా ఉంది.${f.location ? ` స్థలం ${f.location}.` : ''}${f.salary ? ` జీతం ${f.salary}.` : ''}${f.qualification ? ` అర్హత ${f.qualification}.` : ''}${f.experience ? ` అనుభవం ${f.experience}.` : ''}${f.details ? ` పని: ${f.details}.` : ''}${f.benefits ? ` ప్రయోజనాలు: ${f.benefits}.` : ''}`,
     interest: () => 'ఈ అవకాశం మీకు ఆసక్తిగా ఉందా?',
+    loc: () => 'మీరు ప్రస్తుతం ఎక్కడ ఉంటున్నారు?',
+    exp: () => 'మీకు ఎన్ని సంవత్సరాల అనుభవం ఉంది?',
+    edu: () => 'మీ విద్యార్హత ఏమిటి?',
+    doubt: () => 'ఈ ఉద్యోగం గురించి మీకు ఏవైనా సందేహాలు ఉన్నాయా?',
+    near: (f) => `చాలా మంచిది, ${f.location} మీకు దగ్గరే.`,
+    salaryPitch: () => 'అర్థమైంది అండి. జీతం గురించి ఇంటర్వ్యూలో మాట్లాడవచ్చు, ఇంటర్వ్యూలో బాగా చేస్తే జీతం పెరిగే అవకాశం ఉంది. ఇంటర్వ్యూకి రావడానికి మీకు ఇష్టమేనా?',
     next: (f) => `చాలా బాగుంది. ${f.contact ? `${f.contact} గారు కాల్ చేసి వివరాలు చెప్తారు, లేదా మీరు` : 'మీరు'} మీ రెజ్యూమ్ వాట్సాప్‌లో పంపవచ్చు. మీకు ఏ సమయం అనుకూలంగా ఉంటుంది?`,
-    c1: (f) => `ఇది మంచి అవకాశం అండి. ${f.role}${f.location ? `, ${f.location}` : ''}${f.salary ? `, జీతం ${f.salary}` : ''}. ఒక్క నిమిషం చాలు. మరికొంత చెప్పమంటారా?`,
+    c1: () => 'మీకు ఏమి సమస్య ఉందో చెప్పగలరా? ఏదైనా ఇబ్బంది ఉంటే చెప్పండి.',
     c2: () => 'స్థలం లేదా జీతం గురించి ఏదైనా సమస్య ఉంటే మా టీమ్‌కి తెలియజేస్తాను. మీకు ఏది ఇష్టం?',
     decline: () => 'సరే అండి, పర్వాలేదు. మీ సమయానికి ధన్యవాదాలు. మీకు తెలిసిన ఎవరైనా ఉద్యోగం కోసం చూస్తుంటే ఈ అవకాశం వారికి చెప్పండి. మంచి రోజు!',
     close: (f) => `ధన్యవాదాలు {name} గారు.${f.contact ? ` ఏవైనా సందేహాలు ఉంటే ${f.contact} గారిని సంప్రదించండి.` : ''} శుభదినం.`,
@@ -64,8 +76,14 @@ const L = {
     perm: () => 'क्या आपके पास एक मिनट बात करने का समय है? एक नौकरी के अवसर के बारे में बताना है।',
     say: (f) => `${f.role} का पद खाली है।${f.location ? ` स्थान ${f.location}।` : ''}${f.salary ? ` वेतन ${f.salary}।` : ''}${f.qualification ? ` योग्यता ${f.qualification}।` : ''}${f.experience ? ` अनुभव ${f.experience}।` : ''}${f.details ? ` काम: ${f.details}।` : ''}${f.benefits ? ` लाभ: ${f.benefits}।` : ''}`,
     interest: () => 'क्या आप इस अवसर में रुचि रखते हैं?',
+    loc: () => 'आप अभी कहाँ रहते हैं?',
+    exp: () => 'आपके पास कितने साल का अनुभव है?',
+    edu: () => 'आपकी शिक्षा क्या है?',
+    doubt: () => 'क्या इस नौकरी के बारे में आपका कोई सवाल है?',
+    near: (f) => `बहुत अच्छा, ${f.location} आपके पास ही है।`,
+    salaryPitch: () => 'समझ गया। वेतन पर इंटरव्यू में बात हो सकती है, और इंटरव्यू में अच्छा करने पर वेतन बढ़ने का मौका है। क्या आप इंटरव्यू के लिए आना चाहेंगे?',
     next: (f) => `बहुत अच्छा। ${f.contact ? `${f.contact} जी आपको कॉल करके अगले कदम बता सकते हैं, या आप` : 'आप'} अपना रिज्यूमे व्हाट्सएप पर भेज सकते हैं। आपके लिए कौन सा समय ठीक रहेगा?`,
-    c1: (f) => `यह अच्छा अवसर है। ${f.role}${f.location ? `, ${f.location}` : ''}${f.salary ? `, वेतन ${f.salary}` : ''}। बस एक मिनट लगेगा। क्या मैं थोड़ा और बताऊँ?`,
+    c1: () => 'क्या आप बता सकते हैं कि क्या समस्या है? कोई चिंता हो तो बताइए।',
     c2: () => 'अगर स्थान या वेतन को लेकर कोई चिंता है तो मैं अपनी टीम को बता दूँगा। आप क्या चाहते हैं?',
     decline: () => 'ठीक है, कोई बात नहीं। आपके समय के लिए धन्यवाद। अगर आपका कोई जानकार नौकरी की तलाश में है तो उन्हें यह अवसर बताइए। आपका दिन शुभ हो।',
     close: (f) => `धन्यवाद {name} जी।${f.contact ? ` किसी भी सवाल के लिए ${f.contact} से संपर्क करें।` : ''} शुभ दिन।`,
@@ -83,7 +101,7 @@ function build(factsIn) {
   Object.entries(L).forEach(([lang, t]) => {
     const facts = sayable(factsIn, lang);
     out[lang] = [
-      `Opening: ${t.open(facts)}`, `Ask: ${t.perm(facts)}`, `Say: ${t.say(facts)}`, `Interest: ${t.interest(facts)}`, `Ask: ${t.next(facts)}`,
+      `Opening: ${t.open(facts)}`, `Ask: ${t.perm(facts)}`, `Say: ${t.say(facts)}`, `Interest: ${t.interest(facts)}`, `Ask: ${t.loc(facts)}`, `Ask: ${t.exp(facts)}`, `Ask: ${t.edu(facts)}`, `Ask: ${t.doubt(facts)}`, `Ask: ${t.next(facts)}`,
       `Convince: ${t.c1(facts)}`, `Convince: ${t.c2(facts)}`, `Decline: ${t.decline(facts)}`, `Closing: ${t.close(facts)}`,
     ].join('\n');
   });
@@ -113,4 +131,19 @@ function answer(factsIn, text, lang) {
   return hit ? a[hit](facts) : null;
 }
 
-module.exports = { parseFacts, build, startLanguage, answer, KEYS };
+// the question "where are you located?" (in any of the three languages), whether an answer says the job is near, and what is said then
+const isLocQuestion = (text) => Object.values(L).some((t) => t.loc() === String(text || '').trim());
+function near(facts, text) {
+  const loc = String((facts && facts.location) || '').toLowerCase();
+  const t = String(text || '').toLowerCase();
+  if (!loc) return false;
+  const SS = require('./voice/speakScript'); // eslint-disable-line global-require
+  return t.includes(loc) || t.includes(SS.native(facts.location, 'Telugu')) || t.includes(SS.native(facts.location, 'Hindi')) || /\b(near|nearby|close|around)\b|దగ్గర|పక్క|पास|नज़दीक|नजदीक/.test(t);
+}
+const nearAck = (facts, lang) => (L[lang] || L.English).near(sayable(facts, lang));
+// pay is the problem ("salary is low"): what can be said (founder 2026-11-05: salary can be talked about in the interview, a chance of an increase if it goes well)
+const SALARY_WORDS = /salary|pay\b|package|ctc|జీతం|శాలరి|సాలరి|సాలరీ|శాలరీ|वेतन|सैलरी|तनख्वाह/i;
+const salaryReason = (text) => SALARY_WORDS.test(String(text || ''));
+const salaryPitch = (facts, lang) => (L[lang] || L.English).salaryPitch(sayable(facts, lang));
+
+module.exports = { parseFacts, build, startLanguage, answer, isLocQuestion, near, nearAck, salaryReason, salaryPitch, KEYS };
