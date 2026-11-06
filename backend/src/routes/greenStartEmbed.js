@@ -68,7 +68,7 @@ router.get('/log', adminOnly, limited, (req, res) => {
 const prisma = require('../db');
 const { SSO_EMAIL_KEY, EMAIL_RE, ssoEmail, greenStartTicket } = require('../utils/greenStartSso');
 
-// BY DEPARTMENT (founder 2026-11-02, utils/omniDeptLogins.js): Super Admin / Admin open the company account (every workspace); everybody
+// BY DEPARTMENT (founder 2026-11-02, utils/omniDeptLogins.js): Super Admin / Admin / developer open with their own email, seeing every workspace; everybody
 // else opens their department's own login, a member of only their department workspace (their WhatsApp number, its replies, their
 // campaigns). No department login yet = no ticket, with the reason (never the company account).
 router.post('/sso-ticket', async (req, res) => {
@@ -80,8 +80,8 @@ router.post('/sso-ticket', async (req, res) => {
   const who = await require('../utils/omniDeptLogins').loginFor(req.user); // eslint-disable-line global-require
   if (who.blocked) return res.json({ ticket: null, blocked: true, reason: who.reason });
   const email = who.email;
-  await logAudit({ userId: req.user.id, actorName: req.user.name, action: who.all ? 'Opened Omni-Channel (Green Start) with the company account' : `Opened Omni-Channel (Green Start) as ${who.dept}`, entity: 'GreenStart', toValue: email }).catch(() => {});
-  return res.json({ ticket: greenStartTicket({ email, name: who.all ? 'TeamLink' : `TeamLink ${who.dept}`, externalUserId: req.user.id }), next: '/app', ...(who.all ? {} : { department: who.dept, workspace: who.workspace }) });
+  await logAudit({ userId: req.user.id, actorName: req.user.name, action: who.own ? `Opened Omni-Channel (Green Start) as ${who.email}` : who.all ? `Opened Omni-Channel (Green Start) with the company account${who.ownFailed ? ` (own email refused: ${who.ownFailed})` : ''}` : `Opened Omni-Channel (Green Start) as ${who.dept}`, entity: 'GreenStart', toValue: email }).catch(() => {});
+  return res.json({ ticket: greenStartTicket({ email, name: who.own ? (req.user.name || 'TeamLink') : who.all ? 'TeamLink' : `TeamLink ${who.dept}`, externalUserId: req.user.id }), next: '/app', ...(who.all ? {} : { department: who.dept, workspace: who.workspace }) });
 });
 // the departments' Omni-Channel workspaces and logins (Integrations > Omni-Channel), and "Set up department logins now"
 router.get('/departments', adminOnly, async (req, res) => {

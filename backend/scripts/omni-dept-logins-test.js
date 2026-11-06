@@ -84,7 +84,7 @@ const list = (x) => (Array.isArray(x) ? x : (x && x.items) || []);
     const a = await D.loginFor(await fresh(admin));
     const m = await D.loginFor(await fresh(tlMed));
     const h = await D.loginFor(await fresh(tlHr));
-    Z.check('T7 Super Admin / Admin open the company account (every department)', A.isAdmin(await fresh(admin)) && a.email === COMPANY && a.all, a);
+    Z.check('T7 Super Admin / Admin open with their own email and see every department', A.isAdmin(await fresh(admin)) && a.email === String(admin.email).toLowerCase() && a.all && a.own, a);
     Z.check('T8 a Medical Team Lead opens the Medical login (only Medical\'s number and replies)', m.email === D.emailFor('Medical', COMPANY) && m.dept === 'Medical', m);
     Z.check('T9 a department with no number gets no Omni-Channel, with the reason (never the company account)', h.blocked && /HR/.test(h.reason) && !h.email, h);
 

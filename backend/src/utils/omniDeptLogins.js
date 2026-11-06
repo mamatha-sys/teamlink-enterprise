@@ -25,6 +25,12 @@ const prisma = require('../db');
 const KEY = 'omni.gs.deptLogins';
 const WA_MAP_KEY = 'omni.gs.waMap';
 const ROLE = 'team_leader';
+// Super Admin / Admin / developer open Omni-Channel with THEIR OWN email (founder 2026-11-06: "when i open the developer page so omnichannel also open same email"):
+// that account is an Organization Admin of every workspace, so it sees everything the company account sees. The company account stays for TeamLink's background sync only.
+const ADMIN_ROLE = 'organization_admin';
+const ADMINS_KEY = 'omni.gs.adminLogins'; // { [email]: [workspace ids it is already in] }
+const ADMIN_CHECK_MS = 10 * 60000;
+const adminChecked = new Map(); // email -> when; a new workspace is picked up within this time
 const parse = (s, d) => { try { return s ? JSON.parse(s) : d; } catch { return d; } };
 const getSetting = async (k, d) => parse(((await prisma.appSetting.findUnique({ where: { key: k } }).catch(() => null)) || {}).value, d);
 const putSetting = (k, v) => prisma.appSetting.upsert({ where: { key: k }, create: { key: k, value: JSON.stringify(v) }, update: { value: JSON.stringify(v) } });
@@ -186,32 +192,33 @@ async function run({ why = 'manual', pushChannels = true } = {}) {
   return running;
 }
 
-/** The department's own Omni-Channel login in ONE workspace with the Team Leader role. -> words */
-async function ensureLogin(token, wsId, email, deptTitle) {
+/** A login in ONE workspace: the department's own with the Team Leader role, or (who.role) an admin's own. -> words */
+async function ensureLogin(token, wsId, email, deptTitle, who = {}) {
   const O = require('./rcsOmniSync'); // eslint-disable-line global-require
   const SSO = require('./greenStartSso'); // eslint-disable-line global-require
-  await O.call('POST', '/team/roles/standard', { token, ws: wsId, body: { templateKey: ROLE } }); // adds it once; again = the same role
+  const role = who.role || ROLE;
+  if (role === ROLE) await O.call('POST', '/team/roles/standard', { token, ws: wsId, body: { templateKey: ROLE } }); // adds it once; again = the same role
   const members = await O.call('GET', '/team/members?pageSize=100', { token, ws: wsId });
   const me = ((members && members.items) || []).find((m) => String((m.user && m.user.email) || m.email || '').toLowerCase() === email);
   if (me) {
-    if (((me.role && me.role.key) || me.roleKey) !== ROLE) {
-      await O.call('PATCH', `/team/members/${me.id}/role`, { token, ws: wsId, body: { roleKey: ROLE } });
-      return 'Ready (role set to Team Leader).';
+    if (((me.role && me.role.key) || me.roleKey) !== role) {
+      await O.call('PATCH', `/team/members/${me.id}/role`, { token, ws: wsId, body: { roleKey: role } });
+      return `Ready (role set to ${role === ROLE ? 'Team Leader' : 'Organization Admin'}).`;
     }
     return 'Ready.';
   }
   try {
-    await O.call('POST', '/team/members', { token, ws: wsId, body: { email, roleKey: ROLE } }); // the account exists already
+    await O.call('POST', '/team/members', { token, ws: wsId, body: { email, roleKey: role } }); // the account exists already
     return 'Ready (added to the workspace).';
   } catch (err) {
     if (err.status !== 404 && !/USER_NOT_FOUND|No registered user/i.test(err.message)) throw err;
   }
   // first time: invite, sign the new login in once (an account with no organisation of its own), accept
-  const inv = await O.call('POST', '/team/invites', { token, ws: wsId, body: { email, roleKey: ROLE } });
+  const inv = await O.call('POST', '/team/invites', { token, ws: wsId, body: { email, roleKey: role } });
   const link = await O.call('POST', `/team/invites/${inv.id}/link`, { token, ws: wsId });
   const inviteToken = decodeURIComponent((/[?&#]token=([^&#]+)/.exec(String((link && link.url) || '')) || [])[1] || '');
   if (!inviteToken) throw new Error('Omni-Channel gave no invitation link.');
-  const ticket = SSO.greenStartTicket({ email, name: `Omni-Channel ${deptTitle}`, externalUserId: `dept:${slug(deptTitle)}` });
+  const ticket = SSO.greenStartTicket({ email, name: who.name || `Omni-Channel ${deptTitle}`, externalUserId: who.externalUserId || `dept:${slug(deptTitle)}` });
   const dl = await O.call('POST', '/auth/teamlink', { body: { ticket } });
   if (!dl || !dl.accessToken) throw new Error('Omni-Channel asked the new department login for a second sign-in step.');
   await O.call('POST', '/invites/accept', { token: dl.accessToken, body: { token: inviteToken } });
@@ -234,15 +241,50 @@ async function removeElsewhere(token, others, email) {
   return out;
 }
 
+/** An admin's own Omni-Channel account: a member of every workspace, added to any new one. Throws when Green Start will not have it. */
+async function ensureAdminLogin(email, name, externalUserId) {
+  const at = adminChecked.get(email);
+  if (at && Date.now() - at < ADMIN_CHECK_MS) return;
+  const GI = require('./greenStartIntegrations'); // eslint-disable-line global-require
+  const SSO = require('./greenStartSso'); // eslint-disable-line global-require
+  const { token } = await GI.signIn();
+  const wss = await GI.workspacesOf(token);
+  const all = await getSetting(ADMINS_KEY, {});
+  const done = new Set(all[email] || []);
+  const todo = wss.filter((w) => !done.has(w.id));
+  for (const w of todo) {
+    // eslint-disable-next-line no-await-in-loop
+    await ensureLogin(token, w.id, email, 'Admin', { role: ADMIN_ROLE, name, externalUserId });
+    done.add(w.id);
+  }
+  // Green Start can refuse an address (a platform administrator's, a suspended one): find out here, so the person still gets in
+  if (todo.length) await GI.call('POST', '/auth/teamlink', { body: { ticket: SSO.greenStartTicket({ email, name, externalUserId }) } });
+  if (todo.length) await putSetting(ADMINS_KEY, { ...all, [email]: [...done] });
+  adminChecked.set(email, Date.now());
+}
+
 /**
  * Which Omni-Channel account this TeamLink person opens. -> { email } | { blocked: true, reason }
- * Super Admin / Admin: the company account. Everybody else: their department's login (made by run()).
+ * Super Admin / Admin / developer: their own email, seeing every workspace (the company account only if theirs cannot be used, with why).
+ * Everybody else: their department's login (made by run()).
  */
 async function loginFor(reqUser) {
   const SSO = require('./greenStartSso'); // eslint-disable-line global-require
   const A = require('../outreach/access'); // eslint-disable-line global-require
   const WN = require('./waNumbers'); // eslint-disable-line global-require
-  if (reqUser && A.isAdmin(reqUser)) return { email: await SSO.ssoEmail(), all: true };
+  if (reqUser && A.isAdmin(reqUser)) {
+    const company = await SSO.ssoEmail();
+    const row = reqUser.email ? reqUser : await prisma.user.findUnique({ where: { id: String(reqUser.id) } }).catch(() => null);
+    const email = String((row && row.email) || '').trim().toLowerCase();
+    if (!SSO.EMAIL_RE.test(email) || email === String(company).toLowerCase()) return { email: company, all: true };
+    try {
+      await ensureAdminLogin(email, (row && row.name) || 'TeamLink', String(reqUser.id));
+      return { email, all: true, own: true };
+    } catch (err) {
+      console.error('[omni] own admin login:', err && err.message); // eslint-disable-line no-console
+      return { email: company, all: true, ownFailed: String((err && err.message) || 'Omni-Channel refused it').slice(0, 200) };
+    }
+  }
   const u = reqUser && reqUser.id ? await prisma.user.findUnique({ where: { id: String(reqUser.id) } }).catch(() => null) : null;
   if (!u) return { blocked: true, reason: 'Your TeamLink login could not be read.' };
   const mine = new Set([...WN.departmentsOfUser(u), ...WN.departmentsOfUser(reqUser)]);
@@ -275,4 +317,4 @@ function schedule(why = 'number saved') {
 }
 const last = async () => getSetting(KEY, {});
 
-module.exports = { run, ensureLogin, removeElsewhere, loginFor, start, schedule, last, emailFor, findWorkspace, title, KEY };
+module.exports = { run, ensureLogin, ensureAdminLogin, removeElsewhere, loginFor, start, schedule, last, emailFor, findWorkspace, title, KEY };
