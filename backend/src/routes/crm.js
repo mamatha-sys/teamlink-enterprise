@@ -37,6 +37,7 @@ const SUP = require('../crm/support');
 const CMP = require('../crm/campaigns');
 const AI = require('../crm/ai');
 const SALES = require('../crm/sales');
+const AUTO = require('../crm/autopilot');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -67,6 +68,10 @@ router.get('/website', wrap((req) => SALES.websiteGet(req.user)));
 router.put('/website', wrap((req) => SALES.websiteSave(req.user, req.body || {})));
 router.post('/website/key', wrap((req) => SALES.websiteNewKey(req.user)));
 router.get('/reminders/live', wrap((req) => SALES.liveReminders(req.user)));
+// the CRM running by itself (crm/autopilot.js)
+router.get('/autopilot', wrap((req) => AUTO.get(req.user)));
+router.put('/autopilot', wrap((req) => AUTO.save(req.user, req.body || {})));
+router.post('/leads/:id/auto', wrap((req) => AUTO.pauseLead(req.user, req.params.id, !!(req.body && req.body.paused))));
 router.post('/activities', wrap((req) => CRM.addActivity(req.user, req.body || {})));
 
 // the full CRM (crm/extra.js): reports, targets, settings, import, bulk, export, proposals
@@ -151,6 +156,8 @@ if (!process.env.TEST_MODE && process.env.NODE_ENV !== 'test') {
   }, 60 * 60 * 1000).unref();
   // the timed reminders: every minute, each sent once (crm/sales.js)
   setInterval(() => { SALES.runDue().catch((e) => console.error('[crm] timed reminders:', e.message)); }, 60 * 1000).unref(); // eslint-disable-line no-console
+  // the automatic follow-through: does nothing until it is turned on (crm/autopilot.js)
+  setInterval(() => { AUTO.tick().catch((e) => console.error('[crm] autopilot:', e.message)); }, 60 * 1000).unref(); // eslint-disable-line no-console
 }
 
 module.exports = router;

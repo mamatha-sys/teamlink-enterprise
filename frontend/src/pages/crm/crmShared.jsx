@@ -704,6 +704,7 @@ export function RecordPanel({ kind, id, onClose, onChanged }) {
                 {L.leadStages.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
               </select>
             )}
+            {d.canEdit && kind === 'lead' && row.status !== 'Converted' && <button type="button" className="btn btn-sm" title="Stop or start the automatic mails, SMS, WhatsApp and calls to this lead" onClick={() => api.post(`/crm/leads/${row.id}/auto`, { paused: !row.autoPaused }).then(() => { toast(row.autoPaused ? 'Automatic follow-through is on for this lead.' : 'Automatic follow-through stopped for this lead.'); changed(); }).catch((e) => toast(errOf(e, 'This could not be changed.')))}>{row.autoPaused ? 'Start automatic' : 'Stop automatic'}</button>}
             {d.canEdit && kind === 'lead' && row.status !== 'Converted' && <button type="button" className="btn btn-primary btn-sm" onClick={() => setConverting(true)}>Convert to deal</button>}
             {kind === 'lead' && row.status === 'Converted' && row.dealId && <button type="button" className="btn btn-sm" onClick={() => openRecord('deal', row.dealId)}>Open the deal</button>}
             {d.canEdit && kind === 'deal' && row.stage === 'Won' && !row.clientId && <button type="button" className="btn btn-primary btn-sm" onClick={addAsClient}>Add as client</button>}

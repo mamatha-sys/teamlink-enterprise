@@ -254,4 +254,4 @@ async function markOptOut(user, { channel, value, reason } = {}) {
   return S.okBody({ ok: true });
 }
 
-module.exports = { list, save, detail, preview, testSend, sendNow, cancel, resume, markOptOut, optOut, optedOut, emailOfToken, tokenFor, merge };
+module.exports = { list, save, detail, preview, testSend, sendNow, cancel, resume, markOptOut, optOut, optedOut, emailOfToken, tokenFor, merge, unsubscribeLine };

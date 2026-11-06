@@ -6,6 +6,7 @@
 //   CrmSettings     lead sources, lost reasons, the probability of each stage, the "going cold" days, proposal validity
 import { useEffect, useState } from 'react';
 import api from '../../api';
+import CrmAutoSettings from './CrmAutoSettings.jsx';
 import Modal from '../../components/Modal.jsx';
 import { useCrm, errOf, money, moneyShort, dateOf, RecLink, istToday } from './crmShared.jsx';
 
@@ -320,6 +321,7 @@ export function CrmSettings({ onClose, onSaved }) {
       <button type="button" className="btn btn-sm" style={{ marginBottom: 14 }} onClick={() => setOpen([...open, { name: '', color: '#64748b' }])}>+ Stage</button>
       <div className="field" style={{ maxWidth: 260 }}><label>Default reminder for a new follow-up</label><select value={before} onChange={(e) => setBefore(e.target.value)}><option value="0">At the time</option><option value="15">15 minutes before</option><option value="60">1 hour before</option><option value="1440">1 day before</option></select></div>
       <WebsiteForm />
+      <CrmAutoSettings />
       <div className="section-label">Probability of each stage (%)</div>
       <div className="grid-3">
         {L.stages.filter((s) => s !== 'Won' && s !== 'Lost').map((s) => (

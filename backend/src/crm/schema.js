@@ -160,6 +160,15 @@ const DDL = [
     "reason" TEXT, "byId" TEXT, "createdAt" TEXT NOT NULL
   )`,
   'CREATE UNIQUE INDEX IF NOT EXISTS "CrmOptOut_value" ON "CrmOptOut"("value", "channel")',
+  // one step of the automatic follow-through for one lead: waiting, sending, calling, sent, failed, skipped, stopped (crm/autopilot.js)
+  `CREATE TABLE IF NOT EXISTS "CrmAutoStep" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "recordId" TEXT NOT NULL, "stepId" TEXT NOT NULL,
+    "dueAt" TEXT NOT NULL, "status" TEXT NOT NULL DEFAULT 'waiting',
+    "result" TEXT, "callId" TEXT, "sentAt" TEXT, "createdAt" TEXT NOT NULL
+  )`,
+  'CREATE UNIQUE INDEX IF NOT EXISTS "CrmAutoStep_one" ON "CrmAutoStep"("recordId", "stepId")',
+  'CREATE INDEX IF NOT EXISTS "CrmAutoStep_due" ON "CrmAutoStep"("status", "dueAt")',
 ];
 // Columns added after the first release: added once, "duplicate column" is the normal answer afterwards.
 const COLUMNS = [
@@ -170,6 +179,7 @@ const COLUMNS = [
   ['CrmLead', 'utmSource', 'TEXT'], ['CrmLead', 'utmMedium', 'TEXT'], ['CrmLead', 'utmCampaign', 'TEXT'], ['CrmLead', 'pageUrl', 'TEXT'],
   ['CrmTask', 'type', 'TEXT'], ['CrmTask', 'notifyApp', 'INTEGER'], ['CrmTask', 'notifyWhatsapp', 'INTEGER'], ['CrmTask', 'notifySms', 'INTEGER'], ['CrmTask', 'notifyLead', 'INTEGER'],
   ['CrmTask', 'remindBefore', 'INTEGER'], ['CrmTask', 'reminderSentAt', 'TEXT'], ['CrmTask', 'reminderNote', 'TEXT'],
+  ['CrmLead', 'autoPaused', 'INTEGER'], // somebody pressed Stop on the automatic follow-through (crm/autopilot.js)
 ];
 const INDEXES = [
   'CREATE INDEX IF NOT EXISTS "CrmLead_phone" ON "CrmLead"("phone")', 'CREATE INDEX IF NOT EXISTS "CrmLead_email" ON "CrmLead"("email")', 'CREATE INDEX IF NOT EXISTS "CrmLead_stage" ON "CrmLead"("stage")',
