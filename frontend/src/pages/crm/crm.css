@@ -135,3 +135,35 @@ button.crm-deal-row .n{color:var(--ink)}
 button.crm-flow-step{font:inherit;cursor:pointer;width:100%}
 button.crm-support-line{width:100%;border:none;font:inherit;text-align:left;cursor:pointer}
 button.crm-support-line:hover{background:color-mix(in srgb,var(--crm-blue,#2f6fed) 8%,var(--line-soft))}
+
+/* ---- the CRM on the whole screen (founder 2026-11-06: "align the complete crm properly") ------------------------------------------------
+   <main> is capped at 1220px and centred (styles.css), which left the CRM in a narrow column away from the breadcrumb. Like the other redesigned
+   screens it uses the screen's width; its left edge is the breadcrumb's. Headings are the app's UI font on every CRM page. */
+main:has(> .crm-page){max-width:1680px;margin:0}
+.crm-page .page{width:100%;min-width:0}
+.crm-page .page-head{align-items:center;margin-bottom:14px}
+.crm-page .page-head h1{font-family:var(--font-ui);font-size:23px;font-weight:800;letter-spacing:-.01em;margin:0}
+.crm-page h2,.crm-page h3,.crm-page h4{font-family:var(--font-ui);font-weight:700}
+.crm-page .page-sub{font-size:13px;color:var(--ink-soft);margin-top:2px}
+.crm-page .filter-row{align-items:center}
+.crm-page .filter-row input,.crm-page .filter-row select{height:38px;margin:0}
+.crm-page .tabs{margin-bottom:14px}
+.crm-page .tbl-wrap{width:100%;overflow-x:auto}
+.crm-page .results-bar{gap:12px;flex-wrap:wrap}
+
+/* a card on the board (the dashboard's .crm-card rule above would otherwise win) */
+.crm-board{width:100%}
+.crm-board .crm-col{flex:1 0 212px;min-width:0}
+.crm-board .crm-card{border-radius:8px;padding:9px 10px;margin-bottom:7px}
+.crm-board .crm-col-head{border-radius:4px 4px 0 0;min-height:42px;gap:6px}
+
+/* dashboard rows line up: the cards of a row are the same height, long names stop before the amount */
+.crm-grid3>.crm-card,.crm-grid2>.crm-card{display:flex;flex-direction:column;min-height:0}
+.crm-deal-row{display:grid;grid-template-columns:22px minmax(0,1fr) auto;column-gap:10px;row-gap:3px;align-items:center}
+.crm-deal-row .b,.crm-deal-row .n{grid-row:1 / span 2}
+.crm-deal-row .n{white-space:normal;line-height:1.3}
+.crm-deal-row .v{grid-column:3;text-align:right}
+.crm-deal-row>:last-child:not(.v):not(.n){grid-column:3;justify-self:end}
+.crm-deal-row .n small{white-space:nowrap}
+.crm-grid2>.crm-card{max-height:440px;overflow:auto}
+.crm-deal-row .v{flex:0 0 auto}
