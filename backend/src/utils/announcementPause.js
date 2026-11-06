@@ -40,4 +40,16 @@ async function setPaused(a, paused, user) {
   return row;
 }
 
-module.exports = { isPaused, pausedInfo, setPaused, PAUSED_HIDE };
+// A DELETED notice leaves every login (founder 2026-11-06: "employee logins lo delete chey"): its bell rows go with it, for everybody.
+const removeNotifications = (a) => prisma.notification.deleteMany({ where: notificationsOf(a) }).catch(() => null);
+
+// Bell rows of notices deleted before that rule, whose notice is gone: same title, no such announcement. Run once when the server starts.
+async function sweepDeleted() {
+  const rows = await prisma.notification.findMany({ where: { title: { startsWith: 'Announcement: ' }, OR: [{ channel: 'In-App' }, { channel: null }] }, select: { title: true }, distinct: ['title'] });
+  const live = new Set((await prisma.announcement.findMany({ select: { title: true } })).map((a) => `Announcement: ${a.title}`));
+  const gone = rows.map((r) => r.title).filter((t) => !live.has(t));
+  if (gone.length) await prisma.notification.deleteMany({ where: { title: { in: gone }, OR: [{ channel: 'In-App' }, { channel: null }] } });
+  return gone;
+}
+
+module.exports = { isPaused, pausedInfo, setPaused, removeNotifications, sweepDeleted, PAUSED_HIDE };

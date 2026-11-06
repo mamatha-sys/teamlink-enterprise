@@ -46,11 +46,20 @@ const db = {
   },
   user: { findMany: async () => [] },
 };
+const pauseDb = {
+  announcement: db.announcement,
+  notification: {
+    rows: [],
+    deleteMany: async ({ where }) => { pauseDb.notification.rows = pauseDb.notification.rows.filter((n) => !((where.title.in ? where.title.in.includes(n.title) : n.title === where.title) && (n.channel === 'In-App' || n.channel === null))); return {}; },
+    findMany: async () => [...new Map(pauseDb.notification.rows.map((n) => [n.title, n])).values()].map((n) => ({ title: n.title })),
+  },
+};
 let who = { id: 'u1', name: 'Asha' };
 const load = Module._load;
 Module._load = function stub(request, parent, isMain) {
   const from = parent ? parent.filename : '';
   if (request === '../db' && /routes[\\/]announcements\.js$/.test(from)) return db;
+  if (request === '../db' && /announcementPause\.js$/.test(from)) return pauseDb;
   if (request === '../middleware/auth') return { requireAuth: (req, res, next) => { req.user = who; next(); }, requirePerm: () => (req, res, next) => next() };
   if (request === '../utils/audit') return { logAudit: async () => {} };
   if (request === '../utils/permissions') return { can: async () => true };
@@ -91,8 +100,17 @@ Module._load = function stub(request, parent, isMain) {
   check('someone it does not reach does not', (await fetch(`${base}/${made.id}/media`)).status === 403);
   who = { id: 'u1', name: 'Asha' };
   check('the same file cannot go on a second notice', (await post({ mediaId })).status === 400);
+  const Pause = require('../src/utils/announcementPause');
+  pauseDb.notification.rows = [
+    { title: 'Announcement: T', channel: 'In-App' }, { title: 'Announcement: T', channel: 'In-App' }, { title: 'Announcement: T', channel: 'Email' }, { title: 'Leave approved', channel: 'In-App' },
+  ];
   await fetch(`${base}/${made.id}`, { method: 'DELETE' });
   check('deleting the notice removes the file', A.resolveStored(mediaId) === null);
+  check('its bell rows leave every login; other notifications and the email log stay', pauseDb.notification.rows.length === 2 && pauseDb.notification.rows.every((n) => n.channel === 'Email' || n.title === 'Leave approved'), pauseDb.notification.rows);
+  pauseDb.notification.rows = [{ title: 'Announcement: Diwali festival', channel: 'In-App' }, { title: 'Announcement: Still here', channel: 'In-App' }];
+  rows.push({ id: 'keep', title: 'Still here' });
+  const swept = await Pause.sweepDeleted();
+  check('bell rows of a notice deleted earlier are swept, a live notice keeps its own', swept.length === 1 && pauseDb.notification.rows.length === 1 && pauseDb.notification.rows[0].title === 'Announcement: Still here', pauseDb.notification.rows);
   server.close();
   fs.rmSync(dir, { recursive: true, force: true });
   console.log(`\nAnnouncement media: ${pass} passed, ${fail} failed`);

@@ -286,8 +286,11 @@ router.delete('/:id', requirePerm(null, 'hrms', 'Employee Services', 'delete'), 
   await prisma.announcement.delete({ where: { id: req.params.id } });
   const media = row ? mediaOf(row) : null;
   if (media) attachments.remove(media.file);
+  if (row) await PAUSE.removeNotifications(row);
   await logAudit({ userId: req.user.id, action: 'Announcement deleted', entity: 'Announcement', entityId: req.params.id });
   res.status(204).end();
 });
+
+setTimeout(() => { PAUSE.sweepDeleted().catch(() => null); }, 20000).unref();
 
 module.exports = router;
