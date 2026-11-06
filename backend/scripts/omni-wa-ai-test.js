@@ -370,12 +370,14 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     const gsSeen = [];
     const gs = { found: null, broken: false };
     const gsThread = [];
+    const gsPosts = [];
     const gsServer = http.createServer((req, res) => {
       if (req.method === 'POST') {
         let raw = '';
         req.on('data', (c) => { raw += c; });
         req.on('end', () => {
           const has = req.headers['x-workspace-id'] === 'ws2';
+          gsPosts.push(req.headers['x-workspace-id']);
           if (has) gsThread.push({ url: req.url, body: JSON.parse(raw) });
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true, data: { stored: has } }));
@@ -413,6 +415,25 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     stub.script = [{ reply: 'Okay.' }];
     await run();
     check('a running chat on the same campaign carries on (a new campaign would change it)', (await aiMsgs(i.id)).length === 2 && (await convAt(phoneOf(10))).campaignId === 'gs:c9');
+    // one number, one workspace: an old thread in another workspace never takes the chat (founder 2026-11-06)
+    const mapBefore = GI.readWaMap;
+    GI.readWaMap = async () => ({ 'zz-edu2': { workspaceId: 'ws2' }, 'zz-med': { workspaceId: 'ws1' } });
+    gsPosts.length = 0;
+    await GC.mirror(phoneOf(10), 'ZZTEST from Education 2', 'zz-ref-1', 'zz-edu2');
+    check('the AI reply goes only to the workspace of the number they wrote to', gsPosts.length === 1 && gsPosts[0] === 'ws2', gsPosts);
+    gsPosts.length = 0;
+    await GC.mirror(phoneOf(10), 'ZZTEST not in Omni', 'zz-ref-2', 'zz-not-mapped');
+    check('a number with no workspace is put in no workspace', gsPosts.length === 0, gsPosts);
+    gsSeen.length = 0;
+    const edu = await GC.recentSend(phoneOf(10), 7, 'zz-edu2');
+    const med = await GC.recentSend(phoneOf(10), 7, 'zz-med');
+    check('a campaign counts only in the workspace of that number', !!edu && edu.campaignId === 'gs:c9' && med === null && gsSeen.map((x) => x.ws).join() === 'ws2,ws1', gsSeen.map((x) => x.ws));
+    await S.run('UPDATE "OmniWaConv" SET numberId = ? WHERE e164 = ?', 'zz-med', phoneOf(10));
+    await Agent.onInbound({ from: phoneOf(10), text: 'hello other number', id: `wamid.ZZ${SUFFIX}move`, at: new Date(), numberId: 'zz-edu2' }, { candidateId: i.id });
+    const moved = await convAt(phoneOf(10));
+    check('writing to another company number: the last promotion stays behind', moved.numberId === 'zz-edu2' && !moved.campaignId && !moved.promoAt, [moved.numberId, moved.campaignId]);
+    await S.run('UPDATE "OmniWaConv" SET pendingAt = NULL WHERE e164 = ?', phoneOf(10));
+    GI.readWaMap = mapBefore;
     const leadNo = phoneOf(78);
     await inbound(leadNo, 'Tell me more', 'ZZTEST Campaign Lead');
     stub.script = [{ reply: 'Sure, what would you like to know?' }];

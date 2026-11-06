@@ -121,6 +121,12 @@ async function onInbound(info, result) {
     const provider = info.id ? clip(info.id, 200) : null;
     const fresh = await S.run('INSERT OR IGNORE INTO "OmniWaMessage" (id, e164, convId, direction, body, status, providerMessageId, candidateId, numberId, at, createdAt) VALUES (?,?,?,\'IN\',?,\'received\',?,?,?,?,?)', S.newId('wam'), e164, conv.id, clip(info.text, 4000), provider, candidateId, info.numberId || null, at, now);
     if (!fresh) return null;
+    // the same person now writes to another company number: another workspace's talk. The last one's promotion and job stay behind
+    if (info.numberId && conv.numberId && info.numberId !== conv.numberId) {
+      const { promoCardSent, cardShown, intakeOn, intakeDone, intakeAt, answers, chosenJob, jobChoices, promoJob, ...keep } = JSON.parse(conv.collected || '{}');
+      Object.assign(conv, { promoAt: null, campaignId: null, campaignName: null, requirementId: null, collected: JSON.stringify(keep), aiTurns: 0 });
+      await S.run('UPDATE "OmniWaConv" SET promoAt = NULL, campaignId = NULL, campaignName = NULL, requirementId = NULL, collected = ?, aiTurns = 0, updatedAt = ? WHERE id = ?', conv.collected, now, conv.id);
+    }
     const link = await linkContext(conv, cfg, now);
     await S.run(`UPDATE "OmniWaConv" SET name = ?, numberId = COALESCE(?, numberId), requirementId = COALESCE(?, requirementId), campaignId = COALESCE(?, campaignId), campaignName = COALESCE(?, campaignName),
       ownerUserId = COALESCE(?, ownerUserId), ownerName = COALESCE(?, ownerName), promoAt = COALESCE(?, promoAt), lastInboundAt = ?, lastText = ?, unread = unread + 1, pendingAt = ?, updatedAt = ? WHERE id = ?`,
@@ -231,7 +237,7 @@ async function sendText(conv, text, { user = null, ai: byAi = true } = {}) {
     } catch { /* the message went; the timeline line is a courtesy */ }
   }
   await S.run('UPDATE "OmniWaConv" SET lastText = ?, updatedAt = ? WHERE id = ?', clip(body, 200), now, conv.id);
-  require('./gsCampaign').mirror(conv.e164, body, res.providerRef || null); // eslint-disable-line global-require -- Channels > WhatsApp in Green Start shows it too
+  require('./gsCampaign').mirror(conv.e164, body, res.providerRef || null, conv.numberId); // eslint-disable-line global-require -- Channels > WhatsApp in Green Start shows it too
   Live.changed();
   return { ok: true, providerRef: res.providerRef || null };
 }
@@ -426,7 +432,7 @@ async function runTurn(row, defaults, now = Date.now()) {
   // a campaign sent inside Omni-Channel (Green Start) is not in TeamLink's log: ask there, also in a running chat, because a NEW campaign changes what the chat is about
   const fromTeamLink = promoted && conv.campaignId && !String(conv.campaignId).startsWith('gs:');
   if (!fromTeamLink) {
-    const gs = await require('./gsCampaign').recentSend(conv.e164, cfg.promoDays); // eslint-disable-line global-require
+    const gs = await require('./gsCampaign').recentSend(conv.e164, cfg.promoDays, conv.numberId); // eslint-disable-line global-require
     if (gs) promoted = true;
     if (gs && gs.campaignId !== conv.campaignId) {
       const promoJob = await T.jobOfCampaign(gs.campaignName);
