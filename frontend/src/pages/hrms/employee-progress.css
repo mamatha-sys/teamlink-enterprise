@@ -1,30 +1,44 @@
-/* Employee progress on the HRMS dashboard (EmployeeProgress.jsx). One hue for every bar, numbers in ink. */
-.hd-epg{--epg-bar:#2a78d6;margin:6px 0 18px}
-:root[data-theme="dark"] .hd-epg{--epg-bar:#3d8fd6}
+﻿/* Employee progress on the HRMS dashboard (EmployeeProgress.jsx). Ring colours follow the measure and pass the palette check in both themes. */
+.hd-epg{--epg-1:#2a78d6;--epg-2:#d9822b;--epg-3:#0e9f8e;--epg-4:#7c5cd6;margin:6px 0 18px;display:grid;gap:12px}
+:root[data-theme="dark"] .hd-epg{--epg-1:#3d8fd6;--epg-2:#c47a28;--epg-3:#1a9a8b;--epg-4:#9379e3}
 @media (prefers-color-scheme: dark){
-  :root[data-theme="system"] .hd-epg{--epg-bar:#3d8fd6}
+  :root[data-theme="system"] .hd-epg{--epg-1:#3d8fd6;--epg-2:#c47a28;--epg-3:#1a9a8b;--epg-4:#9379e3}
 }
-.hd-epg .tlc.tlc-card{padding:16px 18px 18px;margin-top:12px}
+.hd-epg .tlc.tlc-card{padding:16px 18px 18px}
 .hd-epg .tlc-head h3{font-size:16px}
 .hd-epg .tlc-sub{font-size:13px;color:var(--tlc-ink2)}
 
-.epg-head,.epg-row{display:grid;grid-template-columns:minmax(130px,1.1fr) repeat(4,minmax(0,1fr));gap:6px 16px;align-items:center}
-.epg-head{padding-bottom:6px;border-bottom:1px solid var(--line);font-size:12px;color:var(--tlc-ink2)}
-.epg-row{padding:8px 0;border-bottom:1px solid var(--line)}
-.epg-row:last-child{border-bottom:0}
-.epg-name{font-size:13px;font-weight:600;color:var(--tlc-ink);text-align:left;background:none;border:0;padding:0;min-width:0;overflow-wrap:anywhere}
-button.epg-name{cursor:pointer}
-button.epg-name:hover{text-decoration:underline}
-.epg-name small{font-weight:400;color:var(--tlc-ink2)}
-.epg-cell{display:flex;align-items:center;gap:8px;min-width:0;padding:4px 0;border-radius:4px}
-.epg-m{display:none}
-.epg-track{flex:1;min-width:30px;height:8px;background:var(--line);border-radius:4px;overflow:hidden}
-.epg-track i{display:block;height:100%;background:var(--epg-bar);border-radius:4px}
-.epg-cell b{font-size:12.5px;font-weight:600;color:var(--tlc-ink);min-width:36px;text-align:right}
+.epg-t{--epg-c:var(--epg-1)}
+.epg-a{--epg-c:var(--epg-3)}
+.epg-p{--epg-c:var(--epg-4)}
+.epg-d{--epg-c:var(--epg-2)}
+.epg-ring{display:block;flex:none}
+.epg-rail{stroke:var(--line)}
+.epg-rail.epg-none{stroke-dasharray:3 4}
+.epg-arc{stroke:var(--epg-c)}
+.epg-num{fill:var(--tlc-ink);font-weight:700}
 
-/* A phone: each department is a small block, and every bar says what it is. */
-@media (max-width:760px){
-  .epg-head{display:none}
-  .epg-row{grid-template-columns:1fr}
-  .epg-m{display:block;width:84px;font-size:12px;color:var(--tlc-ink2)}
+.epg-block{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;min-width:0;border-radius:8px;padding:4px 2px}
+.epg-block:focus-visible{outline:2px solid var(--epg-1)}
+.epg-name{font-size:12px;font-weight:600;color:var(--tlc-ink)}
+.epg-detail{font-size:12px;color:var(--tlc-ink2);max-width:190px}
+
+.epg-overall{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;padding-top:6px}
+.epg-overall .epg-name{font-size:14px}
+
+.epg-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px}
+.epg-card{border:1px solid var(--line);border-radius:12px;padding:12px 14px 10px;min-width:0}
+.epg-card-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px}
+.epg-title{font-size:14px;font-weight:700;color:var(--tlc-ink);background:none;border:0;padding:0;text-align:left;min-width:0;overflow-wrap:anywhere}
+button.epg-title{cursor:pointer}
+button.epg-title:hover{text-decoration:underline}
+.epg-count{font-size:12px;color:var(--tlc-ink2);white-space:nowrap}
+.epg-rings{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+.epg-rings .epg-name{font-size:11px;font-weight:500;color:var(--tlc-ink2)}
+
+/* A phone: two big rings a row, and the department rings stay four in a row but smaller. */
+@media (max-width:640px){
+  .epg-overall{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .epg-cards{grid-template-columns:1fr}
+  .epg-rings .epg-ring{width:54px;height:54px}
 }

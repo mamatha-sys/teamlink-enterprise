@@ -158,4 +158,16 @@ async function forOmni(viewerId, month) {
   };
 }
 
-module.exports = { forOmni, seatHolders, workspaceDepartments };
+// The people the Super Admin can give AI Marketing to (the current HRMS seat holders), and the role of the person asking.
+async function marketingPeople(viewerId) {
+  const id = String(viewerId || '').trim().slice(0, 80);
+  const viewer = id ? await resolveIdentity(id).catch(() => null) : null;
+  const holders = await seatHolders();
+  const users = await prisma.user.findMany({ where: { id: { in: [...holders.keys()] } }, select: { id: true, name: true, status: true } });
+  const persons = users.filter((u) => !u.status || u.status === 'Active').map((u) => ({ userId: u.id, name: u.name, ...holders.get(u.id) }))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const superAdmin = viewer && (viewer.role === 'SUPER_ADMIN' || viewer.hrmsRole === 'SUPER_ADMIN');
+  return { ok: true, viewerRole: superAdmin ? 'SUPER_ADMIN' : (viewer ? viewer.role : null), persons };
+}
+
+module.exports = { forOmni, seatHolders, workspaceDepartments, marketingPeople };

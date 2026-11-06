@@ -374,7 +374,6 @@ function MyDashboard() {
 
   return (
     <div>
-      <SectionLabel>My Progress This Month</SectionLabel>
       <MyProgress />
       <SectionLabel>My Day</SectionLabel>
       <StatRow columns={3} cells={[

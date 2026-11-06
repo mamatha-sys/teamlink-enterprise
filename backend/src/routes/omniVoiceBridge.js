@@ -37,6 +37,16 @@ router.get('/credit-use', async (req, res) => {
   }
 });
 
+// AI Marketing in Omni-Channel: who can be ticked, and whether the person asking is the Super Admin (outreach/creditUseBridge.js). Read only.
+router.get('/marketing-people', async (req, res) => {
+  try {
+    return res.set('Cache-Control', 'no-store').json(await require('../outreach/creditUseBridge').marketingPeople(req.query.viewer)); // eslint-disable-line global-require
+  } catch (err) {
+    console.error('[omni-marketing-people]', err && err.message); // eslint-disable-line no-console
+    return res.json({ ok: false, error: 'TeamLink could not read the employees just now.' }); // 200, never 502/503
+  }
+});
+
 router.post('/calls', async (req, res) => {
   const b = req.body || {};
   const r = await omni.create({ externalId: b.externalId, toNumber: b.toNumber, name: b.name, script: b.script, scriptLanguage: b.scriptLanguage, scripts: b.scripts, agentName: b.agentName });
