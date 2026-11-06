@@ -285,13 +285,13 @@ async function recruiterBoard(c, req) {
   addSet(b, 'review-pending', { kind: 'group', group: 'RECRUITER_REVIEW_PENDING', title: 'Review pending (ready to send to ATS)' });
   addSet(b, 'sent-week', { kind: 'app', title: 'Sent to ATS this week', ids: idsOf(sentWeek) });
   addSet(b, 'screening', { kind: 'group', group: 'SCREENING_PENDING', title: 'Screening pending' });
-  addSet(b, 'submissions-month', { kind: 'app', title: internal ? 'Sent to Dept Head / TL this month' : 'Client submissions this month', ids: subIds });
+  addSet(b, 'submissions-month', { kind: 'app', title: internal ? 'Checked by HR this month' : 'Client submissions this month', ids: subIds });
   b.counts.push(
     { id: 'new-today', label: 'New applications', value: newToday.length, sub: 'today', drill: 'new-today' },
     { id: 'review-pending', label: 'Review pending', value: reviewPending.length, sub: 'in Job Portal screening', drill: 'review-pending', tone: reviewPending.length ? 'amber' : null },
     { id: 'sent-week', label: 'Sent to ATS', value: sentWeek.length, sub: 'this week', drill: 'sent-week' },
     { id: 'screening', label: 'Screening pending', value: screening.length, sub: 'resume / AI interview', drill: 'screening' },
-    { id: 'submissions-month', label: internal ? 'Sent to Dept Head' : 'Submissions', value: subIds.length, sub: 'this month', drill: 'submissions-month' },
+    { id: 'submissions-month', label: internal ? 'Checked by HR' : 'Submissions', value: subIds.length, sub: 'this month', drill: 'submissions-month' },
   );
 
   // ---- (B) My Queue ----
@@ -364,7 +364,7 @@ async function recruiterBoard(c, req) {
   b.widgets.push({
     id: 'target', type: 'target', title: 'Target vs Achieved — this month',
     rows: [
-      { id: 'submissions', label: internal ? 'Sent to Dept Head' : 'Submissions', achieved: subIds.length, target: target.submissions, drill: 'submissions-month' },
+      { id: 'submissions', label: internal ? 'Checked by HR' : 'Submissions', achieved: subIds.length, target: target.submissions, drill: 'submissions-month' },
       { id: 'joinings', label: 'Joinings', achieved: joinedMonth.length, target: target.joinings, drill: 'joined-month' },
     ],
     to: '/performance',

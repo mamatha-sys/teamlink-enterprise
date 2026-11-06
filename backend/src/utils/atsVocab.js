@@ -197,19 +197,24 @@ function stageMoveProblem(fromStage, toStage, { internal = false, resumeFrom = n
   // HR RUNS INTERNAL HIRING START TO END (founder 2026-11-03: "TLs dhi evaridhi em vundadhu, mottham antha start to end, HR ey chustharu"):
   // HR books the interview straight from its own check - there is no Dept head / TL step any more.
   if (internal && from === 0 && toStage === 'INTERVIEW_SCHEDULED') return null;
+  // the sentence reads the internal chain's words too: no team lead, no client manager on TeamLink's own hires
+  const name = (code) => stageLabelFor(code, { internal });
+  if (internal && from < STAGE_PHASE.INTERVIEW_SCHEDULED) {
+    return `${name(toStage)} can't be reached from ${name(fromStage)} — book the interview first.`;
+  }
   // Entering the NEXT phase lands on its first step: BDE Review before BDE
   // Approved, Shared with Client / Client Review before Client Shortlisted.
   if (to === from + 1) {
     if ((PHASE_ENTRIES[to] || [toStage]).includes(toStage)) return null;
-    return `${stageLabel(toStage)} can't be reached from ${stageLabel(fromStage)} — `
-      + `the candidate has to go through ${stageLabel(PHASE_ENTRIES[to][0])} first.`;
+    return `${name(toStage)} can't be reached from ${name(fromStage)} — `
+      + `the candidate has to go through ${name(PHASE_ENTRIES[to][0])} first.`;
   }
   // The actual workflow runs a CLIENT placement through Offer → Offer
   // Accepted → Joining too (the client's offer, recorded by the recruiter), so
   // the old Selected → Joined shortcut for client placements is gone.
   const missing = PHASE_ENTRY[from + 1];
-  return `${stageLabel(toStage)} can't be reached from ${stageLabel(fromStage)} — `
-    + `the candidate has to go through ${stageLabel(missing)} first.`;
+  return `${name(toStage)} can't be reached from ${name(fromStage)} — `
+    + `the candidate has to go through ${name(missing)} first.`;
 }
 
 // Owner role, next action and SLA in days for every stage — the prototype's

@@ -384,7 +384,7 @@ function stageAllowedForHiringType(toStage, application, requirement) {
   const internal = isInternalHire(application, requirement);
   if (internal && CLIENT_ONLY_STAGES.includes(toStage)) {
     return 'This is a TeamLink internal hire — there is no BDE review or client submission. '
-      + 'After HR Review and the Dept Head / TL approval the candidate goes to Interview.';
+      + 'After the HR check the candidate goes to Interview.';
   }
   // §35 — HIRED is the internal-hire end state (it hands over to HRMS). A
   // client placement ends at Joined, which hands over to Accounts.

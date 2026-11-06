@@ -307,7 +307,7 @@ function decorate(candidate, { user, sharedIds = null, followUps = null, withApp
     // travels alongside as stageDetailLabel; nothing is lost, it is folded.
     stageGroup: groupIdOfStage(latest.stage),
     stageGroupLabel: groupLabelOfStage(latest.stage),
-    stageDetailLabel: stageDetail(latest),
+    stageDetailLabel: stageDetail(latest, { internal: isInternalApp(latest, requirement) }),
     requirementId: latest.requirementId,
     requirementTitle: requirement ? requirement.title : null,
     requirementDepartment: requirement ? requirement.department : null,
@@ -558,7 +558,7 @@ const QUEUES = {
 // the internal chain's word for the same step (shown when Internal is picked).
 const PIPE_STAGES = [
   { key: 'recruiter_review', label: 'Recruiter Review', internal: 'HR Review' },
-  { key: 'tl_review', label: 'TL Review', internal: 'Dept Head / TL Review' },
+  { key: 'tl_review', label: 'TL Review', internal: 'HR Review (before interview)' },
   { key: 'bde_review', label: 'BDE Review' },
   { key: 'client_submitted', label: 'Client Submitted' },
   { key: 'client_shortlisted', label: 'Client Shortlisted' },
@@ -1023,7 +1023,7 @@ async function buildPipelineRows(user, st, s, snap) {
         currentStageLabel: stageLabelFor(a.stage, { internal }),
         stageGroup: groupIdOfStage(a.stage),
         stageGroupLabel: groupLabelOfStage(a.stage),
-        stageDetailLabel: stageDetail(a),
+        stageDetailLabel: stageDetail(a, { internal }),
         stageKey: stageKeyOf(a, internal, snap),
         pipelineStatus: pipelineStatusOf(a.stage),
         lifeStatus: applicationLifeStatus(a),
@@ -2642,7 +2642,7 @@ router.get('/:id', async (req, res) => {
     stageLabel: stageLabelFor(a.stage, { internal: isInternalApp(a, a.requirement) }),
     stageGroup: groupIdOfStage(a.stage),
     stageGroupLabel: groupLabelOfStage(a.stage),
-    stageDetailLabel: stageDetail(a),
+    stageDetailLabel: stageDetail(a, { internal: isInternalApp(a, a.requirement) }),
     owner: applicationOwner(a, a.requirement),
     // Who we are waiting on OUTSIDE TeamLink, reported beside the owner
     // rather than instead of them (§5).

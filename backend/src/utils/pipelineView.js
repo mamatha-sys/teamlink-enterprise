@@ -21,7 +21,7 @@
 // ---------------------------------------------------------------------------
 
 const {
-  STAGE_LABELS, stageLabel, INTERVIEW_STATUS_CODES, INTERVIEW_STATUS_LABELS,
+  STAGE_LABELS, stageLabel, stageLabelFor, INTERVIEW_STATUS_CODES, INTERVIEW_STATUS_LABELS,
   interviewStatusLabel, STAGE_CODES,
 } = require('./atsVocab');
 
@@ -91,13 +91,13 @@ function groupLabelOfStage(stage) {
 // The precise status WITHIN the visible group — the detail that used to be a
 // top-level stage. For the Interview group that is the interview lifecycle
 // status; everywhere else it is the underlying stage's own label.
-function stageDetail(application) {
+function stageDetail(application, { internal = false } = {}) {
   if (!application || !application.stage) return null;
   const g = groupOfStage(application.stage);
   if (g && g.id === 'interview' && application.interviewStatus) {
     return interviewStatusLabel(application.interviewStatus);
   }
-  return stageLabel(application.stage);
+  return stageLabelFor(application.stage, { internal });
 }
 
 // How far along the visible pipeline a stage sits (-1 for Hold / Rejected /
