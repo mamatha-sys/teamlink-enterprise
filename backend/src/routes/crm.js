@@ -158,6 +158,8 @@ if (!process.env.TEST_MODE && process.env.NODE_ENV !== 'test') {
   setInterval(() => { SALES.runDue().catch((e) => console.error('[crm] timed reminders:', e.message)); }, 60 * 1000).unref(); // eslint-disable-line no-console
   // the automatic follow-through: does nothing until it is turned on (crm/autopilot.js)
   setInterval(() => { AUTO.tick().catch((e) => console.error('[crm] autopilot:', e.message)); }, 60 * 1000).unref(); // eslint-disable-line no-console
+  // nothing else reads the mailbox by itself: mail replies have to be seen for a sequence to stop (only while it is on)
+  setInterval(() => { AUTO.checkMailbox().catch((e) => console.error('[crm] mailbox:', e.message)); }, 5 * 60 * 1000).unref(); // eslint-disable-line no-console
 }
 
 module.exports = router;

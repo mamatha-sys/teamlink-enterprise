@@ -162,6 +162,86 @@ const NIGHT = Date.parse('2026-11-10T18:00:00Z'); // 11:30 pm in India
   const slot = await AP.nextSlot(row.id, await AP.load(), Date.parse('2026-11-14T06:30:00Z')); // a Saturday in India
   check('a meeting is never put on a Sunday', slot.day === '2026-11-16', slot);
 
+  console.log('They wrote back');
+  await AP.save(admin, { on: false }); await AP.save(admin, { on: true });
+  await prisma.$executeRawUnsafe('UPDATE "AppSetting" SET "value" = json_set("value", \'$.armedAt\', ?) WHERE "key" = ?', new Date(NOON - HOUR).toISOString(), 'crm.autopilot');
+  await prisma.$executeRawUnsafe('UPDATE "CrmAutoStep" SET "status" = \'stopped\' WHERE "status" IN (\'waiting\', \'calling\')');
+  const DLV = require('../src/utils/messageDelivery');
+  const IMAP = require('../src/utils/imapInbox');
+  const waiting = async (id) => (await steps(id)).filter((s) => s.status === 'waiting').length;
+  const started = async (name, over) => { const l = await lead(name, over); await backdate(l.id, NOON - 60000); await tick(NOON); return l; };
+  const taskOf = (id) => DB.one('SELECT * FROM "CrmTask" WHERE "leadId" = ? AND "title" LIKE \'Answer %\'', id);
+  const bell = (id) => prisma.notification.findFirst({ where: { recipient: { startsWith: `crm-reply|${id}|` } } });
+
+  const r1 = await started('Sms Reply Ltd');
+  check('(the sequence is waiting)', (await waiting(r1.id)) > 0, await steps(r1.id));
+  const out1 = await DLV.applyInbound({ channel: 'SMS', from: `+91${r1.phone}`, text: 'Yes please call me', id: 'zz-sms-1', provider: 'sms.test' });
+  check('an SMS reply through the real inbound path: every waiting step stops', (await waiting(r1.id)) === 0 && (await steps(r1.id)).some((s) => s.result === 'they replied on SMS'), { out1, steps: await steps(r1.id) });
+  check('it is on the timeline with their words', (await acts(r1.id)).includes('Replied on SMS') && !!(await DB.one('SELECT "id" FROM "CrmActivity" WHERE "leadId" = ? AND "note" = ?', r1.id, 'Yes please call me')));
+  check('the owner is told, and gets a follow-up to answer it', !!(await bell(r1.id)) && !!(await taskOf(r1.id)), await taskOf(r1.id));
+  const k1 = sent.length;
+  await tick(NOON + 200 * HOUR);
+  check('nothing more goes to them after a week', sent.filter((x, i) => i >= k1 && (x.to === r1.email || x.to === r1.phone || x.toNumber === r1.phone)).length === 0);
+  await DLV.applyInbound({ channel: 'SMS', from: `+91${r1.phone}`, text: 'Yes please call me', id: 'zz-sms-1', provider: 'sms.test' });
+  check('the provider sending the same reply twice counts once', (await acts(r1.id)).filter((s) => s === 'Replied on SMS').length === 1, await acts(r1.id));
+
+  const r2 = await started('Wa Reply Ltd');
+  await DLV.applyInbound({ channel: 'WhatsApp', from: `91${r2.phone}`, text: 'Send details', id: 'zz-wa-1' });
+  check('a WhatsApp reply stops it too', (await waiting(r2.id)) === 0 && (await acts(r2.id)).includes('Replied on WhatsApp'), await acts(r2.id));
+
+  const rawMail = (from, subject, extra = '') => `From: Ravi <${from}>\r\nSubject: ${subject}\r\nMessage-ID: <zz-${Math.random()}@example.test>\r\nDate: Tue, 10 Nov 2026 10:00:00 +0530\r\n${extra}Content-Type: text/plain\r\n\r\nYes, let us talk on Monday.\r\n`;
+  const r3 = await started('Mail Reply Ltd');
+  await IMAP.pollOnce({ messages: [rawMail(r3.email, 'Re: Thank you')] });
+  check('a mail reply through the real mailbox reader stops it too', (await waiting(r3.id)) === 0 && (await acts(r3.id)).includes('Replied on mail'), await acts(r3.id));
+
+  const r4 = await started('Out Of Office Ltd');
+  const w4 = await waiting(r4.id);
+  await IMAP.pollOnce({ messages: [rawMail(r4.email, 'Automatic reply: Thank you'), rawMail(r4.email, 'Out of office'), rawMail(r4.email, 'Re: hello', 'Auto-Submitted: auto-replied\r\n')] });
+  check('an out-of-office is not a reply: the sequence goes on', w4 > 0 && (await waiting(r4.id)) === w4 && !(await acts(r4.id)).includes('Replied on mail'), await acts(r4.id));
+
+  const r5 = await started('Stop Word Ltd');
+  await DLV.applyInbound({ channel: 'SMS', from: `+91${r5.phone}`, text: 'STOP', id: 'zz-sms-5', provider: 'sms.test' });
+  const l5 = await S.getRow('lead', r5.id);
+  check('"STOP": out of every channel, Lost, and no follow-up to chase them', (await CMP.optedOut('email', r5.email)) && (await CMP.optedOut('whatsapp', r5.phone)) && l5.stage === 'Lost' && !(await taskOf(r5.id)) && (await waiting(r5.id)) === 0, l5);
+
+  const r6 = await lead('New Stage Ltd');
+  await DLV.applyInbound({ channel: 'SMS', from: `+91${r6.phone}`, text: 'hello', id: 'zz-sms-6', provider: 'sms.test' });
+  check('a reply moves a New lead to Contacted', (await S.getRow('lead', r6.id)).stage === 'Contacted');
+  const orphan = await lead('No Owner Ltd');
+  await DB.run('UPDATE "CrmLead" SET "ownerId" = NULL, "ownerName" = NULL WHERE "id" = ?', orphan.id);
+  await DLV.applyInbound({ channel: 'SMS', from: `+91${orphan.phone}`, text: 'hello', id: 'zz-sms-7', provider: 'sms.test' });
+  check('no owner: it still lands on the timeline, nothing breaks', (await acts(orphan.id)).includes('Replied on SMS'));
+  const stranger = await DLV.applyInbound({ channel: 'SMS', from: '+919999900000', text: 'who is this', id: 'zz-sms-8', provider: 'sms.test' }).catch((e) => ({ threw: e.message }));
+  check('a number no lead has: the normal path is untouched', !stranger.threw, stranger);
+  const r7 = await lead('Early Reply Ltd');
+  await backdate(r7.id, NOON - 60000);
+  await DLV.applyInbound({ channel: 'SMS', from: `+91${r7.phone}`, text: 'hi', id: 'zz-sms-10', provider: 'sms.test' });
+  await tick(NOON);
+  check('a lead who writes before the first step is queued is never started', (await steps(r7.id)).length === 0, await steps(r7.id));
+  await DLV.applyInbound({ channel: 'WhatsApp', from: `91${r1.phone}`, text: 'one more thing', id: 'zz-wa-2' });
+  await DLV.applyInbound({ channel: 'WhatsApp', from: `91${r1.phone}`, text: 'and another', id: 'zz-wa-3' });
+  check('three messages, one follow-up', (await DB.all('SELECT "id" FROM "CrmTask" WHERE "leadId" = ? AND "title" LIKE \'Answer %\'', r1.id)).length === 1);
+  const owner = await resolveIdentity(r1.ownerId);
+  check('the on-screen note carries the reply', (await SALES.liveReminders(owner)).body.reminders.some((n) => JSON.stringify(n).includes('Sms Reply Ltd replied on')), await SALES.liveReminders(owner));
+  const r8 = await started('Real Reply Ltd');
+  await IMAP.pollOnce({ messages: [rawMail(r8.email, 'Re: Delivery status of our order')] });
+  check('a person writing about "delivery status" is still a reply', (await acts(r8.id)).includes('Replied on mail'), await acts(r8.id));
+  const ahead = (await steps(r8.id)).filter((s) => s.status === 'stopped' && Date.parse(s.dueAt) > Date.now()).length;
+  await AP.pauseLead(admin, r8.id, false);
+  check('"Start again" after a reply wakes only the steps still ahead', (await waiting(r8.id)) === ahead, { ahead, steps: await steps(r8.id) });
+  const won = await lead('Won Client Ltd');
+  await DB.run('UPDATE "CrmLead" SET "stage" = \'Won\' WHERE "id" = ?', won.id);
+  await DLV.applyInbound({ channel: 'SMS', from: `+91${won.phone}`, text: 'STOP', id: 'zz-sms-11', provider: 'sms.test' });
+  check('"STOP" from a won client opts them out but never turns the win into Lost', (await S.getRow('lead', won.id)).stage === 'Won' && (await CMP.optedOut('whatsapp', won.phone)));
+  let polled = 0;
+  await AP.checkMailbox({ pollOnce: async () => { polled += 1; return {}; } });
+  await AP.save(admin, { on: false });
+  const offCheck = await AP.checkMailbox({ pollOnce: async () => { polled += 1; return {}; } });
+  check('the mailbox is read on a timer while it is on, not while it is off', polled === 1 && offCheck.off === true, { polled, offCheck });
+  const r9 = await lead('Off Reply Ltd');
+  await DLV.applyInbound({ channel: 'SMS', from: `+91${r9.phone}`, text: 'hi', id: 'zz-sms-9', provider: 'sms.test' });
+  check('with the switch off a reply is still seen by the owner', (await acts(r9.id)).includes('Replied on SMS') && !!(await bell(r9.id)));
+
   console.log(failed ? `\n${failed} of ${total} checks FAILED` : `\nAll ${total} checks passed`);
   await prisma.$disconnect().catch(() => {});
   for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(COPY + s); } catch { /* none */ } }

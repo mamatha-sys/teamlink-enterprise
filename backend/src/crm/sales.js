@@ -164,7 +164,7 @@ async function cancelTask(user, id) {
 // the in-app reminders of the last two hours, for the toast on any page (components/crm/CrmReminderToast.jsx)
 async function liveReminders(user) {
   const rows = await prisma.notification.findMany({
-    where: { userId: user.id, read: false, recipient: { startsWith: 'crm-task|' }, createdAt: { gt: new Date(Date.now() - 2 * 3600000) } }, orderBy: { createdAt: 'desc' }, take: 10, select: { id: true, title: true, message: true },
+    where: { userId: user.id, read: false, OR: [{ recipient: { startsWith: 'crm-task|' } }, { recipient: { startsWith: 'crm-reply|' } }], createdAt: { gt: new Date(Date.now() - 2 * 3600000) } }, orderBy: { createdAt: 'desc' }, take: 10, select: { id: true, title: true, message: true },
   });
   return S.okBody({ reminders: rows });
 }

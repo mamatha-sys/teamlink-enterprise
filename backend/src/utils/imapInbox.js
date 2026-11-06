@@ -233,6 +233,9 @@ async function pollOnce({ transport, messages } = {}) {
       let R = null; let ev = null;
       try { R = require('../outreach/omni/replyRouter'); ev = await R.begin({ provider: 'email.imap', id: p.messageId, channel: 'Email', from: p.from, text: p.text, at: p.date, name: p.fromName }); } catch { R = null; } // eslint-disable-line global-require
       if (ev && ev.duplicate) { out.ignored += 1; continue; } // eslint-disable-line no-continue
+      // a CRM lead wrote back: the automatic messages stop and the owner is told (crm/autopilot.js)
+      // eslint-disable-next-line global-require, no-await-in-loop
+      await require('../crm/autopilot').onReply({ channel: 'Email', email: p.from, subject: p.subject, text: p.text }).catch(() => null);
       // eslint-disable-next-line no-await-in-loop
       const who = await matchReply(p);
       if (R && ev && ev.id && who && who.by === 'sender') {

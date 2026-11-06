@@ -11,7 +11,8 @@
 //   * OFF until a Sales manager or Admin turns it on, and then ONLY leads that arrive after that moment: old leads and old customer lists are never messaged.
 //   * nothing goes in quiet hours (Message templates > Limits): it waits for the morning.
 //   * an opt-out (CrmOptOut: the unsubscribe link, or "do not call") stops the person at once, on every channel.
-//   * a lead stops being worked once it is past Contacted, Won, Lost, Junk or Converted, or when somebody presses Stop on it.
+//   * a lead stops being worked once it is past Contacted, Won, Lost, Junk or Converted, when somebody presses Stop on it, or the moment they REPLY by SMS, WhatsApp or mail: a person takes it
+//     from there (onReply; an out-of-office is not a reply, "stop" is an opt-out).
 //   * at most 20 sends a minute. Sample records ("Sample · ...") are never contacted.
 // Each step is claimed before it is sent, so two passes can never send it twice. tick() runs every minute (routes/crm.js).
 // ---------------------------------------------------------------------------
@@ -103,6 +104,8 @@ async function pauseLead(user, id, paused) {
   const row = await S.getRow('lead', id);
   if (!S.canEditRow(user, r, row)) return S.fail(404, 'This lead is not there, or it is not yours.');
   await S.update('CrmLead', row.id, { autoPaused: paused ? 1 : 0, updatedAt: DB.nowIso() });
+  // started again after they replied: the steps still ahead wake up, never the ones whose day has passed, never after they asked us to stop
+  if (!paused) await DB.run('UPDATE "CrmAutoStep" SET "status" = \'waiting\', "result" = NULL WHERE "recordId" = ? AND "status" = \'stopped\' AND "result" LIKE \'they replied%\' AND "dueAt" > ?', row.id, DB.nowIso());
   await note({ leadId: row.id }, paused ? `Automatic follow-through stopped by ${user.name || 'a person'}` : `Automatic follow-through started again by ${user.name || 'a person'}`);
   return S.okBody({ ok: true, autoPaused: !!paused });
 }
@@ -279,6 +282,78 @@ async function customerMeetings(st, now, deps) {
   return n;
 }
 
+// ---- they wrote back ----------------------------------------------------------------------------------------------
+const STOP_MAIL = /^\s*(stop|stop all|unsubscribe|cancel|opt[- ]?out|remove me|do not (contact|mail|message)( me)?|don'?t (contact|mail|message)( me)?)\s*[.!]?\s*$/i;
+const NOT_A_PERSON = /^\s*(out of (the )?office|automatic reply|auto.?reply|auto.?response|undeliverable)/i;
+const CHANNEL_WORD = { Email: 'mail', SMS: 'SMS', WhatsApp: 'WhatsApp' };
+
+async function leadsOf({ phone, email }) {
+  const em = String(email || '').trim().toLowerCase();
+  const ph = S.phone10(phone);
+  if (em) return DB.all('SELECT * FROM "CrmLead" WHERE lower(trim("email")) = ? AND "status" != \'Junk\'', em);
+  if (ph.length !== 10) return [];
+  return (await DB.all('SELECT * FROM "CrmLead" WHERE "phone" LIKE ? AND "status" != \'Junk\'', `%${ph.slice(-4)}%`)).filter((l) => S.phone10(l.phone) === ph);
+}
+/**
+ * A reply from a lead, whichever way it came (utils/messageDelivery.js, utils/imapInbox.js). The steps still waiting stop, the reply is on the timeline, and the owner gets the note on screen and a
+ * follow-up to answer it. It runs with the automatic follow-through off as well: a reply is worth seeing either way. "stop" is an opt-out. Nothing is read into the words beyond that: a person decides.
+ * -> how many leads it was
+ */
+async function onReply({ channel, phone, email, subject, text, stop = false }) {
+  if (channel === 'Email' && NOT_A_PERSON.test(`${subject || ''}`)) return 0;
+  const leads = await leadsOf({ phone, email });
+  if (!leads.length) return 0;
+  const body = S.clip(text, 1000);
+  const wantsOut = stop || (channel === 'Email' && STOP_MAIL.test(String(text || '')));
+  const CMP = require('./campaigns'); // eslint-disable-line global-require
+  const names = SALES.stageNames(await SETTINGS.load());
+  const word = CHANNEL_WORD[channel] || channel;
+  const managers = (await S.ownerOptions()).filter((o) => o.tl).map((o) => o.id);
+  for (const lead of leads) {
+    /* eslint-disable no-await-in-loop */
+    // paused as well, so a lead who writes before their first step is queued is not started afterwards
+    await S.update('CrmLead', lead.id, { autoPaused: 1, updatedAt: DB.nowIso() });
+    await DB.run('UPDATE "CrmAutoStep" SET "status" = \'stopped\', "result" = ? WHERE "recordId" = ? AND "status" = \'waiting\'', wantsOut ? 'they asked us to stop' : `they replied on ${word}`, lead.id);
+    await note({ leadId: lead.id }, wantsOut ? `Asked us to stop (${word})` : `Replied on ${word}`, body, channel === 'Email' ? 'email' : (channel === 'WhatsApp' ? 'whatsapp' : 'note'));
+    if (wantsOut) {
+      if (lead.email) await CMP.optOut('email', lead.email, { reason: `Asked us to stop by ${word}` });
+      if (lead.phone) await CMP.optOut('whatsapp', lead.phone, { reason: `Asked us to stop by ${word}` });
+      if (lead.status !== 'Converted' && SALES.stageOf(lead, names) !== 'Won') await moveLead(lead, 'Lost', 'Asked us to stop');
+    } else if (SALES.stageOf(lead, names) === names[0]) await moveLead(lead, 'Contacted', `Replied on ${word}`);
+    const to = lead.ownerId ? [lead.ownerId] : managers;
+    const stamp = Date.now();
+    for (const userId of to) {
+      await prisma.notification.create({
+        data: {
+          userId, title: wantsOut ? `${lead.company} asked us to stop` : `${lead.company} replied on ${word}`, message: `${body || ''}\nOpen: /crm/leads?open=lead:${lead.id}`.trim(), channel: 'In-App', recipient: `crm-reply|${lead.id}|${stamp}`, status: 'Sent',
+        },
+      }).catch(() => {});
+    }
+    // one follow-up however many messages they send: a person answers them all at once
+    const open = !wantsOut && lead.ownerId && await DB.one('SELECT "id" FROM "CrmTask" WHERE "leadId" = ? AND "status" = \'Open\' AND "title" LIKE \'Answer %\'', lead.id);
+    if (!wantsOut && lead.ownerId && !open) {
+      const iso = new Date(stamp + 5.5 * HOUR).toISOString();
+      const now = DB.nowIso();
+      await S.insert('CrmTask', {
+        id: S.newId('task'), title: `Answer ${lead.contactName || lead.company}: replied on ${word}`, dueDate: iso.slice(0, 10), dueTime: iso.slice(11, 16), status: 'Open', type: channel === 'Email' ? 'Email' : (channel === 'WhatsApp' ? 'WhatsApp' : 'Other'),
+        notifyApp: 0, notifyWhatsapp: 0, notifySms: 0, notifyLead: 0, remindBefore: 0, reminderSentAt: DB.nowIso(), leadId: lead.id, ownerId: lead.ownerId, ownerName: lead.ownerName, createdAt: now, updatedAt: now,
+      }).catch(() => null);
+    }
+    /* eslint-enable no-await-in-loop */
+  }
+  return leads.length;
+}
+
+// Nothing else reads the mailbox by itself, and a mail reply has to be seen for the sequence to stop. Only while the automatic follow-through is on, and only when a mailbox is connected.
+async function checkMailbox({ pollOnce } = {}) {
+  const st = await load();
+  if (!st.on) return { off: true };
+  // eslint-disable-next-line global-require
+  const imap = require('../utils/imapInbox');
+  if (!pollOnce && !(await imap.status()).configured) return { notConfigured: true };
+  return (pollOnce || imap.pollOnce)();
+}
+
 /** One pass. -> what was done. Does nothing while it is off. */
 async function tick({ now = Date.now(), deps = {} } = {}) {
   const st = await load();
@@ -332,5 +407,5 @@ async function tick({ now = Date.now(), deps = {} } = {}) {
 }
 
 module.exports = {
-  DEFAULTS, clean, load, get, save, pauseLead, tick, bookMeeting, nextSlot, calendarFile,
+  DEFAULTS, clean, load, get, save, pauseLead, tick, bookMeeting, nextSlot, calendarFile, onReply, checkMailbox,
 };
