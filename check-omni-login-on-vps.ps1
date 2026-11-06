@@ -20,7 +20,7 @@ const { PrismaClient } = require("@prisma/client");
 const p = new PrismaClient();
 (async () => {
   const email = process.env.CHECK_EMAIL;
-  const u = await p.user.findFirst({ where: { email: { equals: email } }, select: { name: true, role: true, active: true } }).catch(() => null);
+  const u = await p.user.findFirst({ where: { email: { equals: email } }, select: { name: true, role: true } }).catch(() => null);
   console.log(`TeamLink login        : ${u ? `${u.name}, role ${u.role}` : "no TeamLink login has exactly this email"}`);
   const r = await p.appSetting.findUnique({ where: { key: "omni.gs.adminLogins" } }).catch(() => null);
   const all = r ? JSON.parse(r.value) : {};
