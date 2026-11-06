@@ -45,6 +45,11 @@ const db = {
     delete: async ({ where }) => { rows.splice(rows.findIndex((r) => r.id === where.id), 1); },
   },
   user: { findMany: async () => [] },
+  notification: {
+    rows: [],
+    findMany: async ({ where }) => db.notification.rows.filter((n) => n.userId === where.AND[0].userId && !n.read),
+    updateMany: async ({ where }) => { db.notification.rows.filter((n) => n.userId === where.AND[1].userId && n.title === where.AND[0].title).forEach((n) => { n.read = true; }); return {}; },
+  },
 };
 const pauseDb = {
   announcement: db.announcement,
@@ -100,6 +105,19 @@ Module._load = function stub(request, parent, isMain) {
   check('someone it does not reach does not', (await fetch(`${base}/${made.id}/media`)).status === 403);
   who = { id: 'u1', name: 'Asha' };
   check('the same file cannot go on a second notice', (await post({ mediaId })).status === 400);
+  // a new notice comes up on screen, once
+  const notice = await (await post({ title: 'Holiday' })).json();
+  db.notification.rows = [{ userId: 'u9', title: 'Announcement: Holiday', read: false, createdAt: new Date(), channel: 'In-App' }, { userId: 'u9', title: 'Announcement: Deleted long ago', read: false, createdAt: new Date(), channel: 'In-App' }];
+  who = { id: 'u9', name: 'Mani' };
+  const first = await (await fetch(`${base}/popup`)).json();
+  check('an unread notice comes up for its reader; a bell row with no notice does not', first.length === 1 && first[0].id === notice.id, first);
+  check('OK marks it read', (await fetch(`${base}/${notice.id}/seen`, { method: 'POST' })).status === 204);
+  check('it does not come back', (await (await fetch(`${base}/popup`)).json()).length === 0);
+  who = { id: 'outsider', name: 'X' };
+  db.notification.rows = [{ userId: 'outsider', title: 'Announcement: Holiday', read: false, createdAt: new Date(), channel: 'In-App' }];
+  check('someone it does not reach gets no popup', (await (await fetch(`${base}/popup`)).json()).length === 0);
+  who = { id: 'u1', name: 'Asha' };
+  rows.splice(rows.findIndex((r) => r.id === notice.id), 1);
   const Pause = require('../src/utils/announcementPause');
   pauseDb.notification.rows = [
     { title: 'Announcement: T', channel: 'In-App' }, { title: 'Announcement: T', channel: 'In-App' }, { title: 'Announcement: T', channel: 'Email' }, { title: 'Leave approved', channel: 'In-App' },

@@ -14,6 +14,7 @@ import SetupTabs from './SetupTabs.jsx';
 import InterviewTabs from './InterviewTabs.jsx';
 import NotificationBell from './NotificationBell.jsx';
 import NudgePopup from './NudgePopup.jsx';
+import AnnouncementPopup from './AnnouncementPopup.jsx'; // a new notice comes up on screen for everyone it reaches (2026-11-06)
 import TaskPopup from './dashboard/TaskPopup.jsx';
 import JobRequestPopup from './JobRequestPopup.jsx';
 import CrmReminderToast from './crm/CrmReminderToast.jsx'; // a CRM follow-up that has come due, on screen on any page (2026-11-06)
@@ -388,6 +389,7 @@ export default function Shell() {
       <AiAssistant />
       {/* morning / afternoon / evening reminders and "complete this course" (staff only; utils/dayNudges.js) */}
       {user && !['CLIENT', 'CANDIDATE'].includes(user.role) && <NudgePopup />}
+      {user && !['CLIENT', 'CANDIDATE'].includes(user.role) && <AnnouncementPopup />}
     </div>
   );
 }

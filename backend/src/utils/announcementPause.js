@@ -52,4 +52,4 @@ async function sweepDeleted() {
   return gone;
 }
 
-module.exports = { isPaused, pausedInfo, setPaused, removeNotifications, sweepDeleted, PAUSED_HIDE };
+module.exports = { isPaused, pausedInfo, setPaused, removeNotifications, sweepDeleted, notificationsOf, PAUSED_HIDE };

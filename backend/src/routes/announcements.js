@@ -189,6 +189,30 @@ router.get('/:id/media', async (req, res) => {
   return res.sendFile(path.basename(full), { root: path.dirname(full), cacheControl: false }); // with a root: the upload folder's own name starts with a dot
 });
 
+// NEW NOTICES COME UP ON SCREEN (founder 2026-11-06, components/AnnouncementPopup.jsx). What this person has not read yet is their unread bell row of
+// that notice, so OK here and opening it in the bell are one thing. A week old at most: a popup is for news. Nobody gets one for their own notice.
+const POPUP_DAYS = 7;
+const POPUP_MAX = 5;
+router.get('/popup', async (req, res) => {
+  const since = new Date(Date.now() - POPUP_DAYS * 86400000);
+  const bell = await prisma.notification.findMany({
+    where: { AND: [{ userId: req.user.id, read: false, title: { startsWith: 'Announcement: ' }, createdAt: { gte: since } }, { OR: [{ channel: 'In-App' }, { channel: null }] }, PAUSE.PAUSED_HIDE] },
+    orderBy: { createdAt: 'asc' }, take: 40, select: { title: true, createdAt: true },
+  });
+  if (!bell.length) return res.json([]);
+  const notices = await prisma.announcement.findMany({ where: { title: { in: [...new Set(bell.map((n) => n.title.slice('Announcement: '.length)))] } } });
+  const ctx = await viewerContext(req.user);
+  const legacy = legacyReach(scopeDepartments(req.user) || []);
+  const near = (a, n) => { const gap = new Date(n.createdAt).getTime() - new Date(a.createdAt).getTime(); return gap >= -60000 && gap <= 30 * 60000; };
+  const list = [...new Set(bell.map((n) => notices.find((a) => `Announcement: ${a.title}` === n.title && near(a, n))).filter(Boolean))];
+  return res.json(list.filter((a) => reaches(ctx, a, legacy) && !PAUSE.isPaused(a)).slice(0, POPUP_MAX).map(shape));
+});
+router.post('/:id/seen', async (req, res) => {
+  const a = await prisma.announcement.findUnique({ where: { id: req.params.id } });
+  if (a) await prisma.notification.updateMany({ where: { AND: [PAUSE.notificationsOf(a), { userId: req.user.id }] }, data: { read: true } });
+  res.status(204).end();
+});
+
 router.post('/', async (req, res) => {
   const how = await postingMode(req.user);
   if (how.mode === 'none') return res.status(403).json({ error: how.reason });
