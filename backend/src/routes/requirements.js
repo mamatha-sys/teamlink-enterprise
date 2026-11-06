@@ -530,7 +530,7 @@ function primaryActionOf(row, policy) {
     case 'recruiter': return row.live ? { key: 'add-candidate', label: 'Add Candidate' } : { key: 'view-candidates', label: 'View Candidates' };
     case 'tl': return row.mayAssign ? { key: 'assign-recruiter', label: 'Assign Recruiter' } : { key: 'open', label: 'View' };
     case 'bde':
-      if (row.submitReady) return { key: 'submit-client', label: 'Submit to Client' };
+      if (row.submitReady) return { key: 'submit-client', label: 'Send to BDE TL' }; // the BDE TL sends to the client (2026-11-06)
       return row.mayEdit ? { key: 'edit', label: 'Edit' } : { key: 'open', label: 'View' };
     case 'accounts':
       return row.generateTo ? { key: 'generate-invoice', label: 'Generate Invoice', to: row.generateTo } : { key: 'open', label: 'View' };

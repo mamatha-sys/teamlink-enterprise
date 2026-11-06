@@ -179,7 +179,7 @@ export function nextActionsFor(user, stage, app = null) {
   } else if (stage === 'OFFER_ACCEPTED') {
     // v3: Joined — joining date, final CTC, commission % → Accounts, through
     // the Joining checklist. Not for someone marked "Did not join".
-    if (is('recruiter', 'tl') && can(user, 'ats', 'interviews', 'Joining', 'edit') && !(app && app.joiningStatus === 'Dropped')) out.push({ id: 'joined', label: 'Mark joined', kind: 'popup', popup: 'joined', to: 'JOINED' });
+    if (is('recruiter', 'tl') && canMoveToStage(user, 'JOINED') && can(user, 'ats', 'interviews', 'Joining', 'edit') && !(app && app.joiningStatus === 'Dropped')) out.push({ id: 'joined', label: 'Mark joined', kind: 'popup', popup: 'joined', to: 'JOINED' });
   }
   return out;
 }
@@ -584,20 +584,23 @@ export function CandidateActions({
   if (!internal) return null;
   const stage = app ? app.stage : null;
   const next = stage ? nextActionsFor(user, stage, app) : [];
-  const mayHold = !!stage && !['HOLD', ...CLOSED].includes(stage) && canMoveToStage(user, 'HOLD');
-  const mayReject = !!stage && stage !== 'REJECTED' && canMoveToStage(user, 'REJECTED');
+  // a candidate who reached the client is the BDE TL's: Reject, Hold and Dropped stop there for the Recruiter, TL and BDE (founder 2026-11-06)
+  const pastClient = !!stage && !isInternalApp(app) && !(user.workflow && user.workflow.bdeTl) && ['recruiter', 'tl', 'bde'].includes(viewerStageRole(user)) && !['NEW', 'AI_INTERVIEW_REQUIRED', 'AI_INTERVIEW_SCHEDULED', 'AI_INTERVIEW_COMPLETED', 'RECRUITER_REVIEW', 'RECRUITER_APPROVED', 'TL_REVIEW', 'WITH_BDE', 'BDE_APPROVED', 'HOLD', 'REJECTED'].includes(stage);
+  const mayHold = !!stage && !pastClient && !['HOLD', ...CLOSED].includes(stage) && canMoveToStage(user, 'HOLD');
+  const mayReject = !!stage && !pastClient && stage !== 'REJECTED' && canMoveToStage(user, 'REJECTED');
   const otherStages = stage
     ? workflowStages(user).filter((s) => s !== stage && !['HOLD', 'REJECTED'].includes(s) && !next.some((f) => f.to === s) && moveStepAllowed(user, stage, s))
     : [];
   const editMaster = can(user, 'ats', 'candidates', 'Candidate Master', 'edit');
   const dKind = dropKind(app);
   const joiningEdit = can(user, 'ats', 'interviews', 'Joining', 'edit');
-  const mayDrop = !!dKind && (dKind === 'reject' ? mayReject : (dKind === 'offer' ? joiningEdit : (mayReject || joiningEdit)));
+  const mayClose = isInternalApp(app) ? joiningEdit : (joiningEdit && canMoveToStage(user, 'JOINED'));
+  const mayDrop = !!dKind && (dKind === 'reject' ? mayReject : (dKind === 'offer' ? mayClose : (mayReject || mayClose)));
   // JOINED in "Move to" (founder 2026-11-04: "move step daggara joined aney button kuda vundali"): opens the
   // Joined window (joining date, final CTC, commission -> Accounts). A client placement from Selected / Offer /
   // Offer accepted; an internal hire after the offer is accepted. Earlier steps show it greyed with why.
   const JOIN_FROM = isInternalApp(app) ? ['OFFER_ACCEPTED'] : ['SELECTED', 'OFFER', 'OFFER_ACCEPTED'];
-  const mayJoinMove = !!stage && !CLOSED.includes(stage) && stage !== 'HOLD' && joiningEdit
+  const mayJoinMove = !!stage && !CLOSED.includes(stage) && stage !== 'HOLD' && mayClose
     && !(app && app.joiningStatus === 'Dropped') && !next.some((f) => f.to === 'JOINED') && !otherStages.includes('JOINED');
   const joinNow = mayJoinMove && JOIN_FROM.includes(stage);
   const moveList = otherStages.length > 0 || mayDrop || mayJoinMove;

@@ -537,9 +537,11 @@ async function applyStageMove(user, applicationId, body = {}, opts = {}) {
   } else {
     // INTERNAL HIRING: the Dept Head / TL's approval out of TL Review is the interview booking (no BDE on TeamLink's own jobs).
     let ctx = {};
-    if (stage === 'INTERVIEW_SCHEDULED') {
+    {
       const pre = await prisma.application.findUnique({ where: { id: applicationId }, select: { stage: true, hiringType: true, requirement: { select: { internal: true, hiringType: true } } } });
-      if (pre && pre.stage === 'TL_REVIEW' && hiringTypeOf(pre, pre.requirement) === 'TeamLink Internal Hire') ctx = { internalFromTlReview: true };
+      // where the candidate stands now: past the client, Reject and Hold are the BDE TL's (permissions.js lateForRole)
+      if (pre) ctx = { fromStage: pre.stage, internal: hiringTypeOf(pre, pre.requirement) === 'TeamLink Internal Hire' };
+      if (stage === 'INTERVIEW_SCHEDULED' && pre && pre.stage === 'TL_REVIEW' && ctx.internal) ctx.internalFromTlReview = true;
     }
     refusal = await canMoveToStage(user, stage, ctx);
   }

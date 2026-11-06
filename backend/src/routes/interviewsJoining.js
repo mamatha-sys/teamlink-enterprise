@@ -344,7 +344,7 @@ router.post('/interviews/:id/decision', requirePerm('ats', 'interviews', 'Interv
   // Selected belongs to the client side / the leads, so a Recruiter or a BDE
   // cannot mark someone Selected from here either.
   // eslint-disable-next-line global-require
-  const stageRefusal = await require('../utils/permissions').canMoveToStage(req.user, DECISION_STAGE[decision]);
+  const stageRefusal = await require('../utils/permissions').canMoveToStage(req.user, DECISION_STAGE[decision], { fromStage: app.stage, internal: isInternalHire(app, app.requirement) });
   if (stageRefusal) return res.status(stageRefusal.status).json(stageRefusal.body);
   // FROM HOLD the decision follows the same step-order rule as every other
   // move (e2e gap 15): someone put on hold at "Check by team lead" can't be
@@ -938,9 +938,19 @@ router.get('/joining', requirePerm('ats', 'interviews', 'Joining', 'view'), asyn
 // The steps a CLIENT placement may be marked Joined from (founder 2026-11-04).
 const CLIENT_JOIN_FROM = ['SELECTED', 'OFFER', 'OFFER_ACCEPTED'];
 
+// Joined and Dropped on a client job are the BDE TL's (founder 2026-11-06; permissions.js STAGE_OWNERS). The Joining checklist's documents and call stay open to the team.
+async function joiningRefusal(req, app) {
+  if (isInternalHire(app, app.requirement)) return null;
+  return require('../utils/permissions').canMoveToStage(req.user, 'JOINED', { fromStage: app.stage }); // eslint-disable-line global-require
+}
+
 router.post('/joining/:id/schedule', requirePerm('ats', 'interviews', 'Joining', 'edit'), async (req, res) => {
   const app = await loadScoped(req, res);
   if (!app) return;
+  {
+    const no = await joiningRefusal(req, app);
+    if (no) return res.status(no.status).json(no.body);
+  }
   const internal = isInternalHire(app, app.requirement);
   if (internal) {
     // Internal hire: our own offer, accepted, documents verified.
@@ -991,6 +1001,10 @@ router.post('/joining/:id/schedule', requirePerm('ats', 'interviews', 'Joining',
 router.post('/joining/:id/joined', requirePerm('ats', 'interviews', 'Joining', 'edit'), async (req, res) => {
   const app = await loadScoped(req, res);
   if (!app) return;
+  {
+    const no = await joiningRefusal(req, app);
+    if (no) return res.status(no.status).json(no.body);
+  }
   if (app.joiningStatus !== 'Joining Scheduled') {
     return res.status(409).json({ error: 'Schedule the joining date before marking the candidate joined' });
   }
@@ -1102,6 +1116,10 @@ router.post('/joining/:id/call', requirePerm('ats', 'interviews', 'Joining', 'ed
 router.post('/joining/:id/not-joined', requirePerm('ats', 'interviews', 'Joining', 'edit'), async (req, res) => {
   const app = await loadScoped(req, res);
   if (!app) return;
+  {
+    const no = await joiningRefusal(req, app);
+    if (no) return res.status(no.status).json(no.body);
+  }
   if (app.stage !== 'OFFER_ACCEPTED') {
     return res.status(409).json({ error: `Only someone waiting to join can be marked "did not join" — they are at ${stageLabel(app.stage)}.` });
   }

@@ -1525,6 +1525,11 @@ async function can(user, product, moduleId, feature, action, record = undefined)
 // reach a client placement. HR is deliberately NOT on SELECTED (the Dept Head
 // / TL decides) and routes/applications.js lets only the Dept Head / TL (TL,
 // STL) approve an internal candidate out of TL Review.
+// WHO MOVES A CANDIDATE TO WHOM (founder 2026-11-06: "recruiters ki, only tl varaku pampinchey step ... tl ki bde daggara ki pampincheydhi matrmaey ... bde ki, bde tl ki varaku matrmey. bde tl ki,
+// client ki send cheseydhi matrmey ... client & bde tl ki, select, rejected, joined, dropped ... interviews (bde mottham ki)"; clients have no logins yet, so everything after the client is the BDE TL's):
+//   Recruiter  up to Team lead         TL / STL  up to With BDE         BDE  up to BDE TL, and the interview
+//   BDE TL     to the client and everything after it (BDE_TL_STAGES)    Client  Selected, Rejected, Joined
+// Reject and Hold stay with the Recruiter, TL and BDE only while a candidate has not reached the client (LATE_FROM_PHASE). Manager, HR (internal hiring) and Admin are as before.
 const STAGE_OWNERS = {
   NEW: ['RECRUITER', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER', 'HR'],
   AI_INTERVIEW_REQUIRED: ['RECRUITER', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER', 'HR'],
@@ -1542,24 +1547,29 @@ const STAGE_OWNERS = {
   // stage: their button is Share with Client, whose target SHARED_WITH_CLIENT
   // they do own.
   WITH_BDE: ['TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER'],
-  BDE_APPROVED: ['BDE', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER'],
-  SHARED_WITH_CLIENT: ['BDE', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER'],
-  CLIENT_REVIEW: ['BDE', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER'],
-  CLIENT_SHORTLISTED: ['CLIENT', 'BDE', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER'],
+  BDE_APPROVED: ['BDE', 'MANAGER', 'ASSISTANT_MANAGER'],
+  SHARED_WITH_CLIENT: ['MANAGER', 'ASSISTANT_MANAGER'],
+  CLIENT_REVIEW: ['MANAGER', 'ASSISTANT_MANAGER'],
+  CLIENT_SHORTLISTED: ['CLIENT', 'MANAGER', 'ASSISTANT_MANAGER'],
   // THE INTERVIEW IS BOOKED BY THE BDE (user, 2026-10-12): the client manager - and the BDE TL, who leads that
   // desk (INTERVIEW_BOOKER below) - moves a person into this step, by booking the slot. HR does it for its own
   // internal hiring (scope pins HR to internal jobs). A Recruiter / TL / STL / Manager / AM asks the BDE instead.
   INTERVIEW_SCHEDULED: ['BDE', 'HR'],
-  INTERVIEW_COMPLETED: ['RECRUITER', 'BDE', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER', 'HR'],
+  INTERVIEW_COMPLETED: ['BDE', 'MANAGER', 'ASSISTANT_MANAGER', 'HR'],
   // HR decides Selected on TeamLink's own jobs (2026-11-03: HR runs internal hiring start to end; HR's scope is internal only).
-  SELECTED: ['CLIENT', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER', 'HR'],
-  OFFER: ['RECRUITER', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER', 'HR'],
-  OFFER_ACCEPTED: ['RECRUITER', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER', 'HR'],
-  JOINED: ['RECRUITER', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER', 'HR'],
-  HIRED: ['TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER', 'HR'],
+  SELECTED: ['CLIENT', 'MANAGER', 'ASSISTANT_MANAGER', 'HR'],
+  OFFER: ['MANAGER', 'ASSISTANT_MANAGER', 'HR'],
+  OFFER_ACCEPTED: ['MANAGER', 'ASSISTANT_MANAGER', 'HR'],
+  JOINED: ['CLIENT', 'MANAGER', 'ASSISTANT_MANAGER', 'HR'],
+  HIRED: ['MANAGER', 'ASSISTANT_MANAGER', 'HR'],
   REJECTED: ['RECRUITER', 'BDE', 'CLIENT', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER', 'HR'],
   HOLD: ['RECRUITER', 'BDE', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER', 'HR'],
 };
+
+// The BDE TL, whatever role code the login carries. WITH_BDE: sending a profile back to the BDE.
+const BDE_TL_STAGES = ['WITH_BDE', 'BDE_APPROVED', 'SHARED_WITH_CLIENT', 'CLIENT_REVIEW', 'CLIENT_SHORTLISTED', 'INTERVIEW_SCHEDULED', 'INTERVIEW_COMPLETED', 'SELECTED', 'OFFER', 'OFFER_ACCEPTED', 'JOINED', 'HIRED', 'REJECTED', 'HOLD'];
+const LATE_FROM_PHASE = 3; // SHARED_WITH_CLIENT on (utils/atsVocab.js STAGE_PHASE)
+const SIDE_ROLES = ['RECRUITER', 'TL', 'STL', 'BDE']; // who stops at the client
 
 // The named buttons §17 asks for, per CURRENT stage. `to` is the target stage,
 // so the owner of the button is STAGE_OWNERS[to] and there is no second list
@@ -1631,6 +1641,18 @@ const isInterviewBooker = (user, stage, ctx = {}) => INTERVIEW_BOOKER_STAGES.inc
   && (require('./scope').isBdeTl(user) || (!!ctx.internalFromTlReview && ['TL', 'STL'].includes(stageRoleOf(user)))); // eslint-disable-line global-require
 const BOOKED_BY_BDE = 'Interviews are booked by the client manager (BDE). Your candidate is waiting for them.';
 
+function ownsStage(user, stage, role = stageRoleOf(user)) {
+  if (require('./scope').isBdeTl(user)) return BDE_TL_STAGES.includes(stage); // eslint-disable-line global-require
+  return STAGE_OWNERS[stage].includes(role);
+}
+// A candidate who reached the client is the BDE TL's: Reject and Hold by anybody else stop there (a client job; HR runs internal hiring).
+function lateForRole(user, fromStage, { internal = false } = {}) {
+  if (internal || !fromStage || stageGlobal(user) || require('./scope').isBdeTl(user)) return false; // eslint-disable-line global-require
+  // eslint-disable-next-line global-require
+  return SIDE_ROLES.includes(stageRoleOf(user)) && (require('./atsVocab').STAGE_PHASE[fromStage] || 0) >= LATE_FROM_PHASE;
+}
+const AFTER_CLIENT = 'This candidate has reached the client, so this step is with the BDE TL.';
+
 async function allowedStagesFor(user) {
   // Super Admin / Admin own every stage, as they always have.
   const global = stageGlobal(user);
@@ -1645,7 +1667,7 @@ async function allowedStagesFor(user) {
   }
   return Object.keys(STAGE_OWNERS)
     .filter((stage) => mayEdit || (APPROVE_MOVES[stage] && approve[APPROVE_MOVES[stage]]))
-    .filter((stage) => global || STAGE_OWNERS[stage].includes(atsRole) || isInterviewBooker(user, stage));
+    .filter((stage) => global || ownsStage(user, stage, atsRole) || isInterviewBooker(user, stage));
 }
 
 // The guard routes/applications.js calls. Returns null when allowed, or the
@@ -1653,14 +1675,16 @@ async function allowedStagesFor(user) {
 async function canMoveToStage(user, stage, ctx = {}) {
   if (!STAGE_OWNERS[stage]) return { status: 400, body: { error: 'Unknown stage' } };
   // The interview step is reached by the BDE booking it: say so in plain words (before any other refusal).
-  if (stage === 'INTERVIEW_SCHEDULED' && !stageGlobal(user) && !STAGE_OWNERS[stage].includes(stageRoleOf(user)) && !isInterviewBooker(user, stage, ctx)) {
+  if (stage === 'INTERVIEW_SCHEDULED' && !stageGlobal(user) && !ownsStage(user, stage) && !isInterviewBooker(user, stage, ctx)) {
     return { status: 403, body: { error: BOOKED_BY_BDE, code: 'BDE_BOOKS' } };
   }
   if (!await mayMoveTo(user, stage)) {
     return { status: 403, body: { error: "This action isn't included in your role's permissions" } };
   }
   const global = stageGlobal(user);
-  if (!global && !STAGE_OWNERS[stage].includes(stageRoleOf(user)) && !isInterviewBooker(user, stage, ctx)) {
+  if (['REJECTED', 'HOLD'].includes(stage) && lateForRole(user, ctx.fromStage, ctx)) return { status: 403, body: { error: AFTER_CLIENT, code: 'BDE_TL_STEP' } };
+  if (!global && !ownsStage(user, stage) && !isInterviewBooker(user, stage, ctx)) {
+    if (SIDE_ROLES.includes(stageRoleOf(user)) && stage !== 'INTERVIEW_SCHEDULED') return { status: 403, body: { error: ctx.fromStage ? AFTER_CLIENT : "Moving to this stage isn't included in your role's permissions", code: 'BDE_TL_STEP' } };
     if (stage === 'INTERVIEW_SCHEDULED') return { status: 403, body: { error: BOOKED_BY_BDE, code: 'BDE_BOOKS' } };
     return { status: 403, body: { error: "Moving to this stage isn't included in your role's permissions" } };
   }

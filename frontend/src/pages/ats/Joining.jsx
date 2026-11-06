@@ -14,7 +14,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import api from '../../api';
 import CandidateDrawer from '../../components/CandidateDrawer.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
-import { can } from '../../permissions';
+import { can, canMoveToStage } from '../../permissions';
 import AtsDataTools from '../../components/AtsDataTools.jsx';
 import Pager from '../../components/Pager.jsx';
 import ListPageHeader, { StatusTabs } from '../../components/ui/ListPageHeader.jsx';
@@ -64,6 +64,7 @@ export default function Joining() {
   const [joinedMsg, setJoinedMsg] = useState('');
   const [openCand, setOpenCand] = useState(null); // the candidate window, opened right here
   const canAct = can(user, 'ats', 'interviews', 'Joining', 'edit');
+  const closes = canMoveToStage(user, 'JOINED'); // Joined and Dropped on a client job: the BDE TL's; HR on internal hiring (2026-11-06)
   const canDocs = can(user, 'ats', 'interviews', 'Offers', 'edit');
   const canSeeInvoice = can(user, 'accounts', 'accounts', 'Invoices', 'view');
   // B2 — left inside the guarantee and no replacement: Accounts raises a credit note from the invoice.
@@ -197,7 +198,7 @@ export default function Joining() {
                       {r.clientTrack?.joining?.file?.canOpen && v === 'waiting' && (
                         <button type="button" className="btn btn-sm btn-ghost" onClick={() => openLetter(`/ats/offers/${r.id}/client-letter/joining`)}>Open the client&apos;s letter</button>
                       )}
-                      {canAct && v === 'waiting' && (
+                      {canAct && closes && v === 'waiting' && (
                         <button type="button" className={`btn btn-sm${r.clientTrack && r.clientTrack.joining?.state !== 'CONFIRMED' ? '' : ' btn-primary'}`} onClick={() => setDialog({ kind: 'checklist', id: r.id })}>{nextStep(r)}</button>
                       )}
                       {canAct && v === 'dropped' && (

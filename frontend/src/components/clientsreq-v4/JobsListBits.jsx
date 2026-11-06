@@ -81,7 +81,7 @@ export function rowPrimary(r, role = '', kinds = ['assign-tl', 'assign-recruiter
   if (promote && r.needs === 'recruiter' && kinds.includes('assign-recruiter')) return { key: 'assign-recruiter', label: 'Assign a recruiter', strong: true };
   if (['open', 'edit', 'assign-recruiter', 'assign-tl'].includes(server.key)) return { key: 'open', label: 'Open requirement', strong: false };
   const words = {
-    'add-candidate': 'Add a person', 'view-candidates': 'See people', 'submit-client': 'Send to client', 'generate-invoice': 'Create invoice',
+    'add-candidate': 'Add a person', 'view-candidates': 'See people', 'submit-client': 'Send to BDE TL', 'generate-invoice': 'Create invoice',
   };
   return { key: server.key, label: words[server.key] || server.label, strong: true };
 }
@@ -93,7 +93,7 @@ export function nextStepSentence(r, primary, waiting) {
   if (waiting) return `${waiting}.`;
   switch (primary.key) {
     case 'add-candidate': return 'Add people for this requirement.';
-    case 'submit-client': return 'People are ready to send to the client.';
+    case 'submit-client': return 'People are ready to send to the BDE TL.';
     case 'generate-invoice': return 'Someone joined. The invoice can be made.';
     case 'view-candidates': return 'This requirement is not open now. You can still see its people.';
     default: return !isOpenJob(r) ? 'This requirement is not open. Open it to see the details.' : 'Nothing is waiting. Open the requirement to see the details.';
