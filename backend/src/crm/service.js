@@ -88,7 +88,7 @@ async function pickOwner(user, r, wanted) {
 // ---- record kinds ------------------------------------------------------------------------------------
 // fields a person may write, with their kind ('s' text, 'n' number, 'i' integer, 'd' date, 'L' long text)
 const KINDS = {
-  lead: { table: 'CrmLead', label: 'Lead', name: 'company', fields: { company: 's', contactName: 's', designation: 's', phone: 's', email: 's', industry: 's', city: 's', source: 's', status: 's', rating: 's', notes: 'L' } },
+  lead: { table: 'CrmLead', label: 'Lead', name: 'company', fields: { company: 's', contactName: 's', designation: 's', phone: 's', email: 's', industry: 's', city: 's', source: 's', status: 's', rating: 's', notes: 'L', expectedValue: 'n' } },
   account: { table: 'CrmAccount', label: 'Account', name: 'name', fields: { name: 's', industry: 's', city: 's', website: 's', phone: 's', email: 's', source: 's', notes: 'L' } },
   contact: { table: 'CrmContact', label: 'Contact', name: 'name', fields: { accountId: 's', name: 's', designation: 's', role: 's', phone: 's', email: 's', notes: 'L' } },
   deal: { table: 'CrmDeal', label: 'Deal', name: 'title', fields: { title: 's', accountId: 's', contactId: 's', openings: 'i', avgCtc: 'n', feePercent: 'n', value: 'n', probability: 'i', expectedClose: 'd', nextStep: 's', notes: 'L' } },
@@ -183,7 +183,13 @@ async function list(user, kind, q = {}) {
     if (q.source) { where.push('x."source" = ?'); params.push(clip(q.source)); }
     if (q.rating && RATINGS.includes(q.rating)) { where.push('x."rating" = ?'); params.push(q.rating); }
     if (q.owner && seesAll(r)) { where.push('x."ownerId" = ?'); params.push(clip(q.owner, 60)); }
-    return DB.all(`SELECT x.*, ${LAST_ACT('leadId')}, ${NEXT_TASK('leadId')} FROM "CrmLead" x WHERE ${where.join(' AND ')} ORDER BY x."updatedAt" DESC LIMIT 1000`, ...params);
+    if (q.from && YMD.test(q.from)) { where.push('x."createdAt" >= ?'); params.push(q.from); }
+    if (q.to && YMD.test(q.to)) { where.push('x."createdAt" <= ?'); params.push(`${q.to}T23:59:59.999Z`); }
+    const SALES = require('./sales'); // eslint-disable-line global-require
+    const names = SALES.stageNames(await SETTINGS.load());
+    const rows = (await DB.all(`SELECT x.*, ${LAST_ACT('leadId')}, ${NEXT_TASK('leadId')} FROM "CrmLead" x WHERE ${where.join(' AND ')} ORDER BY x."updatedAt" DESC LIMIT 1000`, ...params)).map((l) => ({ ...l, stage: SALES.stageOf(l, names) }));
+    if (q.stage) return rows.filter((l) => l.stage === q.stage);
+    return q.status ? rows : rows.filter((l) => !['Won', 'Lost'].includes(l.stage)); // the open leads: a won or lost one stays on the board
   }
   if (kind === 'account') {
     if (q.kind === 'Prospect' || q.kind === 'Client') { where.push('x."kind" = ?'); params.push(q.kind); }
@@ -225,7 +231,11 @@ async function detail(user, kind, id) {
   const row = await getRow(kind, id);
   if (!canSeeRow(user, r, row)) return fail(404, `This ${KINDS[kind].label.toLowerCase()} is not there, or it is not yours.`);
   const out = { [kind]: row, canEdit: canEditRow(user, r, row) };
-  if (kind === 'lead') Object.assign(out, await timelineOf('leadId', [row.id]));
+  if (kind === 'lead') {
+    const SALES = require('./sales'); // eslint-disable-line global-require
+    out.lead = { ...row, stage: SALES.stageOf(row, SALES.stageNames(await SETTINGS.load())) };
+    Object.assign(out, await timelineOf('leadId', [row.id]));
+  }
   if (kind === 'deal') {
     out.account = row.accountId ? await getRow('account', row.accountId) : null;
     out.contact = row.contactId ? await getRow('contact', row.contactId) : null;
@@ -411,7 +421,7 @@ async function addTaskRow(user, r, link, body) {
   const own = await pickOwner(user, r, clip(body.ownerId, 60) || link.row.ownerId);
   const now = DB.nowIso();
   const lk = linksOf(link.kind, link.row);
-  const task = await insert('CrmTask', { id: newId('task'), title, dueDate, dueTime, status: 'Open', leadId: lk.leadId || null, accountId: lk.accountId || null, dealId: lk.dealId || null, ownerId: (own || { id: user.id }).id, ownerName: (own || { name: user.name }).name || null, createdById: user.id, createdAt: now, updatedAt: now });
+  const task = await insert('CrmTask', { id: newId('task'), title, dueDate, dueTime, ...(await require('./sales').taskExtras(body)), status: 'Open', leadId: lk.leadId || null, accountId: lk.accountId || null, dealId: lk.dealId || null, ownerId: (own || { id: user.id }).id, ownerName: (own || { name: user.name }).name || null, createdById: user.id, createdAt: now, updatedAt: now });
   return { task };
 }
 
@@ -463,17 +473,20 @@ async function finishTask(user, id, note) {
 }
 
 // Follow-ups in my scope: overdue, today, upcoming (7 days), or done (last 30 days). mine=1: only mine.
-async function tasks(user, { when = 'open', mine } = {}) {
+async function tasks(user, { when = 'open', mine, all, from, to, owner } = {}) {
   const r = roleOf(user);
   const s = (mine || !seesAll(r)) ? { sql: 't."ownerId" = ?', params: [user.id] } : { sql: '1=1', params: [] };
+  if (owner && seesAll(r)) { s.sql += ' AND t."ownerId" = ?'; s.params.push(clip(owner, 60)); }
+  if (from && YMD.test(from)) { s.sql += ' AND t."dueDate" >= ?'; s.params.push(from); }
+  if (to && YMD.test(to)) { s.sql += ' AND t."dueDate" <= ?'; s.params.push(to); }
   const today = istToday();
   const week = new Date(Date.parse(`${today}T00:00:00Z`) + 7 * 86400000).toISOString().slice(0, 10);
   const cond = {
     overdue: ['t."status" = \'Open\' AND t."dueDate" < ?', [today]],
     today: ['t."status" = \'Open\' AND t."dueDate" = ?', [today]],
-    upcoming: ['t."status" = \'Open\' AND t."dueDate" > ? AND t."dueDate" <= ?', [today, week]],
+    upcoming: all ? ['t."status" = \'Open\' AND t."dueDate" > ?', [today]] : ['t."status" = \'Open\' AND t."dueDate" > ? AND t."dueDate" <= ?', [today, week]],
     open: ['t."status" = \'Open\'', []],
-    done: ['t."status" = \'Done\' AND t."doneAt" >= ?', [new Date(Date.now() - 30 * 86400000).toISOString()]],
+    done: from || to ? ['t."status" = \'Done\'', []] : ['t."status" = \'Done\' AND t."doneAt" >= ?', [new Date(Date.now() - 30 * 86400000).toISOString()]],
   }[when] || ['t."status" = \'Open\'', []];
   return DB.all(`SELECT t.*, COALESCE(d."title", l."company", a."name") AS "recordName",
       CASE WHEN t."dealId" IS NOT NULL THEN 'deal' WHEN t."leadId" IS NOT NULL THEN 'lead' ELSE 'account' END AS "recordKind",
@@ -623,7 +636,7 @@ async function me(user) {
     role: r, canEdit: mayEdit(r), canAssign: mayAssign(r), seesAll: seesAll(r),
     owners: mayAssign(r) || seesAll(r) ? await ownerOptions() : [],
     salesTeam: mayAssign(r) ? st.salesTeam : [], // the people added in CRM settings (the BDEs / BDE TLs are on the team anyway)
-    lists: { stages: STAGES, stageProbability: st.stageProbability, leadStatuses: LEAD_STATUSES, sources: st.sources, contactRoles: CONTACT_ROLES, activityKinds: ACTIVITY_KINDS, lostReasons: st.lostReasons, ratings: RATINGS, staleDays: st.staleDays, proposalValidityDays: st.proposalValidityDays, ...ticketLists() },
+    lists: { leadStages: st.leadStages, taskTypes: ['Call', 'Meeting', 'Email', 'WhatsApp', 'Other'], defaultRemindBefore: st.defaultRemindBefore, stages: STAGES, stageProbability: st.stageProbability, leadStatuses: LEAD_STATUSES, sources: st.sources, contactRoles: CONTACT_ROLES, activityKinds: ACTIVITY_KINDS, lostReasons: st.lostReasons, ratings: RATINGS, staleDays: st.staleDays, proposalValidityDays: st.proposalValidityDays, ...ticketLists() },
   });
 }
 

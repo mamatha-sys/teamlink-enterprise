@@ -303,6 +303,7 @@ const crmLeaf = (icon, to, label) => ({ ...leaf(icon, to, label, null), when: cr
 export const CRM_ITEMS = [
   crmLeaf('📊', '/crm/dashboard', 'Dashboard'),
   crmLeaf('🎯', '/crm/leads', 'Leads'),
+  crmLeaf('⏰', '/crm/followups', 'Follow-ups'),
   crmLeaf('💼', '/crm/deals', 'Deals'),
   crmLeaf('🏢', '/crm/accounts', 'Accounts & Contacts'),
 ];

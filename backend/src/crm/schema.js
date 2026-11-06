@@ -165,6 +165,15 @@ const DDL = [
 const COLUMNS = [
   ['CrmLead', 'rating', 'TEXT'],
   ['CrmDeal', 'nextStep', 'TEXT'],
+  // the lead pipeline, website leads and timed reminders (2026-11-06, crm/sales.js)
+  ['CrmLead', 'stage', 'TEXT'], ['CrmLead', 'expectedValue', 'REAL'], ['CrmLead', 'lostReason', 'TEXT'],
+  ['CrmLead', 'utmSource', 'TEXT'], ['CrmLead', 'utmMedium', 'TEXT'], ['CrmLead', 'utmCampaign', 'TEXT'], ['CrmLead', 'pageUrl', 'TEXT'],
+  ['CrmTask', 'type', 'TEXT'], ['CrmTask', 'notifyApp', 'INTEGER'], ['CrmTask', 'notifyWhatsapp', 'INTEGER'], ['CrmTask', 'notifySms', 'INTEGER'], ['CrmTask', 'notifyLead', 'INTEGER'],
+  ['CrmTask', 'remindBefore', 'INTEGER'], ['CrmTask', 'reminderSentAt', 'TEXT'], ['CrmTask', 'reminderNote', 'TEXT'],
+];
+const INDEXES = [
+  'CREATE INDEX IF NOT EXISTS "CrmLead_phone" ON "CrmLead"("phone")', 'CREATE INDEX IF NOT EXISTS "CrmLead_email" ON "CrmLead"("email")', 'CREATE INDEX IF NOT EXISTS "CrmLead_stage" ON "CrmLead"("stage")',
+  'CREATE INDEX IF NOT EXISTS "CrmTask_reminder" ON "CrmTask"("status", "reminderSentAt", "dueDate")',
 ];
 
 let done = null;
@@ -176,6 +185,7 @@ function ensure() {
       // eslint-disable-next-line no-await-in-loop
       await prisma.$executeRawUnsafe(`ALTER TABLE "${t}" ADD COLUMN "${c}" ${type}`).catch((e) => { if (!/duplicate column/i.test(e.message)) throw e; });
     }
+    for (const sql of INDEXES) await prisma.$executeRawUnsafe(sql); // eslint-disable-line no-await-in-loop
     return true;
   })().catch((err) => { done = null; console.error('[crm] schema:', err.message); return false; }); // eslint-disable-line no-console
   return done;

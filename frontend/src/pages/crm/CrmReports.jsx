@@ -202,6 +202,55 @@ function SampleData() {
   );
 }
 
+// The form for the company's website: the key, round-robin owners, and the code to paste on the site (POST /api/crm/leads/public).
+function WebsiteForm() {
+  const { toast } = useCrm();
+  const [w, setW] = useState(null);
+  useEffect(() => { api.get('/crm/website').then((r) => setW(r.data)).catch(() => setW(null)); }, []);
+  if (!w) return null;
+  const url = `${window.location.origin}/api/crm/leads/public`;
+  const code = [
+    '<form id="tl-lead-form">',
+    '  <input name="name" placeholder="Your name" required>',
+    '  <input name="company" placeholder="Company">',
+    '  <input name="phone" placeholder="Phone">',
+    '  <input name="email" type="email" placeholder="Email">',
+    '  <textarea name="message" placeholder="How can we help?"></textarea>',
+    '  <input name="website_url" style="display:none" tabindex="-1" autocomplete="off">',
+    '  <button type="submit">Send</button>',
+    '</form>',
+    '<script>',
+    "document.getElementById('tl-lead-form').addEventListener('submit', function (e) {",
+    '  e.preventDefault();',
+    '  var f = e.target, b = Object.fromEntries(new FormData(f)), q = new URLSearchParams(location.search);',
+    "  b.utm_source = q.get('utm_source') || ''; b.utm_medium = q.get('utm_medium') || ''; b.utm_campaign = q.get('utm_campaign') || ''; b.page_url = location.href;",
+    `  fetch('${url}', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': '${w.key}' }, body: JSON.stringify(b) })`,
+    "    .then(function (r) { if (!r.ok) throw 0; f.reset(); alert('Thank you, we will contact you soon.'); })",
+    "    .catch(function () { alert('Sorry, this could not be sent. Please try again.'); });",
+    '});',
+    '</script>',
+  ].join('\n');
+  async function auto(v) {
+    try { const r = await api.put('/crm/website', { autoAssign: v }); setW(r.data); toast('Saved.'); } catch (e) { toast(errOf(e, 'This could not be saved.')); }
+  }
+  async function renew() {
+    if (!window.confirm('Make a new key? Forms already on your website stop working until you paste the new code.')) return;
+    try { const r = await api.post('/crm/website/key'); setW({ ...w, key: r.data.key }); toast('A new key is ready.'); } catch (e) { toast(errOf(e, 'This could not be changed.')); }
+  }
+  return (
+    <>
+      <div className="section-label">Website form</div>
+      <p className="small-muted" style={{ marginTop: 0 }}>Paste this on your website. Leads come in with Source = Website, and with the page and the campaign (UTM) they came from. The same phone or email again is added as a note on the lead already here.</p>
+      <label style={{ display: 'block', marginBottom: 8 }}><input type="checkbox" checked={w.autoAssign} onChange={(e) => auto(e.target.checked)} style={{ width: 'auto' }} /> Give new website leads to the sales team in turn (otherwise they wait with no owner)</label>
+      <textarea readOnly rows={8} value={code} aria-label="The website form code" style={{ fontFamily: 'monospace', fontSize: 11.5 }} />
+      <div style={{ display: 'flex', gap: 6, margin: '6px 0 14px' }}>
+        <button type="button" className="btn btn-sm" onClick={() => navigator.clipboard.writeText(code).then(() => toast('Copied.')).catch(() => toast('Please select the text and copy it.'))}>Copy code</button>
+        <button type="button" className="btn btn-sm" onClick={renew}>Make a new key</button>
+      </div>
+    </>
+  );
+}
+
 export function CrmSettings({ onClose, onSaved }) {
   const { me, toast } = useCrm();
   const L = me.lists;
@@ -215,11 +264,15 @@ export function CrmSettings({ onClose, onSaved }) {
     return () => clearTimeout(t);
   }, [q]);
   const addMember = (p) => { setF((x) => (x.salesTeam.some((m) => m.userId === p.id) ? x : { ...x, salesTeam: [...x.salesTeam, { userId: p.id, name: p.name, role: 'rep' }] })); setQ(''); setFound([]); };
+  const [stages, setStages] = useState(L.leadStages.map((s) => ({ ...s })));
+  const [before, setBefore] = useState(String(L.defaultRemindBefore));
+  const open = stages.filter((s) => !['Won', 'Lost'].includes(s.name));
+  const setOpen = (list) => setStages([...list, ...stages.filter((s) => ['Won', 'Lost'].includes(s.name))]);
   const [busy, setBusy] = useState(false);
   async function save() {
     setBusy(true);
     try {
-      await api.put('/crm/settings', { ...f, sources: f.sources.split('\n'), lostReasons: f.lostReasons.split('\n') });
+      await api.put('/crm/settings', { ...f, sources: f.sources.split('\n'), lostReasons: f.lostReasons.split('\n'), leadStages: stages, defaultRemindBefore: Number(before) });
       toast('CRM settings saved.'); onSaved();
     } catch (e) { toast(errOf(e, 'The settings could not be saved.')); } finally { setBusy(false); }
   }
@@ -253,6 +306,20 @@ export function CrmSettings({ onClose, onSaved }) {
         <div className="field"><label>Lead sources (one per line)</label><textarea rows={8} value={f.sources} onChange={(e) => setF({ ...f, sources: e.target.value })} /></div>
         <div className="field"><label>Reasons a deal is lost (one per line)</label><textarea rows={8} value={f.lostReasons} onChange={(e) => setF({ ...f, lostReasons: e.target.value })} /></div>
       </div>
+      <div className="section-label">Lead stages</div>
+      <p className="small-muted" style={{ marginTop: 0 }}>The columns of the Leads board. Won and Lost always stay, last. A lead on a stage you remove goes back to the first stage.</p>
+      {open.map((s, i) => (
+        <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>{/* eslint-disable-line react/no-array-index-key */}
+          <input type="color" value={s.color} onChange={(e) => setOpen(open.map((x, j) => (j === i ? { ...x, color: e.target.value } : x)))} aria-label={`Colour of ${s.name}`} style={{ width: 38, padding: 2 }} />
+          <input type="text" value={s.name} maxLength={40} onChange={(e) => setOpen(open.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} aria-label="Stage name" style={{ flex: 1 }} />
+          <button type="button" className="btn btn-sm" disabled={i === 0} aria-label={`Move ${s.name} up`} onClick={() => { const n = [...open]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; setOpen(n); }}>↑</button>
+          <button type="button" className="btn btn-sm" disabled={i === open.length - 1} aria-label={`Move ${s.name} down`} onClick={() => { const n = [...open]; [n[i + 1], n[i]] = [n[i], n[i + 1]]; setOpen(n); }}>↓</button>
+          <button type="button" className="btn btn-sm" disabled={open.length === 1} aria-label={`Remove ${s.name}`} onClick={() => setOpen(open.filter((_, j) => j !== i))}>Remove</button>
+        </div>
+      ))}
+      <button type="button" className="btn btn-sm" style={{ marginBottom: 14 }} onClick={() => setOpen([...open, { name: '', color: '#64748b' }])}>+ Stage</button>
+      <div className="field" style={{ maxWidth: 260 }}><label>Default reminder for a new follow-up</label><select value={before} onChange={(e) => setBefore(e.target.value)}><option value="0">At the time</option><option value="15">15 minutes before</option><option value="60">1 hour before</option><option value="1440">1 day before</option></select></div>
+      <WebsiteForm />
       <div className="section-label">Probability of each stage (%)</div>
       <div className="grid-3">
         {L.stages.filter((s) => s !== 'Won' && s !== 'Lost').map((s) => (
@@ -263,7 +330,7 @@ export function CrmSettings({ onClose, onSaved }) {
         <div className="field"><label>A deal is "going cold" after this many days with nothing logged</label><input type="number" min={1} max={365} value={f.staleDays} onChange={(e) => setF({ ...f, staleDays: e.target.value })} /></div>
         <div className="field"><label>A proposal is valid for (days)</label><input type="number" min={1} max={365} value={f.proposalValidityDays} onChange={(e) => setF({ ...f, proposalValidityDays: e.target.value })} /></div>
       </div>
-      <div className="small-muted">"Other" is always kept in both lists. The stages themselves stay as they are, so the board and the reports keep working. A new probability applies the next time a deal moves.</div>
+      <div className="small-muted">"Other" is always kept in both lists. The deal stages stay as they are, so the board and the reports keep working. A new probability applies the next time a deal moves.</div>
     </Modal>
   );
 }

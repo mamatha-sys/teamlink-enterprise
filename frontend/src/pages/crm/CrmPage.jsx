@@ -18,9 +18,10 @@ import CrmDashboard from './CrmDashboard.jsx';
 import CrmLeads from './CrmLeads.jsx';
 import CrmDeals from './CrmDeals.jsx';
 import CrmAccounts from './CrmAccounts.jsx';
+import CrmFollowups from './CrmFollowups.jsx';
 import './crm.css';
 
-const PAGES = { dashboard: CrmDashboard, leads: CrmLeads, deals: CrmDeals, accounts: CrmAccounts };
+const PAGES = { dashboard: CrmDashboard, leads: CrmLeads, followups: CrmFollowups, deals: CrmDeals, accounts: CrmAccounts };
 
 export default function CrmPage() {
   const { page } = useParams();

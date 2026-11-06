@@ -18,6 +18,9 @@ const DEFAULTS = {
   staleDays: 14,
   proposalValidityDays: 30,
   salesTeam: [],
+  // the stages of a LEAD (crm/sales.js); a deal keeps its own stages, above. Won and Lost always stay, last.
+  leadStages: [{ name: 'New', color: '#64748b' }, { name: 'Contacted', color: '#2563eb' }, { name: 'Qualified', color: '#7c3aed' }, { name: 'Proposal', color: '#d97706' }, { name: 'Negotiation', color: '#ea580c' }, { name: 'Won', color: '#16a34a' }, { name: 'Lost', color: '#dc2626' }],
+  defaultRemindBefore: 15,
 };
 
 let cached = null; let cachedAt = 0;
@@ -25,6 +28,15 @@ const cleanList = (v, fallback) => {
   const out = [...new Set((Array.isArray(v) ? v : String(v || '').split(/\n|,/)).map((x) => String(x || '').trim().slice(0, 60)).filter(Boolean))].slice(0, 40);
   return out.length ? out : fallback;
 };
+function cleanStages(v) {
+  const fixed = DEFAULTS.leadStages.filter((x) => ['Won', 'Lost'].includes(x.name));
+  const seen = new Set(['won', 'lost']);
+  const given = Array.isArray(v) ? v : [];
+  const open = given.map((x) => ({ name: String((x && x.name) || '').trim().slice(0, 40), color: /^#[0-9a-f]{6}$/i.test(String(x && x.color)) ? x.color : '#64748b' }))
+    .filter((x) => x.name && !seen.has(x.name.toLowerCase()) && seen.add(x.name.toLowerCase())).slice(0, 12);
+  const ends = fixed.map((f) => ({ ...f, color: ((given.find((x) => x && x.name === f.name) || {}).color && /^#[0-9a-f]{6}$/i.test(given.find((x) => x && x.name === f.name).color)) ? given.find((x) => x && x.name === f.name).color : f.color }));
+  return [...(open.length ? open : DEFAULTS.leadStages.filter((x) => !['Won', 'Lost'].includes(x.name))), ...ends];
+}
 function normalize(raw = {}) {
   const prob = {};
   STAGES.forEach((s) => {
@@ -33,6 +45,7 @@ function normalize(raw = {}) {
   });
   const sources = cleanList(raw.sources, DEFAULTS.sources);
   if (!sources.includes('Other')) sources.push('Other');
+  if (!sources.includes('Website')) sources.push('Website'); // the website form's leads
   const lostReasons = cleanList(raw.lostReasons, DEFAULTS.lostReasons);
   if (!lostReasons.includes('Other')) lostReasons.push('Other');
   const stale = Math.round(Number(raw.staleDays));
@@ -41,7 +54,8 @@ function normalize(raw = {}) {
   const salesTeam = (Array.isArray(raw.salesTeam) ? raw.salesTeam : []).map((m) => ({ userId: String((m && m.userId) || '').slice(0, 60), name: String((m && m.name) || '').slice(0, 120), role: m && m.role === 'manager' ? 'manager' : 'rep' }))
     .filter((m) => m.userId && !seen.has(m.userId) && seen.add(m.userId)).slice(0, 300);
   return {
-    sources, lostReasons, stageProbability: prob, salesTeam,
+    sources, lostReasons, stageProbability: prob, salesTeam, leadStages: cleanStages(raw.leadStages),
+    defaultRemindBefore: [0, 15, 60, 1440].includes(Number(raw.defaultRemindBefore)) ? Number(raw.defaultRemindBefore) : DEFAULTS.defaultRemindBefore,
     staleDays: Number.isFinite(stale) && stale >= 1 && stale <= 365 ? stale : DEFAULTS.staleDays,
     proposalValidityDays: Number.isFinite(valid) && valid >= 1 && valid <= 365 ? valid : DEFAULTS.proposalValidityDays,
   };

@@ -8,6 +8,7 @@ import api from '../../api';
 import Modal from '../../components/Modal.jsx';
 import { useCrm, errOf, dateOf, istToday, Pill, RecordForm, download } from './crmShared.jsx';
 import CrmCampaigns from './CrmCampaigns.jsx';
+import CrmLeadBoard from './CrmLeadBoard.jsx';
 
 function ImportLeads({ onClose, onDone }) {
   const { me, toast } = useCrm();
@@ -78,10 +79,14 @@ export default function CrmLeads() {
   const [source, setSource] = useState('');
   const [rating, setRating] = useState('');
   const [owner, setOwner] = useState('');
+  const [stage, setStage] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [layout, setLayout] = useState('table'); // table | board (the board shows won and lost leads too)
   const [picked, setPicked] = useState(() => new Set());
-  const load = () => api.get('/crm/leads', { params: { q: q || undefined, status: status || undefined, source: source || undefined, rating: rating || undefined, owner: owner || undefined } })
+  const load = () => api.get('/crm/leads', { params: { q: q || undefined, status: (layout === 'board' ? 'all' : status) || undefined, stage: stage || undefined, from: from || undefined, to: to || undefined, source: source || undefined, rating: rating || undefined, owner: owner || undefined } })
     .then((r) => { setRows(r.data.rows); setErr(''); setPicked(new Set()); }).catch((e) => setErr(errOf(e, 'The leads could not be read.')));
-  useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [q, status, source, rating, owner, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [q, status, stage, from, to, layout, source, rating, owner, version]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (sp.get('add') === '1') { const n = new URLSearchParams(sp); n.delete('add'); setSp(n, { replace: true }); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const today = istToday();
   const toggle = (id) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -112,6 +117,9 @@ export default function CrmLeads() {
           {me.lists.leadStatuses.map((s) => <option key={s} value={s}>{s}</option>)}
           <option value="all">All leads</option>
         </select>
+        <select value={stage} onChange={(e) => setStage(e.target.value)} aria-label="Stage"><option value="">Any stage</option>{me.lists.leadStages.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}</select>
+        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Added from" style={{ width: 145 }} />
+        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Added to" style={{ width: 145 }} />
         <select value={rating} onChange={(e) => setRating(e.target.value)} aria-label="Rating"><option value="">Any rating</option>{me.lists.ratings.map((s) => <option key={s} value={s}>{s}</option>)}</select>
         <select value={source} onChange={(e) => setSource(e.target.value)} aria-label="Source"><option value="">Any source</option>{me.lists.sources.map((s) => <option key={s} value={s}>{s}</option>)}</select>
         {me.seesAll && <select value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Owner"><option value="">Everyone</option>{me.owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select>}
@@ -120,6 +128,10 @@ export default function CrmLeads() {
       {rows && (
         <div className="results-bar">
           <span>{rows.length} lead{rows.length === 1 ? '' : 's'}</span>
+          <span style={{ display: 'flex', gap: 4 }}>
+            <button type="button" className={`btn btn-sm${layout === 'table' ? ' btn-primary' : ''}`} onClick={() => setLayout('table')}>Table</button>
+            <button type="button" className={`btn btn-sm${layout === 'board' ? ' btn-primary' : ''}`} onClick={() => setLayout('board')}>Board</button>
+          </span>
           {me.canEdit && picked.size > 0 && (
             <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
               <b>{picked.size} ticked:</b>
@@ -131,17 +143,18 @@ export default function CrmLeads() {
           )}
         </div>
       )}
-      <div className="tbl-wrap">
+      {layout === 'board' && rows && <CrmLeadBoard rows={rows} onMoved={load} />}
+      {layout === 'table' && <div className="tbl-wrap">
         <table>
           <thead>
             <tr>
               {me.canEdit && <th style={{ width: 28 }}><input type="checkbox" aria-label="Tick all" checked={!!allPicked} onChange={() => setPicked(allPicked ? new Set() : new Set((rows || []).map((l) => l.id)))} style={{ width: 'auto' }} /></th>}
-              <th>Company</th><th>Contact</th><th>Source</th><th>Rating</th><th>Status</th><th>Last touched</th><th>Next follow-up</th>{me.seesAll && <th>Owner</th>}
+              <th>Company</th><th>Contact</th><th>Source</th><th>Rating</th><th>Stage</th><th>Value</th><th>Added</th><th>Last touched</th><th>Next follow-up</th>{me.seesAll && <th>Owner</th>}
             </tr>
           </thead>
           <tbody>
-            {rows == null && <tr><td colSpan={9} className="small-muted">Loading…</td></tr>}
-            {rows && !rows.length && <tr><td colSpan={9}><div className="empty"><h3>No leads here</h3>{me.canEdit ? 'Add a lead with "+ Lead", or bring many in with "Import Excel".' : 'Nothing matches.'}</div></td></tr>}
+            {rows == null && <tr><td colSpan={11} className="small-muted">Loading…</td></tr>}
+            {rows && !rows.length && <tr><td colSpan={11}><div className="empty"><h3>No leads here</h3>{me.canEdit ? 'Add a lead with "+ Lead", or bring many in with "Import Excel".' : 'Nothing matches.'}</div></td></tr>}
             {(rows || []).map((l) => (
               <tr key={l.id} className="row-link" onClick={() => setOpen({ kind: 'lead', id: l.id })}>
                 {me.canEdit && <td onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`Tick ${l.company}`} checked={picked.has(l.id)} onChange={() => toggle(l.id)} style={{ width: 'auto' }} /></td>}
@@ -149,7 +162,9 @@ export default function CrmLeads() {
                 <td>{l.contactName || '—'}<div className="small-muted" style={{ fontSize: 11.5 }}>{[l.designation, l.phone].filter(Boolean).join(' · ')}</div></td>
                 <td>{l.source || '—'}</td>
                 <td><Pill v={l.rating} /></td>
-                <td><Pill v={l.status} /></td>
+                <td><Pill v={l.stage} /></td>
+                <td>{l.expectedValue ? `₹${Number(l.expectedValue).toLocaleString('en-IN')}` : '—'}</td>
+                <td className="small-muted">{dateOf(l.createdAt)}</td>
                 <td className="small-muted">{l.lastActivityAt ? dateOf(l.lastActivityAt) : 'Never'}</td>
                 <td style={{ color: l.nextTaskDue && l.nextTaskDue < today ? 'var(--red)' : undefined, fontWeight: l.nextTaskDue && l.nextTaskDue <= today ? 600 : undefined }}>{l.nextTaskDue ? (l.nextTaskDue === today ? 'Today' : dateOf(l.nextTaskDue)) : '—'}</td>
                 {me.seesAll && <td>{l.ownerName || '—'}</td>}
@@ -157,7 +172,7 @@ export default function CrmLeads() {
             ))}
           </tbody>
         </table>
-      </div>
+      </div>}
       </>)}
       {adding && <RecordForm kind="lead" preset={{ source: '' }} onClose={() => setAdding(false)} onSaved={(row) => { setAdding(false); load(); setOpen({ kind: 'lead', id: row.id }); }} />}
       {importing && <ImportLeads onClose={() => setImporting(false)} onDone={() => { setImporting(false); load(); }} />}

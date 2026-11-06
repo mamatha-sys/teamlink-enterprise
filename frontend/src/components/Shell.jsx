@@ -16,6 +16,7 @@ import NotificationBell from './NotificationBell.jsx';
 import NudgePopup from './NudgePopup.jsx';
 import TaskPopup from './dashboard/TaskPopup.jsx';
 import JobRequestPopup from './JobRequestPopup.jsx';
+import CrmReminderToast from './crm/CrmReminderToast.jsx'; // a CRM follow-up that has come due, on screen on any page (2026-11-06)
 import SelectionMailPopup from './SelectionMailPopup.jsx';
 import UnsignedAgreementPopup from './UnsignedAgreementPopup.jsx'; // a requirement on an unsigned agreement: the question, and the BDE TL's approval (2026-11-05)
 import FollowUpReminderPopup from './FollowUpReminderPopup.jsx'; // a follow-up's call-back day, on screen (2026-11-04) // the TL sends the Selected confirmation mail (2026-11-04)
@@ -290,6 +291,7 @@ export default function Shell() {
             {hasAtsWork(user) && <TaskPopup />}
             {/* A client's new job request: the client's BDE and the BDE TL see it on screen at once (2026-10-09). */}
             {hasAtsWork(user) && <JobRequestPopup />}
+            {hasAtsWork(user) && <CrmReminderToast />}
             {/* A candidate is Selected: the confirmation mail waits for the TL's Send (2026-11-04). */}
             {hasAtsWork(user) && <SelectionMailPopup />}
             {hasAtsWork(user) && <UnsignedAgreementPopup />}

@@ -132,6 +132,8 @@ app.use(require('./routes/omniNumbers'));
 // a WhatsApp number connected inside Omni-Channel also lands in TeamLink (server to server, signed; routes/omniWaFromOmni.js)
 app.use(require('./routes/omniWaFromOmni'));
 // CORS: open only for the public paths third parties use; everything else = CORS_ORIGINS / this site / localhost in dev.
+// A lead from the company's website (a form on another site, with the API key): its own open CORS, so it comes before the app's (routes/crmWebsite.js).
+app.use('/api/crm/leads/public', require('./routes/crmWebsite'));
 app.use(require('./utils/webSecurity').corsMiddleware());
 // Employee Monitoring: an agent batch of activity can be larger than the site-wide 100 kB JSON limit.
 app.use('/api/monitoring/activity', express.json({ limit: '1mb' }));

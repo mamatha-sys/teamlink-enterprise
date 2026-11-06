@@ -36,6 +36,7 @@ const X = require('../crm/extra');
 const SUP = require('../crm/support');
 const CMP = require('../crm/campaigns');
 const AI = require('../crm/ai');
+const SALES = require('../crm/sales');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -55,10 +56,17 @@ router.post('/duplicates', wrap(async (req) => ({ status: 200, body: { duplicate
 
 router.get('/tasks', wrap(async (req) => {
   await CRM.remind({ userId: req.user.id }).catch(() => 0);
-  return { status: 200, body: { tasks: await CRM.tasks(req.user, { when: String(req.query.when || 'open'), mine: String(req.query.mine || '') === '1' }) } };
+  return { status: 200, body: { tasks: await CRM.tasks(req.user, { when: String(req.query.when || 'open'), mine: String(req.query.mine || '') === '1', all: String(req.query.all || '') === '1', from: req.query.from, to: req.query.to, owner: req.query.owner }) } };
 }));
 router.post('/tasks', wrap((req) => CRM.addTask(req.user, req.body || {})));
 router.post('/tasks/:id/done', wrap((req) => CRM.finishTask(req.user, req.params.id, req.body && req.body.note)));
+router.post('/tasks/:id/cancel', wrap((req) => SALES.cancelTask(req.user, req.params.id)));
+// the lead pipeline, the website form and the on-screen reminders (crm/sales.js)
+router.post('/leads/:id/stage', wrap((req) => SALES.moveLead(req.user, req.params.id, req.body || {})));
+router.get('/website', wrap((req) => SALES.websiteGet(req.user)));
+router.put('/website', wrap((req) => SALES.websiteSave(req.user, req.body || {})));
+router.post('/website/key', wrap((req) => SALES.websiteNewKey(req.user)));
+router.get('/reminders/live', wrap((req) => SALES.liveReminders(req.user)));
 router.post('/activities', wrap((req) => CRM.addActivity(req.user, req.body || {})));
 
 // the full CRM (crm/extra.js): reports, targets, settings, import, bulk, export, proposals
@@ -141,6 +149,8 @@ if (!process.env.TEST_MODE && process.env.NODE_ENV !== 'test') {
     const h = new Date(Date.now() + 5.5 * 3600 * 1000).getUTCHours();
     if (h >= 9 && h < 20) CRM.remind().catch((e) => console.error('[crm] reminders:', e.message)); // eslint-disable-line no-console
   }, 60 * 60 * 1000).unref();
+  // the timed reminders: every minute, each sent once (crm/sales.js)
+  setInterval(() => { SALES.runDue().catch((e) => console.error('[crm] timed reminders:', e.message)); }, 60 * 1000).unref(); // eslint-disable-line no-console
 }
 
 module.exports = router;

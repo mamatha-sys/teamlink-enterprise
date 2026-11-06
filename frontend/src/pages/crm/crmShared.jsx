@@ -9,6 +9,8 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import api from '../../api';
 import Modal from '../../components/Modal.jsx';
+import { DoneDialog, REMIND_WORDS } from './CrmFollowups.jsx';
+import { useMoveLead } from './CrmLeadBoard.jsx';
 import AddClientWizard from '../../components/clients/AddClientWizard.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { TicketList } from './CrmSupport.jsx'; // eslint-disable-line import/no-cycle
@@ -134,7 +136,7 @@ function fieldsFor(kind, me) {
     return [
       { k: 'company', label: 'Company *' }, { k: 'contactName', label: 'Contact person' }, { k: 'designation', label: 'Designation' },
       { k: 'phone', label: 'Phone', type: 'tel' }, { k: 'email', label: 'Email', type: 'email' }, { k: 'industry', label: 'Industry' },
-      { k: 'city', label: 'City' }, { k: 'source', label: 'Source', type: 'select', options: L.sources },
+      { k: 'city', label: 'City' }, { k: 'source', label: 'Source', type: 'select', options: L.sources }, { k: 'expectedValue', label: 'Expected value (₹)', type: 'number' },
       { k: 'rating', label: 'Rating', type: 'select', options: L.ratings },
       { k: 'status', label: 'Status', type: 'select', options: L.leadStatuses.filter((s) => s !== 'Converted'), editOnly: true },
       { k: 'notes', label: 'Notes', type: 'textarea', wide: true },
@@ -318,24 +320,40 @@ export function Timeline({ activities }) {
 // Follow-ups of one record (add, done) or of the dashboard (with the record they belong to).
 export function TaskList({ tasks, link, onChanged, showRecord, canEdit = true }) {
   const { toast } = useCrm();
+  const { me } = useCrm();
   const [title, setTitle] = useState('');
   const [due, setDue] = useState(istToday());
+  const [time, setTime] = useState('');
+  const [type, setType] = useState('Call');
+  const [before, setBefore] = useState(String(me.lists.defaultRemindBefore));
+  const [inApp, setInApp] = useState(true);
+  const [wa, setWa] = useState(false);
+  const [sms, setSms] = useState(false);
+  const [doing, setDoing] = useState(null);
   const [busy, setBusy] = useState(false);
   const today = istToday();
   async function add() {
     setBusy(true);
-    try { await api.post('/crm/tasks', { title, dueDate: due, ...link }); setTitle(''); toast('Follow-up added.'); onChanged(); } catch (e) { toast(errOf(e, 'The follow-up could not be added.')); } finally { setBusy(false); }
-  }
-  async function done(t) {
-    try { await api.post(`/crm/tasks/${t.id}/done`, {}); toast('Done.'); onChanged(); } catch (e) { toast(errOf(e, 'This could not be saved.')); }
+    try { await api.post('/crm/tasks', { title, dueDate: due, dueTime: time || undefined, type, remindBefore: Number(before), notifyApp: inApp, notifyWhatsapp: wa, notifySms: sms, ...link }); setTitle(''); setTime(''); toast('Follow-up added.'); onChanged(); } catch (e) { toast(errOf(e, 'The follow-up could not be added.')); } finally { setBusy(false); }
   }
   return (
     <div>
       {link && canEdit && (
-        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-          <input type="text" placeholder="New follow-up" value={title} onChange={(e) => setTitle(e.target.value)} />
-          <input type="date" value={due} min={today} onChange={(e) => setDue(e.target.value)} style={{ width: 150 }} aria-label="Due date" />
-          <button type="button" className="btn btn-sm" disabled={busy || !title.trim() || !due} onClick={add}>Add</button>
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+            <select value={type} onChange={(e) => setType(e.target.value)} style={{ width: 110 }} aria-label="Type">{me.lists.taskTypes.map((x) => <option key={x}>{x}</option>)}</select>
+            <input type="text" placeholder="New follow-up" value={title} onChange={(e) => setTitle(e.target.value)} style={{ flex: '1 1 160px' }} />
+            <input type="date" value={due} min={today} onChange={(e) => setDue(e.target.value)} style={{ width: 150 }} aria-label="Due date" />
+            <input type="time" value={time} onChange={(e) => setTime(e.target.value)} style={{ width: 110 }} aria-label="Due time" />
+            <button type="button" className="btn btn-sm" disabled={busy || !title.trim() || !due} onClick={add}>Add</button>
+          </div>
+          <div className="small-muted" style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', fontSize: 12 }}>
+            <span>Remind:</span>
+            <select value={before} onChange={(e) => setBefore(e.target.value)} style={{ width: 150 }} aria-label="Remind before">{Object.entries(REMIND_WORDS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+            <label><input type="checkbox" checked={inApp} onChange={(e) => setInApp(e.target.checked)} style={{ width: 'auto' }} /> In app</label>
+            <label><input type="checkbox" checked={wa} onChange={(e) => setWa(e.target.checked)} style={{ width: 'auto' }} /> WhatsApp</label>
+            <label><input type="checkbox" checked={sms} onChange={(e) => setSms(e.target.checked)} style={{ width: 'auto' }} /> SMS</label>
+          </div>
         </div>
       )}
       {!tasks.length && <div className="small-muted">No follow-ups.</div>}
@@ -344,7 +362,7 @@ export function TaskList({ tasks, link, onChanged, showRecord, canEdit = true })
         return (
           <div key={t.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '6px 0', borderBottom: '1px solid var(--line-soft)', opacity: t.status === 'Done' ? 0.55 : 1 }}>
             {t.status === 'Open' && canEdit
-              ? <input type="checkbox" aria-label={`Mark "${t.title}" done`} onChange={() => done(t)} style={{ marginTop: 3, width: 'auto' }} />
+              ? <input type="checkbox" checked={false} aria-label={`Mark "${t.title}" done`} onChange={() => setDoing(t)} style={{ marginTop: 3, width: 'auto' }} />
               : <span aria-hidden="true" style={{ width: 13 }}>{t.status === 'Done' ? '✓' : ''}</span>}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, textDecoration: t.status === 'Done' ? 'line-through' : undefined }}>{t.title}</div>
@@ -357,6 +375,7 @@ export function TaskList({ tasks, link, onChanged, showRecord, canEdit = true })
           </div>
         );
       })}
+      {doing && <DoneDialog task={doing} onClose={() => setDoing(null)} onDone={() => { setDoing(null); onChanged(); }} />}
     </div>
   );
 }
@@ -610,6 +629,8 @@ export function RecordPanel({ kind, id, onClose, onChanged }) {
   useEffect(() => { setD(null); setErr(''); load(); }, [kind, id]); // eslint-disable-line react-hooks/exhaustive-deps
   const changed = () => { load(); if (onChanged) onChanged(); };
   const { move, dialog } = useMoveDeal(changed);
+  const { move: moveLead, dialog: leadDialog } = useMoveLead(changed);
+  const L = me.lists;
   const row = d && d[kind];
   const name = row ? (row.company || row.name || row.title) : '';
   const stale = kind === 'deal' && row ? staleDays(row, (d.activities || [])[0], me.lists.staleDays) : 0;
@@ -643,7 +664,7 @@ export function RecordPanel({ kind, id, onClose, onChanged }) {
       ['📍', kind === 'deal' ? (d.account && d.account.city) : row.city],
     ].filter(([, v]) => v);
     const about = kind === 'lead'
-      ? [['Lead source', row.source], ['Industry', row.industry], ['Rating', row.rating && <Pill v={row.rating} />]]
+      ? [['Lead source', row.source], ['Stage', row.stage], ['Expected value', row.expectedValue ? `₹${Number(row.expectedValue).toLocaleString('en-IN')}` : null], ['Lost reason', row.lostReason], ['Industry', row.industry], ['Rating', row.rating && <Pill v={row.rating} />], ['Came from', [row.utmSource, row.utmMedium, row.utmCampaign].filter(Boolean).join(' / ')], ['Page', row.pageUrl]]
       : kind === 'deal'
         ? [['Account', d.account ? <RecLink kind="account" id={d.account.id}>{d.account.name}</RecLink> : '—'], ['Deal value', <b>{money(row.value)}</b>], ['Probability', `${row.probability}%`],
           ['Openings × CTC × fee', row.openings ? `${row.openings} × ${money(row.avgCtc)} × ${row.feePercent || 0}%` : ''], ['Expected close', dateOf(row.expectedClose)], ['Next step', row.nextStep], ...(row.stage === 'Lost' ? [['Lost because', row.lostReason]] : [])]
@@ -678,6 +699,11 @@ export function RecordPanel({ kind, id, onClose, onChanged }) {
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <QuickContact phone={contactLine && contactLine.phone ? contactLine.phone : row.phone} email={contactLine && contactLine.email ? contactLine.email : row.email} />
             {d.canEdit && <button type="button" className="btn btn-sm" onClick={() => setEditing({ kind, row })}>Edit</button>}
+            {d.canEdit && kind === 'lead' && row.status !== 'Converted' && (
+              <select value={row.stage || ''} onChange={(e) => moveLead(row, e.target.value)} aria-label="Stage" style={{ width: 'auto' }}>
+                {L.leadStages.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
+              </select>
+            )}
             {d.canEdit && kind === 'lead' && row.status !== 'Converted' && <button type="button" className="btn btn-primary btn-sm" onClick={() => setConverting(true)}>Convert to deal</button>}
             {kind === 'lead' && row.status === 'Converted' && row.dealId && <button type="button" className="btn btn-sm" onClick={() => openRecord('deal', row.dealId)}>Open the deal</button>}
             {d.canEdit && kind === 'deal' && row.stage === 'Won' && !row.clientId && <button type="button" className="btn btn-primary btn-sm" onClick={addAsClient}>Add as client</button>}
@@ -782,7 +808,7 @@ export function RecordPanel({ kind, id, onClose, onChanged }) {
       {converting && row && <ConvertLead lead={row} onClose={() => setConverting(false)} onDone={(out) => { setConverting(false); changed(); if (out.deal) openRecord('deal', out.deal.id); }} />}
       {addingClient && row && <AddClientHere deal={row} account={d.account} contact={d.contact || (d.contacts || [])[0]} onClose={() => setAddingClient(false)} onDone={() => { setAddingClient(false); changed(); }} />}
       {showClient && <ClientSummary id={showClient} onClose={() => setShowClient(null)} />}
-      {dialog}
+      {dialog}{leadDialog}
     </>
   );
 }
