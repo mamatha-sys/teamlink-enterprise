@@ -1,44 +1,44 @@
-﻿/* Employee progress on the HRMS dashboard (EmployeeProgress.jsx). Ring colours follow the measure and pass the palette check in both themes. */
-.hd-epg{--epg-1:#2a78d6;--epg-2:#d9822b;--epg-3:#0e9f8e;--epg-4:#7c5cd6;margin:6px 0 18px;display:grid;gap:12px}
-:root[data-theme="dark"] .hd-epg{--epg-1:#3d8fd6;--epg-2:#c47a28;--epg-3:#1a9a8b;--epg-4:#9379e3}
+﻿/* Employee progress on the HRMS dashboard (EmployeeProgress.jsx): one donut and one list. Slot colours are the validated categorical palette; the dark
+   steps are the same hues selected for the dark surface. Every slice has its name and figures in the list, so colour never works alone. */
+.hd-epg{
+  --s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--s5:#e87ba4;--s6:#008300;--s7:#6250d6;--s8:#e34948;--sn:#9aa5ad;
+  margin:6px 0 18px;
+}
+:root[data-theme="dark"] .hd-epg{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#008300;--s7:#9085e9;--s8:#e66767;--sn:#6f7a82}
 @media (prefers-color-scheme: dark){
-  :root[data-theme="system"] .hd-epg{--epg-1:#3d8fd6;--epg-2:#c47a28;--epg-3:#1a9a8b;--epg-4:#9379e3}
+  :root[data-theme="system"] .hd-epg{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#008300;--s7:#9085e9;--s8:#e66767;--sn:#6f7a82}
 }
 .hd-epg .tlc.tlc-card{padding:16px 18px 18px}
 .hd-epg .tlc-head h3{font-size:16px}
 .hd-epg .tlc-sub{font-size:13px;color:var(--tlc-ink2)}
 
-.epg-t{--epg-c:var(--epg-1)}
-.epg-a{--epg-c:var(--epg-3)}
-.epg-p{--epg-c:var(--epg-4)}
-.epg-d{--epg-c:var(--epg-2)}
-.epg-ring{display:block;flex:none}
+.epg-layout{display:grid;grid-template-columns:250px minmax(0,1fr);gap:24px;align-items:center;padding-top:6px}
+.epg-donut{display:block;width:100%;max-width:250px;margin:0 auto}
 .epg-rail{stroke:var(--line)}
-.epg-rail.epg-none{stroke-dasharray:3 4}
-.epg-arc{stroke:var(--epg-c)}
-.epg-num{fill:var(--tlc-ink);font-weight:700}
+.epg-slice{transition:opacity .12s;cursor:default}
+.epg-dim{opacity:.28}
+circle.epg-s1{stroke:var(--s1)} circle.epg-s2{stroke:var(--s2)} circle.epg-s3{stroke:var(--s3)} circle.epg-s4{stroke:var(--s4)}
+circle.epg-s5{stroke:var(--s5)} circle.epg-s6{stroke:var(--s6)} circle.epg-s7{stroke:var(--s7)} circle.epg-s8{stroke:var(--s8)} circle.epg-sn{stroke:var(--sn)}
+i.epg-s1{background:var(--s1)} i.epg-s2{background:var(--s2)} i.epg-s3{background:var(--s3)} i.epg-s4{background:var(--s4)}
+i.epg-s5{background:var(--s5)} i.epg-s6{background:var(--s6)} i.epg-s7{background:var(--s7)} i.epg-s8{background:var(--s8)} i.epg-sn{background:var(--sn)}
+.epg-big{font-size:34px;font-weight:700;fill:var(--tlc-ink)}
+.epg-word{font-size:13px;fill:var(--tlc-ink2)}
 
-.epg-block{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;min-width:0;border-radius:8px;padding:4px 2px}
-.epg-block:focus-visible{outline:2px solid var(--epg-1)}
-.epg-name{font-size:12px;font-weight:600;color:var(--tlc-ink)}
-.epg-detail{font-size:12px;color:var(--tlc-ink2);max-width:190px}
+.epg-legend{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 12px;margin-top:8px;font-size:12px;color:var(--tlc-ink2)}
+.epg-legend span{display:inline-flex;align-items:center;gap:5px}
+.epg-legend i,.epg-who i{display:inline-block;flex:none;width:11px;height:11px;border-radius:3px}
 
-.epg-overall{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;padding-top:6px}
-.epg-overall .epg-name{font-size:14px}
+.epg-tablewrap{overflow-x:auto;min-width:0}
+.epg-table{width:100%;border-collapse:collapse;font-size:13px;color:var(--tlc-ink)}
+.epg-table th{font-size:12px;font-weight:600;color:var(--tlc-ink2);text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+.epg-table td{padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+.epg-table .num{text-align:right;font-variant-numeric:tabular-nums}
+.epg-table tbody tr.on td{background:var(--line)}
+.epg-table tfoot td{font-weight:700;border-bottom:0}
+.epg-who{display:inline-flex;align-items:center;gap:8px}
+.epg-who button{background:none;border:0;padding:0;color:var(--tlc-ink);font:inherit;font-weight:600;cursor:pointer}
+.epg-who button:hover{text-decoration:underline}
 
-.epg-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px}
-.epg-card{border:1px solid var(--line);border-radius:12px;padding:12px 14px 10px;min-width:0}
-.epg-card-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px}
-.epg-title{font-size:14px;font-weight:700;color:var(--tlc-ink);background:none;border:0;padding:0;text-align:left;min-width:0;overflow-wrap:anywhere}
-button.epg-title{cursor:pointer}
-button.epg-title:hover{text-decoration:underline}
-.epg-count{font-size:12px;color:var(--tlc-ink2);white-space:nowrap}
-.epg-rings{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
-.epg-rings .epg-name{font-size:11px;font-weight:500;color:var(--tlc-ink2)}
-
-/* A phone: two big rings a row, and the department rings stay four in a row but smaller. */
-@media (max-width:640px){
-  .epg-overall{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .epg-cards{grid-template-columns:1fr}
-  .epg-rings .epg-ring{width:54px;height:54px}
+@media (max-width:820px){
+  .epg-layout{grid-template-columns:1fr}
 }
