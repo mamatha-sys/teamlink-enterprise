@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../../api';
 import { useAuth } from '../../context/AuthContext.jsx';
 import {
@@ -33,6 +33,32 @@ const AN_SORTS = [
   ['title', 'Title A–Z', (a, b) => String(a.title || '').localeCompare(String(b.title || ''))],
 ];
 
+// A picture or video on a notice. The API needs the login header, so the file comes as a blob: a picture opens by itself, a video on Play (it can be 50 MB).
+const MEDIA_ACCEPT = 'image/png,image/jpeg,image/webp,video/mp4,video/webm';
+const MEDIA_IMAGE_MB = 10;
+const MEDIA_VIDEO_MB = 50;
+function NoticeMedia({ a }) {
+  const [url, setUrl] = useState('');
+  const [state, setState] = useState('');
+  const urlRef = useRef('');
+  const load = () => {
+    setState('loading');
+    api.get(`/announcements/${a.id}/media`, { responseType: 'blob' })
+      .then((res) => { urlRef.current = URL.createObjectURL(res.data); setUrl(urlRef.current); setState(''); })
+      .catch(() => setState('failed'));
+  };
+  const isVideo = a.media.kind === 'video';
+  useEffect(() => {
+    if (!isVideo) load();
+    return () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); };
+  }, [a.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const box = { display: 'block', maxWidth: '100%', maxHeight: 360, borderRadius: 8, marginTop: 8 };
+  if (state === 'failed') return <div className="small-muted" style={{ marginTop: 8 }}>The {a.media.kind === 'video' ? 'video' : 'picture'} could not be opened. <button type="button" className="btn btn-sm" onClick={load}>Try again</button></div>;
+  if (url) return isVideo ? <video src={url} controls autoPlay style={box} /> : <a href={url} target="_blank" rel="noreferrer"><img src={url} alt={a.media.name || a.title} style={box} /></a>;
+  if (isVideo) return <div style={{ marginTop: 8 }}><button type="button" className="btn btn-sm" disabled={state === 'loading'} onClick={load}>{state === 'loading' ? 'Opening…' : '▶ Play video'}</button></div>;
+  return <div className="small-muted" style={{ marginTop: 8 }}>Opening the picture…</div>;
+}
+
 // The prototype's three Announcement feature tiles (AN_FEATURES, line 4428).
 export const AN_FEATURES = [
   ['compose', 'Compose & Target Announcement'],
@@ -50,7 +76,16 @@ function NewAnnouncementModal({ onClose, onSaved, postInfo }) {
   const [form, setForm] = useState({ title: '', body: '', category: 'General', pinned: false, meetingLink: '', meetingAt: '' });
   const [audience, setAudience] = useState(EMPTY_AUDIENCE);
   const [channels, setChannels] = useState([]);
+  const [media, setMedia] = useState(null);
   const { busy, error, setError, run } = useSubmit();
+  function pickMedia(file) {
+    if (!file) { setMedia(null); return; }
+    const isVideo = file.type.startsWith('video/');
+    const limit = (isVideo ? MEDIA_VIDEO_MB : MEDIA_IMAGE_MB) * 1024 * 1024;
+    if (file.size > limit) { setError(`A ${isVideo ? 'video' : 'picture'} can be up to ${isVideo ? MEDIA_VIDEO_MB : MEDIA_IMAGE_MB} MB.`); setMedia(null); return; }
+    setError('');
+    setMedia(file);
+  }
   const linkError = meetingLinkError(form.meetingLink);
 
   async function submit() {
@@ -59,9 +94,18 @@ function NewAnnouncementModal({ onClose, onSaved, postInfo }) {
     if (linkError) { setError(linkError); return; }
     if (!deptOnly && !audienceReady(audience)) { setError(audience.mode === 'departments' ? 'Pick at least one department.' : 'Pick at least one employee.'); return; }
     const link = form.meetingLink.trim();
-    const res = await run(() => api.post('/announcements', {
-      ...form, meetingLink: link, meetingAt: link ? form.meetingAt : '', audience, channels, date: new Date().toISOString().slice(0, 10),
-    }), 'Could not post the announcement');
+    const res = await run(async () => {
+      let mediaId;
+      if (media) {
+        const body = new FormData();
+        body.append('file', media);
+        // No explicit Content-Type: the browser has to set the multipart boundary.
+        mediaId = (await api.post('/announcements/media', body)).data.mediaId;
+      }
+      return api.post('/announcements', {
+        ...form, meetingLink: link, meetingAt: link ? form.meetingAt : '', mediaId, audience, channels, date: new Date().toISOString().slice(0, 10),
+      });
+    }, 'Could not post the announcement');
     if (res) onSaved(res.data);
   }
 
@@ -74,6 +118,10 @@ function NewAnnouncementModal({ onClose, onSaved, postInfo }) {
         <Combo creatable value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
           {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
         </Combo>
+      </Field>
+      <Field label="Picture or video (optional)">
+        <input type="file" accept={MEDIA_ACCEPT} aria-label="Picture or video" onChange={(e) => pickMedia(e.target.files[0])} />
+        <div className="small-muted">PNG, JPEG or WebP picture up to {MEDIA_IMAGE_MB} MB, or MP4 or WebM video up to {MEDIA_VIDEO_MB} MB. Everyone this notice reaches sees it.</div>
       </Field>
       {/* Optional — for a meeting, event or training. People get a
           "Join meeting" button on the notice board and in their bell. */}
@@ -149,6 +197,7 @@ export default function Announcements({ view, onOpen, onBack }) {
         <button type="button" className="btn btn-sm" onClick={() => setOpenedId(null)}>Close</button>
       </div>
       <div className="mtg-d-body">{opened.body}</div>
+      {opened.media && <NoticeMedia key={opened.id} a={opened} />}
       {opened.meetingLink && <JoinMeeting href={opened.meetingLink} when={opened.meetingWhen} />}
     </div>
   );
@@ -283,6 +332,7 @@ export default function Announcements({ view, onOpen, onBack }) {
                 {a.paused && <span className="badge" style={{ marginRight: 6, background: 'var(--amber-bg, #fef3c7)', color: 'var(--amber, #92400e)' }} title={a.pausedBy ? `Paused by ${a.pausedBy}` : 'Paused'}>Paused</span>}
                 {a.pinned && '📌 '}<button type="button" className="mtg-open-title" onClick={() => setOpenedId(a.id)} title="Open this announcement">{a.title}</button><br />
                 <span className="cell-muted" style={{ fontSize: 11.5 }}>{a.body}</span><br />
+                {a.media && <NoticeMedia a={a} />}
                 <span className="cell-muted" style={{ fontSize: 11.5 }}>Posted by <b>{postedByText(a)}</b> · to {a.target || 'everyone'} · {postedAtText(a)}</span>
                 {a.meetingLink && <><br /><JoinMeeting small href={a.meetingLink} when={a.meetingWhen} /></>}
               </span>

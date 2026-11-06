@@ -57,8 +57,14 @@ const SHEET_TYPES = {
   'text/csv': 'csv',
 };
 
+// Videos: NOT in ALLOWED either. Only a caller that asks (store(..., { allowVideo: true }) - announcements, founder 2026-11-06) can store one.
+const VIDEO_TYPES = {
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+};
+
 // A stored name this module produced, and nothing else.
-const STORED_NAME = /^[a-f0-9]{32}\.(png|jpg|webp|pdf|docx|doc|xlsx|xls|csv)$/;
+const STORED_NAME = /^[a-f0-9]{32}\.(png|jpg|webp|pdf|docx|doc|xlsx|xls|csv|mp4|webm)$/;
 
 function uploadDir() {
   const dir = process.env.UPLOAD_DIR
@@ -90,6 +96,10 @@ function sniffAgrees(mime, buf) {
       return buf.length >= 8 && buf.slice(0, 8).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]));
     case 'text/csv':
       return !buf.slice(0, 4096).includes(0); // plain text: no NUL byte
+    case 'video/mp4':
+      return buf.length >= 12 && buf.slice(4, 8).toString('latin1') === 'ftyp';
+    case 'video/webm':
+      return buf.slice(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
     default:
       return false;
   }
@@ -195,14 +205,14 @@ async function parseMultipart(req, { maxBytes = MAX_BYTES } = {}) {
 // Throws an Error whose `.code` names the reason, so the route can phrase it.
 // `maxBytes` lets a caller with a larger stated limit (the bank panel's bill,
 // 8 MB) raise the cap for its own upload; everything else keeps MAX_BYTES.
-function store(file, { maxBytes = MAX_BYTES, allowWord = false, allowSheet = false } = {}) {
+function store(file, { maxBytes = MAX_BYTES, allowWord = false, allowSheet = false, allowVideo = false } = {}) {
   if (!file || !file.data || !file.data.length) {
     throw Object.assign(new Error('NO_FILE'), { code: 'NO_FILE' });
   }
   if (file.data.length > maxBytes) {
     throw Object.assign(new Error('TOO_LARGE'), { code: 'TOO_LARGE' });
   }
-  const ext = ALLOWED[file.contentType] || (allowWord ? WORD_TYPES[file.contentType] : undefined) || (allowSheet ? SHEET_TYPES[file.contentType] : undefined);
+  const ext = ALLOWED[file.contentType] || (allowWord ? WORD_TYPES[file.contentType] : undefined) || (allowSheet ? SHEET_TYPES[file.contentType] : undefined) || (allowVideo ? VIDEO_TYPES[file.contentType] : undefined);
   if (!ext) throw Object.assign(new Error('BAD_TYPE'), { code: 'BAD_TYPE' });
   if (!sniffAgrees(file.contentType, file.data)) {
     throw Object.assign(new Error('CONTENT_MISMATCH'), { code: 'CONTENT_MISMATCH' });
@@ -244,6 +254,6 @@ const MESSAGE = {
 };
 
 module.exports = {
-  MAX_BYTES, ALLOWED, WORD_TYPES, SHEET_TYPES, MESSAGE,
+  MAX_BYTES, ALLOWED, WORD_TYPES, SHEET_TYPES, VIDEO_TYPES, MESSAGE,
   uploadDir, parseMultipart, store, resolveStored, remove, safeDisplayName,
 };

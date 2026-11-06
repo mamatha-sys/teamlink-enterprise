@@ -1,8 +1,10 @@
+const path = require('path');
 const express = require('express');
 const prisma = require('../db');
 const { requireAuth, requirePerm } = require('../middleware/auth');
 const PAUSE = require('../utils/announcementPause');
 const { logAudit } = require('../utils/audit');
+const attachments = require('../utils/attachments');
 const { scopeDepartments } = require('../utils/scope');
 const {
   list, parseAudience, parseChannels, resolveAudience, storedColumns, viewerContext, reaches, deliver, describeDelivery,
@@ -63,13 +65,30 @@ function meetingWhen(at) {
   return `${day} ${mon} ${y}, ${h}:${String(min).padStart(2, '0')} ${ap}`;
 }
 
+// PICTURE OR VIDEO ON A NOTICE (founder 2026-11-06). The file goes first, then the notice names it, so a failed upload never posts half a notice.
+// It lives in the row's `delivery` JSON under `media`, like the meeting link: no migration. The stored name is never sent to a browser.
+const MEDIA_IMAGE_BYTES = 10 * 1024 * 1024;
+const MEDIA_VIDEO_BYTES = 50 * 1024 * 1024;
+const MEDIA_WAIT_MS = 60 * 60 * 1000;
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+const uploaded = new Map(); // stored name -> { userId, at, name, mime, size }: a file chosen, its notice not posted yet
+function forgetOldUploads() {
+  const old = Date.now() - MEDIA_WAIT_MS;
+  uploaded.forEach((u, file) => { if (u.at < old) { attachments.remove(file); uploaded.delete(file); } });
+}
+function mediaOf(a) {
+  try { const d = a.delivery ? JSON.parse(a.delivery) : null; return (d && d.media) || null; } catch { return null; }
+}
+
 function shape(a) {
   let delivery = null;
   try { delivery = a.delivery ? JSON.parse(a.delivery) : null; } catch { delivery = null; }
   const meeting = delivery && delivery.meeting ? delivery.meeting : null;
-  if (delivery && delivery.meeting) {
+  const media = delivery && delivery.media ? delivery.media : null;
+  if (delivery && (delivery.meeting || delivery.media)) {
     delivery = { ...delivery };
     delete delivery.meeting;
+    delete delivery.media;
   }
   // A row whose JSON held only the meeting has no delivery summary.
   if (delivery && delivery.recipients === undefined) delivery = null;
@@ -82,6 +101,7 @@ function shape(a) {
     meetingLink: meeting && meeting.link ? meeting.link : null,
     meetingAt: meeting && meeting.at ? meeting.at : null,
     meetingWhen: meeting && meeting.at ? meetingWhen(meeting.at) : null,
+    media: media ? { kind: String(media.mime).startsWith('video/') ? 'video' : 'image', name: media.name, size: media.size } : null,
     paused: PAUSE.isPaused(a),
     pausedAt: (PAUSE.pausedInfo(a) || {}).at || null,
     pausedBy: (PAUSE.pausedInfo(a) || {}).by || null,
@@ -127,6 +147,48 @@ router.get('/', async (req, res) => {
   res.json(await withPosters(announcements.filter((a) => reaches(ctx, a, legacy) && (mayEdit || !PAUSE.isPaused(a))).map(shape)));
 });
 
+// the picture or video, before the notice: -> { mediaId } for POST /
+router.post('/media', async (req, res) => {
+  const how = await postingMode(req.user);
+  if (how.mode === 'none') return res.status(403).json({ error: how.reason });
+  forgetOldUploads();
+  let parsed;
+  try {
+    parsed = await attachments.parseMultipart(req, { maxBytes: MEDIA_VIDEO_BYTES });
+  } catch (err) {
+    if (err.code === 'TOO_LARGE') return res.status(400).json({ error: 'A video can be up to 50 MB, a picture up to 10 MB.' });
+    return res.status(400).json({ error: attachments.MESSAGE[err.code] || 'Could not read the upload.' });
+  }
+  const type = parsed.file ? parsed.file.contentType : '';
+  const video = Boolean(attachments.VIDEO_TYPES[type]);
+  if (parsed.file && !video && !IMAGE_TYPES.includes(type)) return res.status(400).json({ error: 'Add a PNG, JPEG or WebP picture, or an MP4 or WebM video.' });
+  if (parsed.file && !video && parsed.file.data.length > MEDIA_IMAGE_BYTES) return res.status(400).json({ error: 'A picture can be up to 10 MB.' });
+  let stored;
+  try {
+    stored = attachments.store(parsed.file, { maxBytes: MEDIA_VIDEO_BYTES, allowVideo: true });
+  } catch (err) {
+    return res.status(400).json({ error: attachments.MESSAGE[err.code] || 'Could not store the upload.' });
+  }
+  uploaded.set(stored.billFile, { userId: req.user.id, at: Date.now(), name: stored.billName, mime: stored.billMime, size: stored.billSize });
+  return res.status(201).json({ mediaId: stored.billFile, name: stored.billName, kind: video ? 'video' : 'image' });
+});
+
+// only someone the notice reaches can open its file
+router.get('/:id/media', async (req, res) => {
+  const a = await prisma.announcement.findUnique({ where: { id: req.params.id } });
+  const media = a ? mediaOf(a) : null;
+  if (!media) return res.status(404).json({ error: 'This announcement has no picture or video.' });
+  const ctx = await viewerContext(req.user);
+  const mayEdit = await require('../utils/permissions').can(req.user, null, 'hrms', 'Employee Services', 'edit').catch(() => false); // eslint-disable-line global-require
+  if (!reaches(ctx, a, legacyReach(scopeDepartments(req.user) || [])) || (!mayEdit && PAUSE.isPaused(a))) return res.status(403).json({ error: 'This announcement is not for you.' });
+  const full = attachments.resolveStored(media.file);
+  if (!full) return res.status(404).json({ error: 'The file is no longer on the server.' });
+  res.setHeader('Content-Type', media.mime);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Disposition', `inline; filename="${attachments.safeDisplayName(media.name)}"`);
+  return res.sendFile(path.basename(full), { root: path.dirname(full), cacheControl: false }); // with a root: the upload folder's own name starts with a dot
+});
+
 router.post('/', async (req, res) => {
   const how = await postingMode(req.user);
   if (how.mode === 'none') return res.status(403).json({ error: how.reason });
@@ -141,6 +203,11 @@ router.post('/', async (req, res) => {
   const meetingAt = meetingLink && req.body.meetingAt ? String(req.body.meetingAt).trim().slice(0, 16) : '';
   if (meetingAt && !MEETING_AT.test(meetingAt)) return res.status(400).json({ error: 'Pick a proper meeting date and time.' });
   const meeting = meetingLink ? { link: meetingLink, at: meetingAt || null } : null;
+  const mediaId = String(req.body.mediaId || '');
+  const pending = mediaId ? uploaded.get(mediaId) : null;
+  if (mediaId && (!pending || pending.userId !== req.user.id)) return res.status(400).json({ error: 'Add the picture or video again, then post.' });
+  const media = pending ? { file: mediaId, name: pending.name, mime: pending.mime, size: pending.size } : null;
+  const extras = { ...(meeting ? { meeting } : {}), ...(media ? { media } : {}) };
 
   // The Send-to picker. A caller that sends no audience (an older client
   // posting { target: 'Medical Department' }) is handled exactly as before.
@@ -164,16 +231,17 @@ router.post('/', async (req, res) => {
     data: {
       title, body, category, pinned: !!pinned, target, date,
       postedBy: req.user.name, postedById: req.user.id, ...columns,
-      ...(meeting ? { delivery: JSON.stringify({ meeting }) } : {}),
+      ...(Object.keys(extras).length ? { delivery: JSON.stringify(extras) } : {}),
     },
   });
+  if (pending) uploaded.delete(mediaId); // it belongs to the notice now
   // The meeting travels in the notification / email text itself — the
   // Notification row has no link column. The bell (components/
   // NotificationBell.jsx) turns the "Join meeting: <url>" line into a button;
   // every other screen shows it as plain readable text.
-  const meetingLines = meeting
+  const meetingLines = `${meeting
     ? `\n\n${meeting.at ? `Meeting time: ${meetingWhen(meeting.at)}\n` : ''}Join meeting: ${meeting.link}`
-    : '';
+    : ''}${media ? `\n\nThis notice has a ${media.mime.startsWith('video/') ? 'video' : 'picture'}. Open Announcements to see it.` : ''}`;
 
   // Everyone it reaches gets it in-app; the ticked "Also deliver via"
   // channels are recorded per person (Email really sent when configured,
@@ -188,7 +256,7 @@ router.post('/', async (req, res) => {
       by: req.user,
       exceptUserId: req.user.id,
     });
-    const stored = JSON.stringify(meeting ? { ...delivery, meeting } : delivery);
+    const stored = JSON.stringify({ ...delivery, ...extras });
     await prisma.announcement.update({ where: { id: announcement.id }, data: { delivery: stored } });
     announcement.delivery = stored;
   }
@@ -214,7 +282,10 @@ router.put('/:id/pause', requirePerm(null, 'hrms', 'Employee Services', 'edit'),
 });
 
 router.delete('/:id', requirePerm(null, 'hrms', 'Employee Services', 'delete'), async (req, res) => {
+  const row = await prisma.announcement.findUnique({ where: { id: req.params.id } });
   await prisma.announcement.delete({ where: { id: req.params.id } });
+  const media = row ? mediaOf(row) : null;
+  if (media) attachments.remove(media.file);
   await logAudit({ userId: req.user.id, action: 'Announcement deleted', entity: 'Announcement', entityId: req.params.id });
   res.status(204).end();
 });
