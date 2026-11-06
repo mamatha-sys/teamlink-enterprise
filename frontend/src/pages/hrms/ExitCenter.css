@@ -90,3 +90,19 @@
   .exc-three .btn { flex: 1 1 100%; }
 }
 .exc-profile-btns{display:inline-flex;gap:6px;margin-left:8px;flex-wrap:wrap}
+
+/* The offboarding checklist (ExitChecklist) */
+.xcl{margin:12px 0;padding:12px 14px;border:1px solid var(--line);border-radius:10px}
+.xcl-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:13px}
+.xcl-head span{color:var(--ink-faint);font-size:12px}
+.xcl-bar{height:6px;margin:8px 0 6px;border-radius:3px;background:var(--line);overflow:hidden}
+.xcl-bar i{display:block;height:100%;border-radius:3px;background:#15803d}
+.xcl-row{display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid var(--line);font-size:13px;margin:0;font-weight:400}
+.xcl-row:last-of-type{border-bottom:0}
+.xcl-row.can{cursor:pointer}
+.xcl-row input{width:16px;height:16px;flex:none;margin:0}
+.xcl-text{display:flex;flex-direction:column;min-width:0;flex:1}
+.xcl-row.done .xcl-label{color:var(--ink-faint)}
+.xcl-note{font-size:11.5px;color:var(--ink-faint)}
+.xcl-tag{flex:none;font-size:11px;color:var(--ink-faint);white-space:nowrap}
+.xcl-tag.hr{color:inherit}

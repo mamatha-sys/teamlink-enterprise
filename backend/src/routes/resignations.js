@@ -3,6 +3,7 @@ const prisma = require('../db');
 const { requireAuth, requirePerm, can } = require('../middleware/auth');
 const { employeeRecordWhere, employeeInScope, OUT_OF_SCOPE } = require('../utils/scope');
 const { logAudit } = require('../utils/audit');
+const exitChecklist = require('../utils/exitChecklist');
 const chain = require('../utils/chainRoute');
 const workflow = require('../utils/approvalWorkflow');
 const { systemRequesterError } = require('../utils/systemAccounts');
@@ -50,15 +51,6 @@ const TERMINAL = ['Relieved', 'Withdrawn', 'Rejected'];
 const OPEN = [PENDING, ...SERVING];
 // What /:id/status accepts. Accepted / Approved = approve at the current step.
 const DECISIONS = ['Accepted', 'Approved', 'Rejected', 'Relieved', 'Withdrawn'];
-
-// The same checklist drives the offboarding tracker on each employee's record.
-const EXIT_CHECKLIST = [
-  'Exit interview scheduled',
-  'Assets returned',
-  'Access revoked',
-  'Full & final settlement processed',
-  'Experience letter issued',
-];
 
 // The Reason select. HR may replace the list (PUT /form-config); "Other" is
 // always offered and always asks for the reason in words.
@@ -304,7 +296,7 @@ router.get('/summary', requirePerm(null, 'hrms', 'Employee Services', 'export'),
       return { ...o, [m]: (o[m] || 0) + 1 };
     }, {}),
     noticePeriodDays: cfg.noticePeriodDays,
-    exitChecklist: EXIT_CHECKLIST,
+    exitChecklist: exitChecklist.LABELS,
   });
 });
 
@@ -504,6 +496,35 @@ router.get('/:id', async (req, res, next) => {
       companyName: await companyLegalName(),
       submittingTo: await submittingToOf(record.id),
     });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// ---- THE OFFBOARDING CHECKLIST (utils/exitChecklist.js) -----------------------
+router.get('/:id/checklist', async (req, res, next) => {
+  try {
+    const record = await prisma.employeeRecord.findUnique({ where: { id: req.params.id }, include: { employee: true } });
+    if (!record || record.type !== 'RESIGNATION') return res.status(404).json({ error: 'Resignation not found' });
+    if (!await workflow.canSee(WF_RES, record.id, req.user, record.employee)) return res.status(403).json(OUT_OF_SCOPE);
+    return res.json({ checklist: await exitChecklist.forRecord(record), canTick: exitDate.isHrDesk(req.user) });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// HR's tick on a step only a person can confirm.
+router.patch('/:id/checklist/:key', async (req, res, next) => {
+  try {
+    if (!exitDate.isHrDesk(req.user)) return res.status(403).json({ error: 'Only HR can tick these.' });
+    const record = await prisma.employeeRecord.findUnique({ where: { id: req.params.id }, include: { employee: true } });
+    if (!record || record.type !== 'RESIGNATION') return res.status(404).json({ error: 'Resignation not found' });
+    if (!await workflow.canSee(WF_RES, record.id, req.user, record.employee)) return res.status(403).json(OUT_OF_SCOPE);
+    const done = !!(req.body && req.body.done);
+    const out = await exitChecklist.tick(record, req.params.key, done, req.user);
+    if (out.error) return res.status(out.status).json({ error: out.error });
+    await logAudit({ userId: req.user.id, action: `Offboarding step ${done ? 'ticked' : 'unticked'}`, entity: 'Resignation', entityId: record.id, toValue: `${out.label}: ${record.employee ? record.employee.name : ''}` });
+    return res.json({ checklist: out.checklist, canTick: true });
   } catch (err) {
     return next(err);
   }

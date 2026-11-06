@@ -11,7 +11,7 @@ import { ComposeModal, Field, AiAssist, useSubmit, CheckLine } from '../../compo
 import ApprovalChain, { ApprovalChainLine, fmtDateTime } from '../../components/ApprovalChain.jsx';
 import DataIoBar from '../../components/dataio/DataIoBar.jsx';
 import { useSearchParams } from 'react-router-dom';
-import ExitApprovals, { ExitRecordModal, EditDateModal } from './ExitCenter.jsx';
+import ExitApprovals, { ExitChecklist, ExitRecordModal, EditDateModal } from './ExitCenter.jsx';
 import './Resignation.css';
 
 // ---------------------------------------------------------------------------
@@ -515,6 +515,7 @@ function ResignationDetailModal({ id, isHR, myEmployeeId, onClose, onChanged }) 
               onSaved={() => { setEditDates(false); load(); onChanged(); }}
             />
           )}
+          <ExitChecklist recordId={r.id} />
           <SectionLabel style={{ marginTop: 16 }}>Approval Chain</SectionLabel>
           {mayDecide && lastStep && (
             <Field label="Approved last working date (optional)" hint={`Blank keeps the requested date (${f?.requestedLastWorkingDate ? lorDate(f.requestedLastWorkingDate) : '—'}). Used only when this approval is the final one.`}>
@@ -622,10 +623,7 @@ function ResignationList({ onOpenExit }) {
     }
   }
 
-  const checklist = summary?.exitChecklist || [
-    'Exit interview scheduled', 'Assets returned', 'Access revoked',
-    'Full & final settlement processed', 'Experience letter issued',
-  ];
+  const checklist = summary?.exitChecklist || [];
   const pendingApproval = records.filter((r) => r.status === 'Pending Approval').length;
   const serving = records.filter((r) => SERVING.includes(r.status)).length;
   const relieved = records.filter((r) => r.status === 'Relieved').length;
@@ -815,10 +813,10 @@ function ResignationList({ onOpenExit }) {
         <PanelPad style={{ marginTop: 14 }}>
           <NumHead n={3} title="Exit Checklist" />
           {checklist.map((c) => (
-            <AssignRow flush key={c}><span>{c}</span><span className="cell-muted" style={{ fontSize: 11.5 }}>per exit</span></AssignRow>
+            <AssignRow flush key={c}><span>{c}</span></AssignRow>
           ))}
           <div className="cell-muted" style={{ fontSize: 11.5, marginTop: 8 }}>
-            Opened on the employee&apos;s offboarding tracker when the resignation is finally approved.
+            Open a person&apos;s resignation to see it. What the system can see ticks by itself; HR ticks the rest.
           </div>
         </PanelPad>
         </div>

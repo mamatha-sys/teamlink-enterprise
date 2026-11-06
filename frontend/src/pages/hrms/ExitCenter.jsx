@@ -216,6 +216,47 @@ function DateChangesModal({ onClose }) {
 }
 
 // ---- ONE EXIT --------------------------------------------------------------------------------
+// THE OFFBOARDING CHECKLIST (founder 2026-11-06): what the system can see ticks by itself, and HR ticks the rest. Server: utils/exitChecklist.js.
+export function ExitChecklist({ recordId }) {
+  const [d, setD] = useState(null);
+  const [saving, setSaving] = useState('');
+  const [problem, setProblem] = useState('');
+  useEffect(() => {
+    api.get(`/resignations/${recordId}/checklist`).then((r) => setD(r.data)).catch((e) => setProblem(err(e, 'The checklist could not be loaded')));
+  }, [recordId]);
+  async function tick(step, done) {
+    setSaving(step.key); setProblem('');
+    try { const r = await api.patch(`/resignations/${recordId}/checklist/${step.key}`, { done }); setD(r.data); } catch (e) { setProblem(err(e, 'That could not be saved')); } finally { setSaving(''); }
+  }
+  if (problem && !d) return <div className="error-text">{problem}</div>;
+  if (!d || !d.checklist) return null;
+  const { steps, doneCount, total } = d.checklist;
+  return (
+    <div className="xcl">
+      <div className="xcl-head">
+        <b>Offboarding checklist</b>
+        <span>{doneCount} of {total} done</span>
+      </div>
+      <div className="xcl-bar" role="img" aria-label={`${doneCount} of ${total} done`}><i style={{ width: `${Math.round((doneCount / total) * 100)}%` }} /></div>
+      {steps.map((s) => {
+        const mayTick = d.canTick && s.canTick;
+        return (
+          <label key={s.key} className={`xcl-row${s.done ? ' done' : ''}${mayTick ? ' can' : ''}`}>
+            <input type="checkbox" checked={s.done} disabled={!mayTick || saving === s.key} onChange={(e) => tick(s, e.target.checked)} />
+            <span className="xcl-text">
+              <span className="xcl-label">{s.label}</span>
+              {s.note && <span className="xcl-note">{s.note}</span>}
+            </span>
+            {s.how === 'auto' && <span className="xcl-tag">Automatic</span>}
+            {s.how === 'hr' && <span className="xcl-tag hr">{s.by ? `By ${s.by}` : 'By HR'}{s.at ? `, ${dmy(s.at.slice(0, 10))}` : ''}</span>}
+          </label>
+        );
+      })}
+      {problem && <div className="error-text">{problem}</div>}
+    </div>
+  );
+}
+
 export function ExitRecordModal({ id, onClose, onChanged, autoEdit = false }) {
   const [v, setV] = useState(null);
   const [loadError, setLoadError] = useState('');
@@ -263,6 +304,8 @@ export function ExitRecordModal({ id, onClose, onChanged, autoEdit = false }) {
             <div><span>Notice period</span><b>{v.noticeDays != null ? `${v.noticeDays} days` : '—'}</b></div>
             {v.finalApprover && !v.simple && <div><span>Final approver</span><b>{v.finalApprover}</b></div>}
           </div>
+
+          <ExitChecklist recordId={v.id} />
 
           {/* THE APPROVAL CARD: three separate buttons for the person whose turn it is */}
           {(a.canApprove || a.canReject || a.canSendBack) && v.status === 'Pending Approval' && (
