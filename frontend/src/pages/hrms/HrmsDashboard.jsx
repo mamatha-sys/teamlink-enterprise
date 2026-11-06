@@ -15,7 +15,7 @@ import { useVacancies, VacanciesPopup } from '../../components/dashboard/Vacanci
 // Recruiter joinings (2026-10-05): Super Admin's month-end popup + a recruiter's own figure.
 import NewItems from '../../components/dashboard/NewItems.jsx'; // the New button (2026-10-13), HRMS lines only (2026-10-24)
 import RecruiterJoiningsPopup from '../../components/recruiterJoinings/RecruiterJoiningsPopup.jsx';
-import MyJoiningsCard from '../../components/recruiterJoinings/MyJoiningsCard.jsx';
+import EmployeeProgress, { MyProgress } from './EmployeeProgress.jsx';
 import { isSuperAdmin } from '../../permissions';
 
 const NO_FILTERS = { department: '', location: '', status: '', designation: '', manager: '', q: '' };
@@ -287,6 +287,10 @@ function HrDashboard() {
 
 
 
+      {/* founder 2026-11-06: employee progress instead of the "My joinings" strip: targets, attendance, performance, training, department wise */}
+      <SectionLabel>Employee Progress</SectionLabel>
+      <EmployeeProgress params={params} onPickDept={(d) => set('department', d)} />
+
       <TwoCol>
         {/* THE ONE CHART, where Headcount by Department was (founder 2026-11-02: "dashboard headcount thisesi ahh place lo who came to
             work, by department ahh chart ni pettu"): who came to work on the attendance date, per department - the same people as the
@@ -370,6 +374,8 @@ function MyDashboard() {
 
   return (
     <div>
+      <SectionLabel>My Progress This Month</SectionLabel>
+      <MyProgress />
       <SectionLabel>My Day</SectionLabel>
       <StatRow columns={3} cells={[
         { value: todayRecord?.status || 'Not marked', label: "Today's Attendance", to: '/attendance' },
@@ -428,7 +434,6 @@ export default function HrmsDashboard() {
       {!isHR && <ProfileStatusBanner variant="landing" />}
 
       {isSuperAdmin(user) && <RecruiterJoiningsPopup />}
-      <MyJoiningsCard />
 
       {isHR ? <HrDashboard /> : <MyDashboard />}
 

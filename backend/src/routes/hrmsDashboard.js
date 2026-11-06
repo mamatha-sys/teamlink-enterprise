@@ -8,6 +8,8 @@ const { employeeWhere } = require('../utils/scope');
 const { HR_STATUSES, hrStatusOf } = require('../utils/hrStatus');
 const dateRange = require('../utils/dateRange');
 const D = require('../utils/attendanceDays');
+const progress = require('../utils/employeeProgress');
+const RJ = require('../utils/recruiterJoinings');
 const halfLeave = require('../utils/halfDayLeave');
 const LP = require('../utils/latePermission');
 const LP_STATES = LP.STATE_KEYS;
@@ -92,6 +94,27 @@ router.get('/', requirePerm(null, 'hrms', 'HRMS Dashboard', 'view'), async (req,
   // mayExport: the page shows its Export button only when this is true (GET /export checks again).
   out.mayExport = !!(await mayExportDashboard(req.user));
   return res.json(out);
+});
+
+// EMPLOYEE PROGRESS (founder 2026-11-06, utils/employeeProgress.js): departments, or the people once the filters leave one department.
+router.get('/progress', requirePerm(null, 'hrms', 'HRMS Dashboard', 'view'), async (req, res) => {
+  const period = dateRange.fromQuery(req, res);
+  if (!period) return undefined;
+  const { employees } = await loadBase(req);
+  const today = D.localDate();
+  const month = (period.to < today ? period.to : today).slice(0, 7);
+  const people = await progress.load(prisma, employees, month);
+  const level = new Set(people.map((p) => p.department)).size === 1 && (req.query.department || req.query.manager || req.query.q) ? 'employee' : 'department';
+  return res.json({ month, label: RJ.monthLabel(month), level, overall: progress.groupFigures('all', 'All', people), rows: progress.rowsFor(people, level) });
+});
+
+// An employee's own month. Their own figures only, so the dashboard permission is not needed.
+router.get('/progress/mine', async (req, res) => {
+  const me = await prisma.employee.findFirst({ where: { userId: req.user.id } });
+  const month = D.localDate().slice(0, 7);
+  if (!me) return res.json({ month, label: RJ.monthLabel(month), me: null });
+  const [p] = await progress.load(prisma, [me], month);
+  return res.json({ month, label: RJ.monthLabel(month), me: progress.personRow(p) });
 });
 
 async function buildDashboard(req, period) {
