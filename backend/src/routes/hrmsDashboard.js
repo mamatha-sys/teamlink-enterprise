@@ -103,7 +103,7 @@ router.get('/progress', requirePerm(null, 'hrms', 'HRMS Dashboard', 'view'), asy
   const { employees } = await loadBase(req);
   const today = D.localDate();
   const month = (period.to < today ? period.to : today).slice(0, 7);
-  const people = await progress.load(prisma, employees, month);
+  const people = await progress.load(prisma, progress.counted(employees, await activeDepartmentSet(), req.query), month);
   const level = new Set(people.map((p) => p.department)).size === 1 && (req.query.department || req.query.manager || req.query.q) ? 'employee' : 'department';
   return res.json({ month, label: RJ.monthLabel(month), level, overall: progress.groupFigures('all', 'All', people), rows: progress.rowsFor(people, level) });
 });

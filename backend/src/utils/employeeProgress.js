@@ -9,6 +9,8 @@
 // A person with nothing to measure is left out of that figure: "no reviews yet" is never shown as a score of 0.
 const D = require('./attendanceDays');
 const RJ = require('./recruiterJoinings');
+const { hrStatusOf } = require('./hrStatus');
+const { filterActiveDepartments } = require('./masters');
 
 const pct = (n, d) => (d > 0 ? Math.round((n / d) * 100) : null);
 const WORKED = { present: 1, halfDay: 0.5, absent: 0, onLeave: 0 };
@@ -67,6 +69,14 @@ function rowsFor(people, level) {
   return [...by.entries()].map(([d, list]) => groupFigures(d, d, list)).sort((a, b) => b.people - a.people || a.name.localeCompare(b.name));
 }
 
+// Who counts (founder 2026-11-06: "only active departments and active employees"): Active people of an active department. People who left, and the
+// "no department" bucket, stay out. Picking a status or a department in the dashboard filters is a choice, and is followed.
+function counted(employees, liveDepartments, query = {}) {
+  const live = query.status ? employees : employees.filter((e) => hrStatusOf(e.employmentStatus, e.user && e.user.status) === 'Active');
+  if (!liveDepartments || !liveDepartments.size) return live.filter((e) => e.department || query.department);
+  return filterActiveDepartments(live, liveDepartments, (e) => e.department, query.department).filter((e) => e.department);
+}
+
 // The month's figures for these employees, from the same sources as their own screens.
 async function load(prisma, employees, month) {
   const today = D.localDate();
@@ -107,4 +117,4 @@ async function load(prisma, employees, month) {
   }));
 }
 
-module.exports = { load, personFigures, groupFigures, personRow, rowsFor, targetDone };
+module.exports = { load, counted, personFigures, groupFigures, personRow, rowsFor, targetDone };

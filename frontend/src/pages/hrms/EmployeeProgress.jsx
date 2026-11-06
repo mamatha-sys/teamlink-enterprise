@@ -1,10 +1,11 @@
 // EMPLOYEE PROGRESS ON THE HRMS DASHBOARD (founder 2026-11-06: targets completed, attendance, performance & development, department wise; "only one round
 // graph, all the department details"). Server: GET /hrms/dashboard/progress (utils/employeeProgress.js), so it follows the dashboard's filters and scope.
 //
-// ONE donut. Each slice is a department, sized by its people, because a donut shows parts of a whole and people are the whole here; the figures sit beside
-// it in one list, which is also the legend, so colour never carries the meaning alone. Hovering a slice or a row lights both. Colours are the validated
-// categorical palette, fixed per department so a filter never repaints one (employee-progress.css). Once the list is down to one department, the same
-// donut shows who has met all their targets, and the list shows each person. "No data" is a dash, never 0%.
+// ONE donut, first and alone with its legend: "first ahh round chart kanipinchali, table ane button evvu". Each slice is a department, sized by its people,
+// because a donut shows parts of a whole and people are the whole here. The Table button opens the figures beside it. Only Active people of active
+// departments (utils/employeeProgress.js counted). Hovering a slice or a row lights both. Colours are the validated categorical palette, one each, kept per
+// department so a filter never repaints one (employee-progress.css). Past eight departments the rest are grey and named in the legend. Once the list is down
+// to one department, the same donut shows who has met all their targets. "No data" is a dash, never 0%.
 import { useEffect, useState } from 'react';
 import api from '../../api';
 import ChartCard, { useTip } from '../../components/charts/ChartCard.jsx';
@@ -13,7 +14,20 @@ import './employee-progress.css';
 
 const show = (v) => (v == null ? '—' : `${v}%`);
 const DEPARTMENT_SLOT = { Education: 1, Medical: 2, Manufacturing: 3, BDE: 4, 'R&D': 5, HR: 6, Administration: 7, Accounts: 8 };
-const slotOf = (name) => DEPARTMENT_SLOT[name] || ((Array.from(String(name)).reduce((n, c) => n + c.charCodeAt(0), 0) % 8) + 1);
+// One colour each: a department's own slot, or the next one nobody here has.
+function slotsFor(rows) {
+  const taken = new Set(rows.map((r) => DEPARTMENT_SLOT[r.name]).filter(Boolean));
+  const out = new Map();
+  rows.forEach((r) => {
+    let slot = DEPARTMENT_SLOT[r.name];
+    if (!slot) {
+      slot = [1, 2, 3, 4, 5, 6, 7, 8].find((n) => !taken.has(n)) || 'n';
+      if (slot !== 'n') taken.add(slot);
+    }
+    out.set(r.key, slot);
+  });
+  return out;
+}
 const COLUMNS = [
   { key: 'targetsPct', name: 'Targets', title: (r, people) => (people ? `${r.targetsMet} of ${r.targetsPeople} targets${r.joiningTarget != null ? `, ${r.joinings} of ${r.joiningTarget} joinings` : ''}` : `${r.targetsMet} of ${r.targetsPeople} people met all targets`) },
   { key: 'attendancePct', name: 'Attendance', title: (r) => `${r.daysWorked} of ${r.workingDays} working days` },
@@ -98,6 +112,7 @@ export default function EmployeeProgress({ params, onPickDept }) {
   const [d, setD] = useState(null);
   const [failed, setFailed] = useState(false);
   const [active, setActive] = useState(null);
+  const [table, setTable] = useState(false);
   const key = JSON.stringify(params);
   useEffect(() => {
     let live = true;
@@ -112,30 +127,48 @@ export default function EmployeeProgress({ params, onPickDept }) {
   const people = d.level === 'employee';
   const o = d.overall;
   const noTargets = o.people - o.targetsPeople;
+  const slots = slotsFor(people ? [] : d.rows);
   const slices = people
     ? [
       { key: 'met', name: 'Met all targets', value: o.targetsMet, slot: 3 },
       { key: 'notYet', name: 'Not yet', value: o.targetsPeople - o.targetsMet, slot: 2 },
       { key: 'none', name: 'No target this month', value: noTargets, slot: 'n' },
     ]
-    : d.rows.map((r) => ({ key: r.key, name: r.name, value: r.people, slot: slotOf(r.name) }));
+    : d.rows.map((r) => ({ key: r.key, name: r.name, value: r.people, slot: slots.get(r.key) }));
   return (
     <div className="hd-epg">
       <ChartCard
         title={people ? 'Employee performance' : 'Department wise employee performance'}
-        sub={`${d.label}, so far. ${people ? 'The round graph shows who has met all their targets.' : 'The round graph shows people per department. Click a department to see its people.'}`}
+        sub={`${d.label}, so far. Active employees only. ${people ? 'The round graph shows who has met all their targets.' : 'The round graph shows people per department.'}`}
         isEmpty={d.rows.length === 0} empty="No employees match these filters."
       >
-        <div className="epg-layout">
+        <div className="epg-actions">
+          <button type="button" className="tlc-toggle" aria-pressed={table} onClick={() => setTable((v) => !v)}>{table ? 'Hide table' : 'Table'}</button>
+        </div>
+        <div className={`epg-layout${table ? ' open' : ''}`}>
           <div>
             <Donut slices={slices} total={o.people} word={o.people === 1 ? 'person' : 'people'} active={people ? null : active} setActive={people ? () => {} : setActive} />
-            {people && (
+            {table && (
               <div className="epg-legend">
                 {slices.map((s) => <span key={s.key}><i className={`epg-s${s.slot}`} />{s.name} {s.value}</span>)}
               </div>
             )}
           </div>
-          <Details rows={d.rows} people={people} overall={o} slotFor={(r) => (people ? null : slotOf(r.name))} active={active} setActive={setActive} onPickDept={onPickDept} />
+          {table
+            ? <Details rows={d.rows} people={people} overall={o} slotFor={(r) => (people ? null : slots.get(r.key))} active={active} setActive={setActive} onPickDept={onPickDept} />
+            : (
+              <ul className="epg-key">
+                {slices.map((s) => (
+                  <li key={s.key} className={active === s.key ? 'on' : ''} onMouseEnter={() => !people && setActive(s.key)} onMouseLeave={() => setActive(null)}>
+                    <i className={`epg-s${s.slot}`} />
+                    {!people && onPickDept
+                      ? <button type="button" title={`Show the people of ${s.name}`} onClick={() => onPickDept(s.key)}>{s.name}</button>
+                      : <span>{s.name}</span>}
+                    <b>{s.value}</b>
+                  </li>
+                ))}
+              </ul>
+            )}
         </div>
       </ChartCard>
     </div>

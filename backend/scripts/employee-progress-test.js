@@ -42,4 +42,17 @@ assert.deepStrictEqual([people[0].targetsMet, people[0].targetsPeople, people[0]
 const noDept = P.personFigures({ employee: e('d', null) });
 assert.strictEqual(noDept.department, 'No department');
 
+// only Active people of active departments
+const live = new Set(['education', 'hr']);
+const person = (id, department, employmentStatus = 'Active', login = 'Active') => ({ id, department, employmentStatus, user: { status: login } });
+const crowd = [
+  person('ok', 'Education'), person('left', 'Education', 'Exited'), person('relieved', 'HR', 'Relieved'), person('off', 'HR', 'Active', 'Inactive'),
+  person('notice', 'HR', 'Notice Period'), person('oldDept', 'Recruitment'), person('blank', ''), person('hr', 'HR'),
+];
+const ids = (list) => list.map((x) => x.id);
+assert.deepStrictEqual(ids(P.counted(crowd, live)), ['ok', 'hr'], 'Active people of active departments only');
+assert.deepStrictEqual(ids(P.counted(crowd, live, { status: 'Notice Period' }).filter((x) => x.id === 'notice')), ['notice'], 'a chosen status is followed');
+assert.deepStrictEqual(ids(P.counted(crowd, live, { department: 'Recruitment' })), ['ok', 'oldDept', 'hr'], 'a chosen department stays');
+assert.deepStrictEqual(ids(P.counted(crowd, new Set())), ['ok', 'oldDept', 'hr'], 'no department master: blanks still go');
+
 console.log('employee progress: all passed');
