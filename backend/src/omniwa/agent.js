@@ -280,6 +280,9 @@ async function ownsChat({ candidateId = null, e164 = null }) {
     const conv = (await S.q(`SELECT * FROM "OmniWaConv" WHERE ${candidateId ? 'candidateId' : 'e164'} = ?`, candidateId || e164))[0];
     if (conv && (conv.mode !== 'ai' || conv.state !== 'active')) return false;
     if (conv && conv.aiStartedAt) return true;
+    // the AI answers everybody now, so the bots stay quiet unless only test numbers are on
+    const who = (conv && conv.e164) || e164;
+    if (who) return !cfg.testNumbers.length || cfg.testNumbers.includes(who);
     const since = Date.now() - cfg.promoDays * 86400000;
     const col = candidateId ? 'candidateId' : 'e164';
     return (await S.q(`SELECT 1 AS x FROM "OmniWaMessage" WHERE ${col} = ? AND direction = 'OUT' AND aiGenerated = 0 AND campaignId IS NOT NULL AND at >= ? LIMIT 1`, candidateId || e164, since)).length > 0;
@@ -323,11 +326,13 @@ async function askModel(conv, cfg, input) {
   }
   // an answer inside the questions is an answer, whatever words it has ("job change" is not a search)
   const answering = mem.intakeOn && !/\?\s*$/.test(input);
+  if (!answering && !conv.promoAt && T.isGreeting(input)) return { ctx, calls, reply: T.GREETING_TEXT, written: true }; // "hi" with no promotion behind it: TeamLink's own words, at once
   if (promoJob && asksOther && !answering) return { ctx, calls, reply: T.onlyThisJobText(job), written: true };
   if (((!job.available && !picked) || asksOther) && !answering) {
     const found = await T.offerJobs(conv, input).catch(() => ({ searched: false, jobs: [] }));
     if (found.jobs.length) return { ctx, calls, reply: T.jobListText(found.jobs, found.total), written: true };
     if (found.searched && T.askedAboutJob(input)) return { ctx, calls, reply: T.NO_MATCH_TEXT, written: true }; // "sounds good" asks for no job: that is the model's
+    if (!conv.promoAt && T.mentionsJobs(input)) return { ctx, calls, reply: T.GREETING_TEXT, written: true }; // "any jobs?" names no work to search for: ask which
   }
   // YES to a promotion: TeamLink asks for the details itself, one at a time. A question in between is answered first, then the next detail is asked again with the next answer.
   const now2 = JSON.parse(conv.collected || '{}');
@@ -419,7 +424,8 @@ async function runTurn(row, defaults, now = Date.now()) {
   if (!cfg.enabled) return { skipped: 'off' };
   if (cfg.numberOff) return { skipped: 'number_off' };
   if (cfg.testNumbers.length && !cfg.testNumbers.includes(conv.e164)) return { skipped: 'not_a_test_number' };
-  if (conv.mode === 'ai' && conv.state === 'needs_human' && !STAYS_WITH_PEOPLE.test(conv.handoffReason || '')) {
+  // somebody who said no and later says hi is talking again; STOP is the isBlocked check below
+  if (conv.mode === 'ai' && ((conv.state === 'needs_human' && !STAYS_WITH_PEOPLE.test(conv.handoffReason || '')) || (conv.state === 'not_interested' && T.isGreeting(input)))) {
     await S.run('UPDATE "OmniWaConv" SET state = \'active\', handoffReason = NULL, updatedAt = ? WHERE id = ?', now, conv.id);
     conv.state = 'active'; conv.handoffReason = null;
   }
@@ -444,10 +450,7 @@ async function runTurn(row, defaults, now = Date.now()) {
       await S.run('UPDATE "OmniWaConv" SET promoAt = ?, campaignId = ?, campaignName = ?, requirementId = ?, collected = ?, aiTurns = 0, updatedAt = ? WHERE id = ?', gs.at, gs.campaignId, gs.campaignName, conv.requirementId, conv.collected, now, conv.id);
     }
   }
-  if (!ongoing && !promoted) {
-    if (conv.personType === 'LEAD') { await handoff(conv, 'A new number wrote to us', now); await stamp('lead'); }
-    return { skipped: 'not_a_reply_to_a_promotion' };
-  }
+  // anyone who writes gets an answer, not only a reply to a promotion (founder 2026-11-06: "evaru ina hi ani message chesina ai agent reply evvali")
   const sayFallback = async () => {
     const s = await sendText(conv, cfg.fallbackMessage);
     if (s.ok) await S.run('UPDATE "OmniWaConv" SET fallbackAt = ? WHERE id = ?', now, conv.id);

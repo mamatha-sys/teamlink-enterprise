@@ -109,7 +109,10 @@ function jobListText(jobs, total = jobs.length) {
   const more = total > jobs.length ? ' Or tell me the subject, role or city to see others.' : '';
   return `These jobs are open now:\n${lines.join('\n')}\nReply with the number of the job you want.${more}`;
 }
+const GREETING_TEXT = 'Hello. This is TeamLink Consultants. Are you looking for a job? Tell me the kind of work you want, and I will check our open positions. To talk to our team, write "recruiter".';
+const isGreeting = (t) => /^\W*(h+i+|hey+|hai+|hel+o+|namaste|namaskaram|good\s+(morning|afternoon|evening)|gm)(\s+(sir|madam|mam|maam|team|there))?\W*$/i.test(String(t || ''));
 const NO_MATCH_TEXT = 'I could not find an open job for that right now. Tell me another kind of work you want, or write "recruiter" and someone from our team will help you.';
+const mentionsJobs = (text) => JOB_ASK.test(String(text || ''));
 const askedAboutJob = (text) => wordsOf(text).length > 0 && JOB_ASK.test(String(text || ''));
 const pickedNumber = (text) => { const m = /^\D*([1-5])\D*$/.exec(String(text || '').trim()); return m ? Number(m[1]) : null; };
 const titleHas = (title, text) => wordsOf(text).some((w) => wordStarts(title, stemOf(w)));
@@ -275,4 +278,4 @@ async function run(name, args, conv, ctx) {
 }
 
 const NAMES = ['get_candidate_profile', 'get_job_details', 'search_knowledge_base', 'save_candidate_data', 'send_apply_link', 'send_interview_link', 'handoff_to_recruiter'];
-module.exports = { isYes, isNo, nextQuestion, fieldOf, jobOfCampaign, onlyThisJobText, jobCardText, quickAnswer, run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };
+module.exports = { GREETING_TEXT, isGreeting, mentionsJobs, isYes, isNo, nextQuestion, fieldOf, jobOfCampaign, onlyThisJobText, jobCardText, quickAnswer, run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };

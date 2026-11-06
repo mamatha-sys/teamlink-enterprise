@@ -219,7 +219,19 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     await run();
     conv = await convAt(unknown);
     const contact = conv && conv.leadContactId ? (await S.q('SELECT contactType FROM "OutreachContact" WHERE id = ?', conv.leadContactId))[0] : null;
-    check('an unknown number becomes a Lead, a person is called, the AI does not answer a stranger', conv && conv.personType === 'LEAD' && conv.state === 'needs_human' && stub.calls.length === 0 && contact && contact.contactType === 'candidate_lead', conv);
+    check('an unknown number becomes a Lead and the AI answers them, TeamLink\'s own words first', conv && conv.personType === 'LEAD' && conv.state === 'active' && stub.calls.length === 0 && !!conv.lastAiAt && contact && contact.contactType === 'candidate_lead', conv);
+    const hiNo = phoneOf(96);
+    await inbound(hiNo, 'Hiii', 'ZZTEST Hello Person');
+    stub.calls.length = 0;
+    await run();
+    const hiConv = await convAt(hiNo);
+    const hiMsgs = await Inbox.leadMessages(hiConv.id);
+    check('hi from anybody: answered at once, the model is not asked', stub.calls.length === 0 && /looking for a job/.test(hiMsgs[hiMsgs.length - 1].text), hiMsgs);
+    const Tg = require(path.join(BACK, 'src/omniwa/tools'));
+    check('a greeting is a greeting, a sentence is not', ['hi', 'Hii', 'HELLO', 'hi sir', 'Good morning', 'hey!'].every(Tg.isGreeting) && !['hi i need a job', 'high salary', 'hello any vacancy?'].some(Tg.isGreeting));
+    await Cfg.save(admin, { testNumbers: ['919000000001'] });
+    check('with only test numbers on, the bots keep the other chats', (await Agent.ownsChat({ e164: phoneOf(95) })) === false && (await Agent.ownsChat({ e164: '919000000001' })) === true);
+    await Cfg.save(admin, { testNumbers: [] });
     const aList = await Inbox.list(adminMe, {});
     check('Admin sees the lead in the list', aList.rows.some((r) => r.personType === 'LEAD' && r.personId === conv.id));
     if (other) {
@@ -229,13 +241,13 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     }
     const leadSend = await Agent.sendText(conv, 'Hello, tell me your skills.', { user: admin, ai: false });
     const leadMsgs = await Inbox.leadMessages(conv.id);
-    check('a person can answer a lead inside 24 hours and the chat keeps both messages', leadSend.ok && leadMsgs.length === 2 && leadMsgs[1].by === admin.name, leadSend);
+    check('a person can answer a lead inside 24 hours and the chat keeps both messages', leadSend.ok && leadMsgs.length === 3 && leadMsgs[2].by === admin.name, leadSend);
 
     // ---- 6a. the first live test: no job in the chat
     console.log('\n-- no job in the chat');
     check('with no job, words about what is open or filled are stopped; a plain question passes', !!G.jobClaim('We have a few staff nurse positions available, but they are currently filled.') && !!G.jobClaim("Sorry, we couldn't find any job openings.") && G.jobClaim('Which city do you want to work in?') === null);
     const noJobNo = phoneOf(79);
-    await inbound(noJobNo, 'I need a job', 'ZZTEST No Job');
+    await inbound(noJobNo, 'Can you help me please', 'ZZTEST No Job');
     await S.run('UPDATE "OmniWaConv" SET aiStartedAt = ?, state = \'active\', handoffReason = NULL, pendingAt = ? WHERE e164 = ?', Date.now(), Date.now() - 60000, noJobNo);
     await S.run('UPDATE "OmniWaMessage" SET consumedAt = NULL WHERE e164 = ?', noJobNo);
     stub.script = [{ reply: 'The staff nurse positions are currently filled.' }];
@@ -401,20 +413,21 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     await inbound(phoneOf(10), 'Hi');
     stub.calls.length = 0;
     await run();
-    check('a candidate no campaign reached: Green Start is asked (every workspace, this number), and the AI stays out', gsSeen.length === 2 && gsSeen.every((x) => x.url.includes(`phone=${phoneOf(10)}`) && x.auth === 'Bearer zz-gs-token') && stub.calls.length === 0, gsSeen);
+    check('a candidate no campaign reached: Green Start is asked (every workspace, this number), and they get the hello', gsSeen.length === 2 && gsSeen.every((x) => x.url.includes(`phone=${phoneOf(10)}`) && x.auth === 'Bearer zz-gs-token') && stub.calls.length === 0 && /looking for a job/.test((await aiMsgs(i.id))[0].body), gsSeen);
     gs.found = true;
     await inbound(phoneOf(10), 'sounds good to me');
     stub.script = [{ reply: 'Thank you, let me help.' }];
     await run();
     conv = await convAt(phoneOf(10));
-    check('reply to a Green Start campaign: the AI answers, and the chat shows that campaign', (await aiMsgs(i.id)).length === 1 && conv.campaignName === 'ZZTEST Nurses' && conv.campaignId === 'gs:c9' && !!conv.aiStartedAt, conv);
+    check('reply to a Green Start campaign: the AI answers, and the chat shows that campaign', (await aiMsgs(i.id)).length === 2 && conv.campaignName === 'ZZTEST Nurses' && conv.campaignId === 'gs:c9' && !!conv.aiStartedAt, conv);
     await new Promise((r) => { setTimeout(r, 400); });
-    check('the AI reply is shown in the Green Start thread too: same words and Meta id, in the workspace that has the thread, nothing sent again', gsThread.length >= 1 && gsThread[0].url === '/api/v1/conversations/import-outbound' && gsThread[0].body.text === 'Thank you, let me help.' && gsThread[0].body.phone === phoneOf(10) && !!gsThread[0].body.providerMessageId, gsThread);
+    const mirrored = gsThread.find((x) => x.body.text === 'Thank you, let me help.');
+    check('the AI reply is shown in the Green Start thread too: same words and Meta id, in the workspace that has the thread, nothing sent again', !!mirrored && mirrored.url === '/api/v1/conversations/import-outbound' && mirrored.body.phone === phoneOf(10) && !!mirrored.body.providerMessageId, gsThread);
     gsSeen.length = 0;
     await inbound(phoneOf(10), 'one more');
     stub.script = [{ reply: 'Okay.' }];
     await run();
-    check('a running chat on the same campaign carries on (a new campaign would change it)', (await aiMsgs(i.id)).length === 2 && (await convAt(phoneOf(10))).campaignId === 'gs:c9');
+    check('a running chat on the same campaign carries on (a new campaign would change it)', (await aiMsgs(i.id)).length === 3 && (await convAt(phoneOf(10))).campaignId === 'gs:c9');
     // one number, one workspace: an old thread in another workspace never takes the chat (founder 2026-11-06)
     const mapBefore = GI.readWaMap;
     GI.readWaMap = async () => ({ 'zz-edu2': { workspaceId: 'ws2' }, 'zz-med': { workspaceId: 'ws1' } });
@@ -446,7 +459,7 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     await inbound(phoneOf(11), 'Hi');
     stub.calls.length = 0;
     await run();
-    check('Green Start not answering: nothing breaks, nobody gets a wrong AI reply', stub.calls.length === 0 && (await aiMsgs(j.id)).length === 0);
+    check('Green Start not answering: nothing breaks, they get the hello, the model is not asked', stub.calls.length === 0 && (await aiMsgs(j.id)).length === 1);
     gsServer.close();
 
     // ---- 8b1. YES to a promotion: the details are asked in order
