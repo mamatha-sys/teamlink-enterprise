@@ -5,7 +5,7 @@ import {
   PanelPad, AssignRow, TwoCol, QaRow,
   NumHead, FeatureTiles, FeatureScreen, FeatureTable,
 } from '../../components/proto.jsx';
-import { isHR as hasHrmsAdmin, canManageServices } from '../../permissions';
+import { isHR as hasHrmsAdmin, canManageServices, canDeleteServices } from '../../permissions';
 import Combo from '../../components/Combo.jsx';
 import PeopleFilterBar, { peopleMatches, textMatches } from '../../components/PeopleFilterBar.jsx';
 import Pager, { usePaged } from '../../components/Pager.jsx';
@@ -203,6 +203,13 @@ export default function Announcements({ view, onOpen, onBack }) {
   );
 
   async function togglePin(a) { await api.put(`/announcements/${a.id}/pin`); load(); }
+  async function removeNotice(a) {
+    if (!window.confirm(`Delete "${a.title}"? It cannot be brought back.`)) return;
+    await api.delete(`/announcements/${a.id}`);
+    if (openedId === a.id) setOpenedId(null);
+    setSent(`Deleted: ${a.title}`);
+    load();
+  }
   // PAUSE (2026-10-27): a paused notice is off the dashboard and out of the bell until Resume
   async function togglePause(a) { await api.put(`/announcements/${a.id}/pause`, { paused: !a.paused }); load(); }
 
@@ -340,6 +347,7 @@ export default function Announcements({ view, onOpen, onBack }) {
                 <span className={`status ${a.category === 'Policy' ? 'pending' : 'active'}`}>{a.category || 'General'}</span>
                 {isHR && <button className="btn btn-sm" title={a.paused ? 'Show it again on the dashboard and in notifications' : 'Hide it from the dashboard and notifications (kept on file)'} onClick={() => togglePause(a)}>{a.paused ? 'Resume' : 'Pause'}</button>}
                 {isHR && <button className="btn btn-sm" onClick={() => togglePin(a)}>{a.pinned ? 'Unpin' : 'Pin'}</button>}
+                {canDeleteServices(user) && <button className="btn btn-sm" onClick={() => removeNotice(a)}>Delete</button>}
               </span>
             </AssignRow>
           ))}

@@ -106,6 +106,7 @@ export const canEditEmployees = (user) => can(user, 'hrms', 'hrms', 'Employee Ma
 // documents,helpdesk,surveys,resignations,employeeRecords}.js.
 export const canManageServices = (user) => can(user, 'hrms', 'hrms', 'Employee Services', 'create');
 export const canEditServices = (user) => can(user, 'hrms', 'hrms', 'Employee Services', 'edit');
+export const canDeleteServices = (user) => can(user, 'hrms', 'hrms', 'Employee Services', 'delete');
 export const canDecideServices = (user) => can(user, 'hrms', 'hrms', 'Employee Services', 'approve');
 // Performance & Development covers reviews, projects, targets, recognition,
 // disciplinary records, KT and the LMS catalogue.
