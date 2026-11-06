@@ -168,7 +168,7 @@ async function raiseJoiningInvoice({
 // ---------------------------------------------------------------------------
 const DEFAULT_ONBOARDING_TASKS = [
   'Offer letter signed', 'ID proof collected', 'PAN card collected',
-  'Laptop/asset assigned', 'Reporting manager introduction', 'System access provisioned',
+  'Laptop/asset assigned', 'Reporting manager introduction', 'System access provisioned', 'Company email assigned',
 ];
 
 async function createHrmsEmployee({ application, candidate, requirement, userId }) {
@@ -204,6 +204,9 @@ async function createHrmsEmployee({ application, candidate, requirement, userId 
     data: { hrmsEmployeeId: employee.id },
   });
   require('./stationeryKit').onActive(employee.id); // default stationery kit, once (utils/stationeryKit.js)
+  // the address they came with stays on the record for good; the login moves to the company email when HR gives it (utils/companyEmail.js)
+  if (candidate.email) await prisma.$executeRawUnsafe('UPDATE "Employee" SET "personalEmail" = ? WHERE "id" = ?', String(candidate.email).trim().toLowerCase(), employee.id).catch(() => {});
+  if (userId) await prisma.notification.create({ data: { userId, title: `Give ${candidate.name} a company email`, message: 'Open the employee page: Login & company email.', channel: 'In-App', recipient: `company-email-due|${employee.id}`, status: 'Sent' } }).catch(() => {});
   await logAudit({
     userId,
     action: 'HRMS employee created from ATS (TeamLink Internal Hire)',

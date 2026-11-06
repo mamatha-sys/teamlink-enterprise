@@ -407,6 +407,7 @@ async function processRequest(req, identifier, userOverride = null) {
     const LA = require('./loginAccounts'); // eslint-disable-line global-require
     let accounts;
     let mention = false;
+    let sendTo = null; // the personal address, when that is what was typed
     if (userOverride) {
       accounts = [userOverride];
       mention = (await LA.accountsByEmail(userOverride.email)).length > 1;
@@ -414,6 +415,11 @@ async function processRequest(req, identifier, userOverride = null) {
       const got = await LA.resolveIdentifier(identifier);
       accounts = got.accounts;
       mention = accounts.length > 1;
+      // the personal address of someone whose login moved to the company email: the link goes to the personal address (utils/companyEmail.js)
+      if (!accounts.length) {
+        const rec = await require('./companyEmail').recoveryLogin(identifier).catch(() => null); // eslint-disable-line global-require
+        if (rec) { accounts = [rec.user]; sendTo = rec.to; }
+      }
     }
     if (!accounts.length) {
       await logAudit({ action: 'Password reset requested - no such account', entity: 'User', toValue: 'Nothing sent', reason: `${where} - typed: ${String(identifier).slice(0, 60)}` });
@@ -440,7 +446,7 @@ async function processRequest(req, identifier, userOverride = null) {
       const first = items[0];
       // eslint-disable-next-line no-await-in-loop
       const res = await deliver({
-        to: list[0].email,
+        to: sendTo || list[0].email,
         kind: 'password-reset',
         build: (hasLogo) => (mention
           ? buildMultiResetEmail({ items, hasLogo })

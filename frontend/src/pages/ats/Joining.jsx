@@ -177,7 +177,7 @@ export default function Joining() {
                       </div>
                     )}
                     {v === 'joined' && r.clientTrack?.invoice && <div style={{ marginTop: 3 }}><StatusChip status={`Invoice: ${r.clientTrack.invoice.label}`} tone={r.clientTrack.invoice.tone} /></div>}
-                    {v === 'joined' && internal && <div className="small-muted" style={{ fontSize: 11, marginTop: 2 }}>{r.hrmsEmployeeId ? 'Employee added' : 'Not added as employee yet'}</div>}
+                    {v === 'joined' && internal && <div className="small-muted" style={{ fontSize: 11, marginTop: 2 }}>{r.hrmsEmployeeId ? <>Employee added · <Link to={`/employees/${r.hrmsEmployeeId}`}>Company email</Link></> : 'Not added as employee yet'}</div>}
                   </td>
                   <td>
                     <div className="ivx-actions">

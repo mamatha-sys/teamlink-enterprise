@@ -203,6 +203,9 @@ router.post('/login', async (req, res) => {
   }
 
   if (accounts.length === 0 && !vendorRow) {
+    // the old personal address, with the right password: the login moved to the company email (utils/companyEmail.js)
+    const movedTo = await require('../utils/companyEmail').movedLogin(typed, pw).catch(() => null); // eslint-disable-line global-require
+    if (movedTo) return res.status(401).json({ error: `Your login is now your company email: ${movedTo}. Please sign in with it. Your password is the same.`, code: 'USE_COMPANY_EMAIL' });
     await spend(pw, 0);
     typedFail(key);
     // SECURITY (2026-10-13): failed sign-ins are audited (address typed + IP; never the password).

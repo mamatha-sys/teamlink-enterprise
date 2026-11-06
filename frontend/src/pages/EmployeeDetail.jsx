@@ -14,6 +14,7 @@ import { seatOptionLabel } from '../components/seatLabel.js'; // free / held / l
 import ExtraFields from '../components/employees/ExtraFields.jsx';
 import ExportMenu from '../components/ExportMenu.jsx';
 import NoticeDays from '../components/employees/NoticeDays.jsx';
+import CompanyEmailCard from '../components/employees/CompanyEmailCard.jsx'; // the personal email stays, the company email becomes the login (2026-11-06)
 // Manage Fields: HR's labels, order and Pause for the built-in fields.
 import { useFieldLayout } from '../utils/employeeFieldLayout';
 
@@ -654,6 +655,7 @@ export default function EmployeeDetail() {
             <div className="kv"><span className="k">Sign-in details</span>
               <span>{employee.credentialsSentStatus || 'Not issued yet'}
                 {employee.credentialsSentAt ? ` · ${new Date(employee.credentialsSentAt).toLocaleString('en-GB')}` : ''}</span></div>
+            {(isHR || isAdmin) && <CompanyEmailCard employeeId={employee.id} onChanged={load} />}
 
             <h3 style={{ fontSize: 13, margin: '14px 0 8px' }}>Bank & Statutory <span className="small-muted">(restricted)</span></h3>
             {!FL.paused('bankName') && <div className="kv"><span className="k">{FL.label('bankName', 'Bank')}</span><span>{employee.bankName ? `${employee.bankName} · ${employee.bankAccountNumber || '—'}` : '—'}</span></div>}

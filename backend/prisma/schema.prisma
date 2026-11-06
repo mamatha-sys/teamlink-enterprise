@@ -1050,6 +1050,11 @@ model Employee {
   unlockedAt               DateTime?
   unlockGrantReason        String?
   unlockGrantSection       String? // "All fields" or a named section
+  // PERSONAL AND COMPANY EMAIL (2026-11-06, utils/companyEmail.js): the address they came with stays for good; the company address, once HR gives it, is `email` and the login.
+  personalEmail            String?
+  companyEmail             String?
+  companyEmailAt           DateTime?
+  companyEmailBy           String?
   // Honest record of the sign-in email: whether it was really transmitted.
   credentialsSentAt        DateTime?
   credentialsSentStatus    String? // Sent | Not sent — no provider | Failed: <provider reason>
@@ -1095,6 +1100,7 @@ model Employee {
   positionAssignments       PositionAssignment[]
 
   @@index([biometricPin])
+  @@index([personalEmail])
 }
 
 // Generic table backing the smaller, similarly-shaped HRMS self-service areas

@@ -520,6 +520,10 @@ router.put('/me', async (req, res) => {
   const gate = await enforceEditWindow(employee);
   if (!gate.allowed) return res.status(403).json({ error: gate.error });
   if (employee.pendingChanges) return res.status(409).json({ error: 'Your last submission is still awaiting HR review.' });
+  {
+    const locked = await require('../utils/companyEmail').emailLocked(employee.id, req.body.email); // eslint-disable-line global-require
+    if (locked) return res.status(400).json({ error: locked, field: 'email' });
+  }
 
   const changes = [];
   await fieldDefs.refresh();
@@ -2741,11 +2745,33 @@ router.post('/:id/send-credentials', requirePerm(null, 'hrms', 'Employee Managem
 // assertInScope() holds a TL or an STL to their own department, and lets HR
 // and the admins through, so widening WHO may edit does not widen WHAT they
 // may edit.
+// PERSONAL AND COMPANY EMAIL (2026-11-06, utils/companyEmail.js): HR gives the company email, and it becomes the login.
+async function employeeForCompanyEmail(req, res) {
+  const employee = await prisma.employee.findUnique({ where: { id: req.params.id } });
+  if (!employee) { res.status(404).json({ error: 'Employee not found' }); return null; }
+  if (!(await assertInScope(req, employee))) { res.status(403).json({ error: 'This record is outside your department scope' }); return null; }
+  return employee;
+}
+router.get('/:id/company-email', requirePerm(null, 'hrms', 'Employee Management', 'edit'), async (req, res) => {
+  const employee = await employeeForCompanyEmail(req, res);
+  if (employee) res.json(await require('../utils/companyEmail').state(employee)); // eslint-disable-line global-require
+});
+router.post('/:id/company-email', requirePerm(null, 'hrms', 'Employee Management', 'edit'), async (req, res) => {
+  const employee = await employeeForCompanyEmail(req, res);
+  if (!employee) return;
+  const out = await require('../utils/companyEmail').assign(req.user, employee, { email: req.body.email, personalEmail: req.body.personalEmail, createMailbox: req.body.createMailbox === true }); // eslint-disable-line global-require
+  res.status(out.status).json(out.body);
+});
+
 router.put('/:id', requirePerm(null, 'hrms', 'Employee Management', 'edit'), async (req, res) => {
   const existingForScope = await prisma.employee.findUnique({ where: { id: req.params.id } });
   if (!existingForScope) return res.status(404).json({ error: 'Employee not found' });
   if (!(await assertInScope(req, existingForScope))) {
     return res.status(403).json({ error: 'This record is outside your department scope' });
+  }
+  {
+    const locked = await require('../utils/companyEmail').emailLocked(existingForScope.id, req.body.email); // eslint-disable-line global-require
+    if (locked) return res.status(400).json({ error: locked, field: 'email' });
   }
   const editableFields = [
     'name', 'email', 'phone', 'department', 'team', 'designation', 'location', 'employmentStatus', 'employeeType',
