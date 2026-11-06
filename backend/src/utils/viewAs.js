@@ -28,6 +28,7 @@ const { AsyncLocalStorage } = require('async_hooks');
 const jwt = require('jsonwebtoken');
 const express = require('express');
 const prisma = require('../db');
+const { isStrictSystemAccount } = require('./systemAccounts');
 
 const VIEW_AS_MINUTES = 60;
 const als = new AsyncLocalStorage();
@@ -122,7 +123,8 @@ async function checkSession(claims, identity) {
     return ended('View as has ended — the Super Admin login behind it is no longer active.');
   }
   if (await isEnded(v.sid)) return ended('View as has ended.');
-  if (identity.role === 'SUPER_ADMIN' || identity.hrmsRole === 'SUPER_ADMIN') {
+  // an HR-super login (utils/hrSuper.js) resolves as Super Admin but is an employee, and View as is read-only: the start and this check use the same test
+  if (isStrictSystemAccount(identity)) {
     return ended('A Super Admin login cannot be viewed as.');
   }
   return null;
