@@ -170,6 +170,11 @@ const MATCH = [...TO_INTEREST, 'Maybe, tell me more.', '3 years', 'Yes, in manuf
   const all = [r0, r1, r2, r3, r4, b, c, n, f, s, te, hi].flatMap((x) => x.said).join(' ');
   check('nothing unfilled is ever said', !/undefined|\{name\}|\{greet\}|null/.test(all));
 
+  console.log('Telugu words (founder 2026-11-06)');
+  const said = ['vacancyScript.js', 'scriptDialogue.js'].map((f) => require('fs').readFileSync(path.join(__dirname, '../src/calling', f), 'utf8')).join('');
+  check('the assistant never says అండి', !said.includes('అండి'));
+  check('the call opens with గారేనా మాట్లాడేది', said.includes('{name} గారేనా మాట్లాడేది?') && !said.includes('గారితో మాట్లాడుతున్నానా'));
+
   console.log(failed ? `\n${failed} of ${total} checks FAILED` : `\nAll ${total} checks passed`);
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });
