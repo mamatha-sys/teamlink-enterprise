@@ -607,6 +607,7 @@ function DashboardTab({ user, isHR, canEditPolicy, canApprove, canConfigure, rel
                   <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     {/* It opens the request with its chain, the reason, the employee's comments, the TL rule, Approve / Reject and the reassign picker. */}
                     <button className={`btn btn-sm${mayDecide ? ' btn-primary' : ''}`} title={mayDecide ? (direct ? 'Approve or reject now - the levels still waiting are skipped' : 'Approve, reject or reassign') : 'See who approves this request'} onClick={() => setChainFor(r.id)}>{mayDecide ? 'Approve / Reject' : 'View'}</button>
+                    <ChainButton requestId={r.id} />
                   </span>
                 </AssignRow>
               );

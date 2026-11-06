@@ -49,3 +49,7 @@
 .pls-n{font-size:22px;font-weight:700}
 .pls-green{background:#DCFCE7;color:#15803D}.pls-blue{background:#DBEAFE;color:#1D4ED8}.pls-grey{background:#F1F5F9;color:#475569}.pls-orange{background:#FFEDD5;color:#C2410C}.pls-red{background:#FEE2E2;color:#B91C1C}
 @media (max-width:700px){.pls-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* Open, Approve / Reject and Chain stay on screen (founder 2026-11-06): the table is wider than the page and they sat past its right edge */
+.lvx-table{overflow-x:auto}
+.lvx-table .lvx-actions{position:sticky;right:0;z-index:1;background:var(--paper-raised,#fff);box-shadow:-6px 0 6px -6px rgba(0,0,0,.18);white-space:nowrap}
+.lvx-table thead .lvx-actions{z-index:2}

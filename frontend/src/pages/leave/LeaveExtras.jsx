@@ -85,7 +85,7 @@ export function LeaveRequestsTable({ requests, onOpen, limit = null, renderActio
         <thead>
           <tr>
             <th>Code</th><th>Employee</th><th>Team</th><th>Designation</th><th>Type</th><th>From</th><th>To</th>
-            <th>Days</th><th>Reason / comments</th><th>Status</th><th>Approved by / Decided by</th><th />
+            <th>Days</th><th>Reason / comments</th><th>Status</th><th>Approved by / Decided by</th><th className="lvx-actions">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -102,7 +102,7 @@ export function LeaveRequestsTable({ requests, onOpen, limit = null, renderActio
               <td><ReasonCell r={r} /></td>
               <td><Status>{r.status}</Status></td>
               <td><DecidedByCell r={r} /></td>
-              <td>
+              <td className="lvx-actions">
                 <span style={{ display: 'flex', gap: 6 }}>
                   {onOpen && <button className="btn btn-sm" onClick={() => onOpen(r.id)}>Open</button>}
                   {renderActions && renderActions(r)}
