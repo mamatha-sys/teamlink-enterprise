@@ -21,7 +21,7 @@ param(
   [switch]$AfterUpdate       # started by its own older copy, which is closing
 )
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '2.0'
+$AgentVersion = '2.1'
 # older Windows would otherwise try an old, refused kind of secure connection
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, System.Security
@@ -344,6 +344,7 @@ function Heartbeat {
   $beat = @{ agentVersion = $AgentVersion; paused = $state; currentApp = $(if ($c -and -not $c.brk) { $c.app } else { '' }); title = $(if ($c -and -not $c.brk) { $c.title } else { '' }); idle = [bool]($c -and $c.idle) }
   $r = Call-Api 'POST' '/heartbeat' $beat $script:cfg.token
   if ($r.status -eq 200) {
+    $script:lastBeatOk = Get-Date   # it is reaching the server: the wake handler uses this to know it is back online
     $s = $r.data.settings
     $script:lastLive = ''   # this heartbeat may be up to 15 seconds old: the watcher sets the picture right
     $script:settings = @{ workStart = $s.workStart; workEnd = $s.workEnd; idleThresholdMinutes = $s.idleThresholdMinutes; excluded = [bool]$s.excluded }
@@ -385,5 +386,29 @@ $sampleTimer = New-Object Windows.Forms.Timer; $sampleTimer.Interval = 15000; $s
 $flushTimer = New-Object Windows.Forms.Timer; $flushTimer.Interval = 120000; $flushTimer.Add_Tick({ try { Flush } catch {} }); $flushTimer.Start()
 $liveTimer = New-Object Windows.Forms.Timer; $liveTimer.Interval = 2000; $liveTimer.Add_Tick({ try { Watch-Front } catch {} }); $liveTimer.Start()
 $beatTimer = New-Object Windows.Forms.Timer; $beatTimer.Interval = 60000; $beatTimer.Add_Tick({ try { Heartbeat } catch {} }); $beatTimer.Start()
+# ---------------------------------------------------------------- WAKE FROM SLEEP
+# Closing the laptop and opening it the next day does NOT sign out of Windows, so this same agent keeps running. But while the
+# PC sleeps a Windows.Forms.Timer does not tick, and the Wi-Fi takes a few seconds to come back on wake - so the first
+# heartbeat after opening the lid can race the network and miss, and the Live Dashboard shows the person Offline until a later
+# tick happens to land. This makes the agent report the moment the PC wakes, and keep trying for a short while until a
+# heartbeat gets through, so a normal close-and-reopen never shows as Offline.
+$script:resumeAt = $null
+try {
+  [Microsoft.Win32.SystemEvents]::add_PowerModeChanged({
+    param($sender, $e)
+    if ($e.Mode -eq [Microsoft.Win32.PowerModes]::Resume) { $script:resumeAt = Get-Date }
+  })
+} catch { }
+$wakeTimer = New-Object Windows.Forms.Timer
+$wakeTimer.Interval = 4000   # the work runs here, on the UI thread, not inside the power event
+$wakeTimer.Add_Tick({
+  if (-not $script:resumeAt) { return }
+  $since = (Get-Date) - $script:resumeAt
+  # a heartbeat that got through AFTER we woke, or 90 seconds of trying, ends the catch-up
+  if (($script:lastBeatOk -and $script:lastBeatOk -gt $script:resumeAt) -or $since.TotalSeconds -gt 90) { $script:resumeAt = $null; return }
+  try { Sample; Watch-Front; Heartbeat; Flush } catch { }
+})
+$wakeTimer.Start()
+
 [Windows.Forms.Application]::Run()
 $tray.Dispose()
