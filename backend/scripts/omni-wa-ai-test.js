@@ -353,6 +353,23 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     await run();
     conv = await convAt(phoneOf(6));
     check('a message sent from any other screen pauses it too, before the next answer', conv.mode === 'paused' && stub.calls.length === 0, conv);
+    // a template sent to one candidate (Send Message) is a promotion, not someone answering
+    const kiran = await mkCandidate(97, 'Kiran');
+    await inbound(phoneOf(97), 'Hi');
+    await run();
+    await prisma.candidateMessage.create({ data: { candidateId: kiran.id, channel: 'WhatsApp', template: 'MANUAL', templateLabel: 'Interview invitation', trigger: 'Manual', recipient: `+${phoneOf(97)}`, body: 'ZZTEST template to one', status: 'SENT', senderUserId: admin.id, senderName: 'Developer Team', createdAt: new Date(Date.now() + 1000) } });
+    await inbound(phoneOf(97), 'Yes');
+    stub.calls.length = 0;
+    await run();
+    let kConv = await convAt(phoneOf(97));
+    check('a template sent to one candidate does not stop the AI', kConv.mode === 'ai' && !!kConv.lastAiAt, kConv);
+    // a chat the old, wider rule paused comes back to the AI with the next message
+    await S.run('UPDATE "OmniWaConv" SET mode = \'paused\', pausedByName = \'Developer Team\' WHERE id = ?', kConv.id);
+    await S.run('INSERT INTO "OmniWaAiRun" (id, convId, e164, input, outcome, output, at) VALUES (?,?,?,?,?,?,?)', `war-zz${SUFFIX}`, kConv.id, kConv.e164, 'Yes', 'paused', 'Developer Team is answering this chat.', Date.now() + 2000);
+    await inbound(phoneOf(97), 'hello');
+    await run();
+    kConv = await convAt(phoneOf(97));
+    check('a chat paused by a template send takes the AI back with the next message', kConv.mode === 'ai', kConv);
 
     // ---- 8. limits and settings
     console.log('\n-- limits');

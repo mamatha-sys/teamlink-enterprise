@@ -251,7 +251,15 @@ async function handoff(conv, reason, now = Date.now()) {
 async function humanSentSince(conv) {
   if (!conv.candidateId) return null;
   const since = Math.max(Number(conv.createdAt) || 0, Number(conv.resumedAt) || 0);
-  return prisma.candidateMessage.findFirst({ where: { candidateId: conv.candidateId, channel: 'WhatsApp', senderUserId: { not: null }, template: { notIn: ['BULK', 'AI', 'BOT', 'INBOUND'] }, createdAt: { gt: new Date(since) } }, orderBy: { createdAt: 'desc' }, select: { senderName: true } });
+  // a person ANSWERING: typed words (a chat reply is labelled "Message"). An approved template sent to one candidate from Send Message is a
+  // promotion, not an answer (founder 2026-11-09: his campaign to one number paused the AI as "Developer Team is answering this chat").
+  return prisma.candidateMessage.findFirst({
+    where: {
+      candidateId: conv.candidateId, channel: 'WhatsApp', senderUserId: { not: null }, template: { notIn: ['BULK', 'AI', 'BOT', 'INBOUND'] }, createdAt: { gt: new Date(since) },
+      OR: [{ template: { not: 'MANUAL' } }, { templateLabel: null }, { templateLabel: { in: ['', 'Message'] } }],
+    },
+    orderBy: { createdAt: 'desc' }, select: { senderName: true },
+  });
 }
 async function pause(conv, name, now = Date.now()) {
   await S.run('UPDATE "OmniWaConv" SET mode = \'paused\', pausedByName = ?, pendingAt = NULL, updatedAt = ? WHERE id = ? AND mode <> \'off\'', clip(name, 80) || null, now, conv.id);
@@ -428,6 +436,14 @@ async function runTurn(row, defaults, now = Date.now()) {
   if (conv.mode === 'ai' && ((conv.state === 'needs_human' && !STAYS_WITH_PEOPLE.test(conv.handoffReason || '')) || (conv.state === 'not_interested' && T.isGreeting(input)))) {
     await S.run('UPDATE "OmniWaConv" SET state = \'active\', handoffReason = NULL, updatedAt = ? WHERE id = ?', now, conv.id);
     conv.state = 'active'; conv.handoffReason = null;
+  }
+  // paused by a send that was not a person answering (the rule above was wider before): the AI takes the chat back. A Pause pressed by hand stays.
+  if (conv.mode === 'paused') {
+    const last = (await S.q('SELECT outcome FROM "OmniWaAiRun" WHERE convId = ? ORDER BY at DESC LIMIT 1', conv.id))[0];
+    if (last && last.outcome === 'paused' && !(await humanSentSince(conv))) {
+      await resume(conv, now);
+      Object.assign(conv, { mode: 'ai', state: conv.state === 'stopped' ? 'stopped' : 'active', pausedByName: null, aiTurns: 0 });
+    }
   }
   if (conv.mode !== 'ai' || conv.state !== 'active') return { skipped: conv.state };
   if (await isBlocked(conv.e164)) return { skipped: 'stopped' };
