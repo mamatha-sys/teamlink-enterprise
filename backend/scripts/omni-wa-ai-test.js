@@ -239,6 +239,8 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
       && !Tg.answerFits('Which date and time would be convenient for you?', 'yes') && Tg.answerFits('Which date and time would be convenient for you?', 'tomorrow 11 am')
       && !Tg.answerFits('Have you already applied for this position, or are you exploring new opportunities?', 'yes') && Tg.answerFits('Have you already applied for this position, or are you exploring new opportunities?', 'exploring')
       && Tg.answerFits('Are you comfortable with the job shift and working hours?', 'yes') && Tg.answerFits('Are you currently working or not working?', 'no'));
+    check('a question is known without a "?"; an answer is not a question', Tg.isQuestion('what is the job role') && Tg.isQuestion('salary entha') && Tg.isQuestion('Is it full time?') && !Tg.isQuestion('exploring')
+      && !Tg.isQuestion('Not working') && !Tg.isQuestion('3 years') && !Tg.isQuestion('Apollo Hospitals') && Tg.aboutThisJob('what is the job role') && !Tg.aboutThisJob('any nursing jobs'));
     check('joining time: days, weeks, months and immediate are read; later than the job is a gap', Tg.daysOf('30 days') === 30 && Tg.daysOf('2 weeks') === 14 && Tg.daysOf('1 month') === 30 && Tg.daysOf('immediate') === 0 && Tg.daysOf('Within 15 Days') === 15
       && !!Tg.joiningGap({ joining: 'Within 15 Days' }, '30 days') && !Tg.joiningGap({ joining: 'Within 15 Days' }, '10 days') && !Tg.joiningGap({ joining: '' }, '30 days'));
     check('a greeting is a greeting, a sentence is not', ['hi', 'Hii', 'HELLO', 'hi sir', 'Good morning', 'hey!'].every(Tg.isGreeting) && !['hi i need a job', 'high salary', 'hello any vacancy?'].some(Tg.isGreeting));
@@ -577,6 +579,14 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     await say('Not working');
     qSent = await aiMsgs(q.id);
     check('someone not working is not asked which company', !qSent.some((m) => /which company/i.test(m.body) || /designation/.test(m.body)) && /total work experience/.test(qSent[qSent.length - 1].body), qSent.slice(-1).map((x) => x.body));
+    // founder 2026-11-09: "what is the job role" inside the questions was saved as the answer and the next question came
+    const atBefore = JSON.parse((await convAt(phoneOf(41))).collected).intakeAt;
+    await say('what is the job role');
+    qSent = await aiMsgs(q.id);
+    const midAsk = JSON.parse((await convAt(phoneOf(41))).collected);
+    const lastQ = qSent[qSent.length - 1].body;
+    check('a question inside the questions, with no "?": answered from the ATS, then the same question again, and it is not saved as an answer', /The job role: ZZTEST Physics Lecturer/.test(lastQ) && /Now my question again: .*total work experience/i.test(lastQ)
+      && midAsk.intakeAt === atBefore && !Object.values(midAsk.answers || {}).some((v) => /job role/i.test(String(v))), [lastQ, atBefore, midAsk.intakeAt]);
     for (const t of ['yes', 'yes', 'yes']) await say(t);
     qSent = await aiMsgs(q.id);
     check('"yes" to the experience question, again and again: the same question again, with a plain request', qSent.slice(-3).every((m) => /correct answer/.test(m.body) && /total work experience/.test(m.body)), qSent.slice(-3).map((x) => x.body));
@@ -594,6 +604,20 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     qSent = await aiMsgs(q.id);
     check('each answer is kept under its question, the closing message goes, a recruiter is told', got.answers['What is your current notice period?'] === '30 days' && got.notice_period === '30 days' && got.experience === '3 years' && conv.state === 'needs_human' && /Thank you for your time/.test(qSent[qSent.length - 1].body), [Object.keys(got.answers).length, conv.state, qSent.slice(-1).map((x) => x.body)]);
     check('questions from TeamLink do not use up the AI replies', Number(conv.aiTurns) === 0, conv.aiTurns);
+
+    // ---- 8b2. a promotion with no job linked (no REQ code in the campaign name): the answers come from our own message, never made up
+    console.log('\n-- no job linked: answers from our message');
+    const nj = await prisma.candidate.create({ data: { name: 'ZZTEST Nojob', phone: `+${phoneOf(43)}` } });
+    await Promo.logBulk({ id: `zznojob${SUFFIX}`, kind: 'bulk', audience: 'candidates', purpose: 'ZZTEST promotion with no job', requirementId: null, templates: { WhatsApp: { name: 'job_update' } }, sender: { senderUserId: admin.id, senderName: 'ZZTEST Recruiter' } },
+      [{ channel: 'WhatsApp', status: 'sent', address: `+${phoneOf(43)}`, text: 'ZZTEST Hiring Staff Nurses\nSalary: 25,000 per month\nLocation: Vijayawada', entityId: nj.id, providerRef: `zzout43${SUFFIX}`, sentAt: new Date() }]);
+    const sayNj = async (t) => { await inbound(phoneOf(43), t); await run(); const m = await aiMsgs(nj.id); return m.length ? m[m.length - 1].body : ''; };
+    stub.calls.length = 0;
+    const njRole = await sayNj('what is the job role');
+    const njPay = await sayNj('salary entha');
+    check('no job linked: "what is the job role" and "salary entha" are answered from our own message, the model is not asked', /details from our message/.test(njRole) && /Staff Nurses/.test(njRole) && /Salary: 25,000 per month/.test(njPay) && stub.calls.length === 0, [njRole, njPay, stub.calls.length]);
+    const njShift = await sayNj('what are the shift timings');
+    const njConv = await convAt(phoneOf(43));
+    check('no job linked and our message does not say it: said plainly, a recruiter is told, nothing guessed', /not in our message/.test(njShift) && njConv.state === 'needs_human', [njShift, njConv.state]);
     const edited = await Cfg.saveQuestions({ list: '1. Are you a nurse?\n2) Which city?', closing: 'Bye.' });
     const T5 = require(path.join(BACK, 'src/omniwa/tools'));
     check('an Admin can change the list; numbers typed in front are taken off; [Salary] with no value is skipped', edited.list[0] === 'Are you a nurse?' && edited.list.length === 2 && T5.nextQuestion(['The pay is [Salary]', 'Next?'], 0, { title: 'X' }).text === 'Next?');

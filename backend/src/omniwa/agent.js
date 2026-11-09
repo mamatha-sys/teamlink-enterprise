@@ -336,16 +336,20 @@ async function askModel(conv, cfg, input) {
       return { ctx, calls, reply: T.jobCardText(sel.job), written: true };
     }
   }
-  const asksOther = job.available && !picked && T.askedAboutJob(input) && !T.titleHas(job.title, input);
+  // "what is the job role" asks about THIS chat's job, not for another one
+  const asksOther = job.available && !picked && T.askedAboutJob(input) && !T.titleHas(job.title, input) && !T.aboutThisJob(input);
   if (promoJob && !mem.promoCardSent) {
     await remember({ promoCardSent: true, cardShown: true });
     return { ctx, calls, reply: T.jobCardText(job), written: true };
   }
   // an answer inside the questions is an answer, whatever words it has ("job change" is not a search)
-  const answering = mem.intakeOn && !/\?\s*$/.test(input);
+  // a question from them ("what is the job role", no "?") is not an answer (founder 2026-11-09: "nenu emaina questions adigithey reply evadam ledhu")
+  const answering = mem.intakeOn && !T.isQuestion(input);
   if (!answering && !conv.promoAt && T.isGreeting(input)) return { ctx, calls, reply: T.GREETING_TEXT, written: true }; // "hi" with no promotion behind it: TeamLink's own words, at once
   if (promoJob && asksOther && !answering) return { ctx, calls, reply: T.onlyThisJobText(job), written: true };
-  if (((!job.available && !picked) || asksOther) && !answering) {
+  // the job of our message ("what is the job role", "shift timings?"): answered below, not searched (a search found "Shift Production supervisor")
+  const ourJobAsked = (conv.promoAt || mem.intakeOn) && (T.aboutThisJob(input) || T.asksDetail(input));
+  if (((!job.available && !picked) || asksOther) && !answering && !ourJobAsked) {
     const found = await T.offerJobs(conv, input).catch(() => ({ searched: false, jobs: [] }));
     if (found.jobs.length) return { ctx, calls, reply: T.jobListText(found.jobs, found.total), written: true };
     if (found.searched && T.askedAboutJob(input)) return { ctx, calls, reply: T.NO_MATCH_TEXT, written: true }; // "sounds good" asks for no job: that is the model's
@@ -361,7 +365,14 @@ async function askModel(conv, cfg, input) {
     return { ctx, calls, reply: 'No problem. Thank you for your time.', written: true };
   }
   const startIntake = !now2.intakeOn && !now2.intakeDone && T.isYes(input) && (!job.available || !promoJob || now2.cardShown);
-  if (startIntake || (now2.intakeOn && !/\?\s*$/.test(input))) {
+  // in the middle of the questions: their question is answered, then the question they still owe comes again, so the questions go on
+  const again = async () => {
+    if (!now2.intakeOn || now2.intakeAt == null) return '';
+    const { list } = await Cfg.questions();
+    const n = T.nextQuestion(list, Number(now2.intakeAt), talkJob ? { ...talkJob, candidate: conv.name } : { candidate: conv.name }, now2.answers || {});
+    return n ? `\n\nNow my question again: ${n.text}` : '';
+  };
+  if (startIntake || (now2.intakeOn && !T.isQuestion(input))) {
     const { list, closing } = await Cfg.questions();
     const answers = { ...(now2.answers || {}) };
     let from = 0;
@@ -418,10 +429,10 @@ async function askModel(conv, cfg, input) {
     const justShown = !!JSON.parse(conv.collected || '{}').cardShown;
     const quick = T.quickAnswer(job, input, { justShown });
     if (quick) await remember({ cardShown: false });
-    if (quick && quick.text) return { ctx, calls, reply: quick.text, written: true };
+    if (quick && quick.text) return { ctx, calls, reply: quick.text, again: await again(), written: true };
     if (quick && quick.missing) {
       ctx.handoff = `They asked for the ${quick.missing}, which is not on the requirement`;
-      return { ctx, calls, reply: `The ${quick.missing} is not in our record for this job yet. Our recruiter will confirm it and get back to you.`, written: true };
+      return { ctx, calls, reply: `The ${quick.missing} is not in our record for this job yet. Our recruiter will confirm it and get back to you.`, again: await again(), written: true };
     }
     if (quick && quick.apply) {
       await T.run('save_candidate_data', { interested: true }, conv, ctx);
@@ -431,6 +442,14 @@ async function askModel(conv, cfg, input) {
       if (/already/.test(String(link.note))) return { ctx, calls, reply: 'You already have the apply link above. Tell me if you need anything else.', written: true };
       ctx.handoff = `Wants to apply for ${job.title}`;
       return { ctx, calls, reply: 'Thank you for your interest. Our recruiter will contact you about this job soon.', written: true };
+    }
+  } else if ((conv.promoAt || conv.campaignId || now2.intakeOn) && (T.isQuestion(input) || input.trim().split(/\s+/).length <= 3)) {
+    // no job is linked (the campaign name has no REQ code), but we sent them a message: its own words answer, nothing is made up
+    const fromMsg = T.promoAnswer(await T.sentBodies(conv), input);
+    if (fromMsg && fromMsg.text) return { ctx, calls, reply: fromMsg.text, again: await again(), written: true };
+    if (fromMsg && fromMsg.missing) {
+      ctx.handoff = `They asked for the ${fromMsg.missing}; no job is linked to this chat`;
+      return { ctx, calls, reply: `The ${fromMsg.missing} is not in our message. Our recruiter will confirm it and get back to you.`, again: await again(), written: true };
     }
   }
   ctx.jobTitle = job.available ? job.title : null;
@@ -442,7 +461,7 @@ async function askModel(conv, cfg, input) {
     if (step === MAX_STEPS - 1) history.push({ role: 'user', content: 'Do not use a tool now. Answer with {"reply":"your short message"}.' });
     const out = await ai.chatJson(system, history, { model: cfg.model || undefined, timeoutMs: MODEL_TIMEOUT_MS }); // eslint-disable-line no-await-in-loop
     const reply = typeof out.reply === 'string' ? out.reply.trim() : '';
-    if (reply) return { ctx, calls, reply }; // a small model may send both: the words win, the tool is not run on a guess
+    if (reply) return { ctx, calls, reply, again: await again() }; // a small model may send both: the words win, the tool is not run on a guess
     if (out.tool && calls.some((c) => c.tool === out.tool)) {
       // a small local model repeats itself: no second run, one plain order to answer
       history.push({ role: 'user', content: `You already used ${out.tool}. Do not use a tool now. Answer with {"reply":"your short message"}.` });
@@ -559,6 +578,7 @@ async function runTurn(row, defaults, now = Date.now()) {
     return { handoff: 'guard', sent: s.ok };
   }
   if (ctx.links.length) reply = `${reply}\n${ctx.links.join('\n')}`;
+  if (got.again) reply = `${reply}${got.again}`; // the question they still owe, after the checks and the length cut, so it is never cut off
   const sent = await sendText(conv, reply);
   if (!sent.ok) {
     await handoff(conv, `The AI reply could not be sent: ${sent.error}`, now);

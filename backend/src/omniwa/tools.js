@@ -231,6 +231,8 @@ const ASKS = [
   ['skills', 'skills', 'The skills', /\b(skills?)\b/i],
   ['type', 'employmentType', 'The job type', /\b(timings?|shift|full.?time|part.?time|work mode|remote|wfh)\b/i],
   ['openings', 'openings', 'The number of openings', /\b(how many|openings?|seats?)\b/i],
+  // last: "where is the post" is the location, "what is the job role" is the role (founder 2026-11-09)
+  ['role', 'title', 'The job role', /\b(role|designation|job title|job profile|position|post)\b|\bwhat (is the |is this |is that )?job\b/i],
 ];
 const YES_TO_CARD = /^\W*(yes|yeah|yep|ok|okay|sure|interested|i am interested|im interested|avunu|haan|ha)\W*$/i;
 // { text } answered | { apply: true } they want the link | { missing } the ATS has no such detail | null not a job question
@@ -249,6 +251,31 @@ function quickAnswer(job, text, { justShown = false } = {}) {
     }
   }
   return null;
+}
+
+// A QUESTION FROM THEM, not an answer (founder 2026-11-09: "what is the job role" in the middle of the questions was saved as the answer and the next question came).
+// A "?" at the end, a question word in front, or a Telugu / Hindi question word anywhere.
+const QUESTION_START = /^\W*(what|whats|what's|which|where|when|why|who|whom|whose|how|is there|is it|is this|is the|are there|are you hiring|can you|could you|can i|could i|do you|does|did you|will you|tell me|please tell|pls tell|plz tell|send me|give me|explain)\b/i;
+const QUESTION_WORD = /\b(entha|enta|ekkada|emiti|enti|endhuku|eppudu|kya|kitna|kitni|kahan|kaun|kab|kyun|batao|bataiye)\b/i;
+const isQuestion = (t) => { const s = String(t || '').trim(); return /\?\s*$/.test(s) || QUESTION_START.test(s) || QUESTION_WORD.test(s); };
+// "the job role", "this post": the job of this chat, not a search for another one
+const aboutThisJob = (t) => /\b(this|the|that|your|ur)\s+(job|post|position|role|vacancy|opening)\b|\bjob\s*(role|title|profile|details?|description)\b/i.test(String(t || ''));
+
+// NO JOB LINKED, BUT WE SENT THEM A PROMOTION: the answer comes from the words of our own message, never made up.
+// { text } | { missing } | null (not a question about the job, or "tell me more" with no message of ours to show: the model answers that, as before)
+const DETAILS_ASK = /\b(details?|about (this|the) (job|post|position|role)|tell me more|more info\w*|description|jd)\b/i;
+// a question about a detail of a job (salary, place, shift...) that names no kind of work: about the job of our message, not a search
+const asksDetail = (t) => isQuestion(t) && !JOB_ASK.test(String(t || '')) && ASKS.some(([, , , re]) => re.test(String(t || '')));
+function promoAnswer(bodies, text) {
+  const t = String(text || '');
+  const ask = ASKS.find(([, , , re]) => re.test(t));
+  const whole = DETAILS_ASK.test(t) || (ask && ask[0] === 'role');
+  if (!ask && !whole) return null;
+  const body = (bodies || []).map((b) => String(b || '').trim()).find(Boolean);
+  if (!body) return ask ? { missing: ask[2].replace(/^The /, '').toLowerCase() } : null;
+  if (whole) return { text: `Here are the details from our message:\n${body.length > 600 ? `${body.slice(0, 600).replace(/\s+\S*$/, '')}...` : body}` };
+  const line = body.split(/\n+/).map((l) => l.trim()).find((l) => ask[3].test(l));
+  return line ? { text: line } : { missing: ask[2].replace(/^The /, '').toLowerCase() };
 }
 
 // what the model may read of the chat's memory
@@ -414,4 +441,4 @@ async function run(name, args, conv, ctx) {
 }
 
 const NAMES = ['get_candidate_profile', 'get_job_details', 'search_knowledge_base', 'save_candidate_data', 'send_apply_link', 'send_interview_link', 'handoff_to_recruiter'];
-module.exports = { contactNumber, applyWords, templateLink, withApply, daysOf, isJoiningQuestion, joiningGap, joiningNudgeText, answerFits, askAgainText, GREETING_TEXT, isGreeting, isClosing, mentionsJobs, isYes, isNo, nextQuestion, fieldOf, jobOfCampaign, onlyThisJobText, jobCardText, quickAnswer, run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };
+module.exports = { isQuestion, aboutThisJob, asksDetail, promoAnswer, sentBodies, contactNumber, applyWords, templateLink, withApply, daysOf, isJoiningQuestion, joiningGap, joiningNudgeText, answerFits, askAgainText, GREETING_TEXT, isGreeting, isClosing, mentionsJobs, isYes, isNo, nextQuestion, fieldOf, jobOfCampaign, onlyThisJobText, jobCardText, quickAnswer, run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };
