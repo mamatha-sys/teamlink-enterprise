@@ -51,4 +51,25 @@ async function createMailbox({ localPart, password = tempPassword(), quotaMb = 1
   }
 }
 
-module.exports = { configured, domain, suggestLocalPart, tempPassword, createMailbox };
+// a new password on a mailbox that is already there (cPanel UAPI Email::passwd_pop) -> { ok } | { ok: false, error }
+async function setMailboxPassword({ email, password }, deps = {}) {
+  const c = env();
+  if (!configured()) return { ok: false, error: 'cPanel is not connected on this server.' };
+  const [localPart, mailDomain] = String(email || '').toLowerCase().split('@');
+  if (!localPart || mailDomain !== c.domain) return { ok: false, error: `This mailbox is not on ${c.domain}, so TeamLink cannot set its password. Set it where the mailbox is kept.` };
+  const form = new URLSearchParams({ email: localPart, password, domain: c.domain });
+  try {
+    const f = deps.fetch || fetch;
+    const res = await f(`${c.base || `https://${c.host}:${c.port}`}/execute/Email/passwd_pop`, {
+      method: 'POST', headers: { Authorization: `cpanel ${c.user}:${c.token}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: form.toString(), signal: AbortSignal.timeout(20000),
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body) return { ok: false, error: res.status === 401 || res.status === 403 ? 'cPanel refused the API token. Check CPANEL_USER and CPANEL_TOKEN on the server.' : `cPanel did not answer properly (${res.status}).` };
+    if (body.status !== 1) return { ok: false, error: `cPanel said: ${(body.errors && body.errors[0]) || 'the password was not changed.'}` };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: `cPanel could not be reached: ${e.message}` };
+  }
+}
+
+module.exports = { configured, domain, suggestLocalPart, tempPassword, createMailbox, setMailboxPassword };

@@ -5,6 +5,9 @@ import api from '../../api';
 // LOGIN & COMPANY EMAIL on the employee page (founder 2026-11-06), for HR / Admin. The personal email stays for documents and password recovery; the company email
 // becomes the login. Saving moves the login, signs the person out, and tells them on their personal email (utils/companyEmail.js). With cPanel connected on the server,
 // "Create mailbox" also makes the mailbox. Data: GET / POST /employees/:id/company-email.
+// SIGN-IN DETAILS (founder 2026-11-09): a password HR types or generates (Teamlink@ + month and year of joining) for the new mailbox,
+// and "Send credentials": it becomes the TeamLink and webmail password and both links go to the personal email
+// (POST /employees/:id/company-email/credentials). TeamLink asks for a new password at the first sign-in.
 // ---------------------------------------------------------------------------
 export default function CompanyEmailCard({ employeeId, onChanged }) {
   const [s, setS] = useState(null);
@@ -15,12 +18,17 @@ export default function CompanyEmailCard({ employeeId, onChanged }) {
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
   const [secret, setSecret] = useState('');
+  const [pw, setPw] = useState('');
+  const [to, setTo] = useState('');
+  const [sentMsg, setSentMsg] = useState('');
+  const [sendError, setSendError] = useState('');
 
   function load() {
     return api.get(`/employees/${employeeId}/company-email`).then((r) => {
       setS(r.data);
       setEmail(r.data.companyEmail || r.data.suggestion || '');
       setPersonal(r.data.personalEmail || '');
+      setTo((t) => t || r.data.personalEmail || '');
     }).catch(() => setS(null));
   }
   useEffect(() => { load(); }, [employeeId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -29,7 +37,7 @@ export default function CompanyEmailCard({ employeeId, onChanged }) {
   async function save(createMailbox) {
     setBusy(true); setError(''); setMsg(''); setSecret('');
     try {
-      const r = await api.post(`/employees/${employeeId}/company-email`, { email, personalEmail: personal, createMailbox });
+      const r = await api.post(`/employees/${employeeId}/company-email`, { email, personalEmail: personal, createMailbox, ...(createMailbox && pw ? { password: pw } : {}) });
       setMsg(r.data.message || 'Saved.');
       setSecret(r.data.mailboxPassword || '');
       setEditing(false);
@@ -40,7 +48,29 @@ export default function CompanyEmailCard({ employeeId, onChanged }) {
     } finally { setBusy(false); }
   }
 
+  async function sendCredentials() {
+    if (!window.confirm(`This makes "${pw}" the TeamLink password${s.cpanel.on ? ' and the webmail password' : ''} for ${s.companyEmail}, and mails both links with it to ${to}. TeamLink asks them for a new password at the first sign-in. Go ahead?`)) return;
+    setBusy(true); setSendError(''); setSentMsg('');
+    try {
+      const r = await api.post(`/employees/${employeeId}/company-email/credentials`, { password: pw, to });
+      setSentMsg(r.data.message || 'Sent.');
+    } catch (e) {
+      setSendError(e.response?.data?.error || 'That did not go. Please try again.');
+    } finally { setBusy(false); }
+  }
+
   const showForm = !s.companyEmail || editing;
+  const companyDomain = s.companyEmail ? s.companyEmail.split('@')[1] : '';
+  const toOnCompanyDomain = !!(companyDomain && to && to.toLowerCase().endsWith(`@${companyDomain}`));
+  const passwordBox = (label) => (
+    <label className="field">
+      <span>{label}</span>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input type="text" value={pw} onChange={(e) => setPw(e.target.value)} placeholder={`e.g. ${s.generatedPassword}`} autoComplete="off" aria-label={label} style={{ flex: 1 }} />
+        <button type="button" className="btn btn-sm" onClick={() => setPw(s.generatedPassword)}>Generate</button>
+      </div>
+    </label>
+  );
   const noPersonal = !s.personalEmail;
   return (
     <>
@@ -61,6 +91,7 @@ export default function CompanyEmailCard({ employeeId, onChanged }) {
             <span>Company email</span>
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={s.domains.length ? `name@${s.domains[0]}` : 'name@company.com'} aria-label="Company email" />
           </label>
+          {s.cpanel.on && passwordBox('Mailbox password (empty: a random one)')}
           <div className="small-muted">
             {s.cpanel.on ? 'Make the mailbox from here, or use one already made in cPanel.' : 'Make the mailbox in cPanel first, then write it here.'}
             {' '}The person is signed out and uses this email from their next sign-in; their password stays the same. They are told on their personal email.
@@ -73,6 +104,20 @@ export default function CompanyEmailCard({ employeeId, onChanged }) {
         </div>
       ) : (
         <button type="button" className="btn btn-sm" style={{ marginTop: 6 }} onClick={() => setEditing(true)}>Change company email</button>
+      )}
+      {s.companyEmail && !editing && (
+        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <h3 style={{ fontSize: 13, margin: 0 }}>Sign-in details</h3>
+          {passwordBox(s.cpanel.on ? 'Password for TeamLink and webmail' : 'Password for TeamLink')}
+          <label className="field"><span>Send to (their personal email)</span><input type="email" value={to} onChange={(e) => setTo(e.target.value)} placeholder="their own email" /></label>
+          {toOnCompanyDomain && <div className="notice amber">{`${to} is a company address, so it may not reach them. Write their own email (Gmail or similar).`}</div>}
+          <div className="small-muted">
+            {`The mail has the TeamLink HRMS link${s.cpanel.on ? ', the webmail link' : ''}, the email and this password. TeamLink asks them for a new password at the first sign-in.`}
+          </div>
+          <div><button type="button" className="btn btn-sm btn-primary" disabled={busy || !pw || !to.trim()} onClick={sendCredentials}>{busy ? 'Sending…' : 'Send credentials'}</button></div>
+          {sendError && <div className="error-text">{sendError}</div>}
+          {sentMsg && <div className="notice green">{sentMsg}</div>}
+        </div>
       )}
       {error && <div className="error-text" style={{ marginTop: 6 }}>{error}</div>}
       {msg && <div className="notice green" style={{ marginTop: 6 }}>{msg}</div>}

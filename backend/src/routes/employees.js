@@ -2759,7 +2759,14 @@ router.get('/:id/company-email', requirePerm(null, 'hrms', 'Employee Management'
 router.post('/:id/company-email', requirePerm(null, 'hrms', 'Employee Management', 'edit'), async (req, res) => {
   const employee = await employeeForCompanyEmail(req, res);
   if (!employee) return;
-  const out = await require('../utils/companyEmail').assign(req.user, employee, { email: req.body.email, personalEmail: req.body.personalEmail, createMailbox: req.body.createMailbox === true }); // eslint-disable-line global-require
+  const out = await require('../utils/companyEmail').assign(req.user, employee, { email: req.body.email, personalEmail: req.body.personalEmail, createMailbox: req.body.createMailbox === true, password: req.body.password }); // eslint-disable-line global-require
+  res.status(out.status).json(out.body);
+});
+// Send credentials: the password becomes the TeamLink and webmail password, and the links go to the personal email
+router.post('/:id/company-email/credentials', requirePerm(null, 'hrms', 'Employee Management', 'edit'), async (req, res) => {
+  const employee = await employeeForCompanyEmail(req, res);
+  if (!employee) return;
+  const out = await require('../utils/companyEmail').sendCredentials(req.user, employee, { password: req.body.password, to: req.body.to }); // eslint-disable-line global-require
   res.status(out.status).json(out.body);
 });
 

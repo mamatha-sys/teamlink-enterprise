@@ -15,6 +15,7 @@
 // The four columns are read and written with plain SQL (like utils/loginAccounts.js), so this works before and after the Prisma client is regenerated.
 // ---------------------------------------------------------------------------
 const bcrypt = require('bcryptjs');
+const { strengthError, passwordEventData } = require('./passwordPolicy');
 const prisma = require('../db');
 const { logAudit } = require('./audit');
 const LA = require('./loginAccounts');
@@ -57,6 +58,7 @@ async function state(employee) {
     suggestion: local && domains.length === 1 ? `${local}@${domains[0]}` : '',
     domains,
     cpanel: { on: CP.configured(), domain: CP.domain() || null },
+    generatedPassword: generatedPassword(employee),
   };
 }
 
@@ -89,6 +91,28 @@ async function tickOnboarding(employee) {
   await prisma.employee.update({ where: { id: employee.id }, data: { onboardingTasks: JSON.stringify(tasks) } });
 }
 
+// THE FIRST PASSWORD HR GIVES (founder 2026-11-09: "generate click cheyyagaane Teamlink@<joined month> ... Teamlink@082026"):
+// Teamlink@ + the month and year of joining, from the date of joining (this month when none is written). Easy to say on a call,
+// so TeamLink asks for a new one at the first sign-in (passwordEventData 'admin').
+function generatedPassword(employee) {
+  const d = employee && employee.dateOfJoining ? new Date(employee.dateOfJoining) : new Date();
+  const ist = new Date((Number.isNaN(d.getTime()) ? Date.now() : d.getTime()) + 330 * 60000);
+  return `Teamlink@${String(ist.getUTCMonth() + 1).padStart(2, '0')}${ist.getUTCFullYear()}`;
+}
+const appLink = () => `${require('./passwordReset').baseUrl()}/login`; // eslint-disable-line global-require
+const webmailLink = (company) => `https://webmail.${String(company).split('@')[1]}`;
+
+function credentialsMail({ name, company, password }) {
+  return [
+    `Hello ${String(name || '').split(' ')[0] || ''},`, '',
+    'Your sign-in details:', '',
+    'TeamLink HRMS (attendance, leave, payslips):', `  Link: ${appLink()}`, `  Email: ${company}`, `  Password: ${password}`, '',
+    'Company webmail:', `  Link: ${webmailLink(company)}`, `  Email: ${company}`, `  Password: ${password}`, '',
+    'TeamLink asks you for a new password the first time you sign in. Please change the webmail password too, from the webmail settings.',
+    'Do not share these details with anyone.', '', '— TeamLink HR',
+  ].join('\n');
+}
+
 function readyMail({ name, company, personal, mailbox }) {
   const lines = [`Hello ${String(name || '').split(' ')[0] || ''},`, '', `Your company email is ready: ${company}`, '', `From now on, sign in to TeamLink with ${company}. Your password stays the same.`];
   if (mailbox) lines.push('', 'Your mailbox:', `  Email: ${company}`, `  First password: ${mailbox.password}`, `  Webmail: https://webmail.${company.split('@')[1]}`, '', 'Please change this mailbox password the first time you open it.');
@@ -97,7 +121,7 @@ function readyMail({ name, company, personal, mailbox }) {
 }
 
 /** -> { status, body } */
-async function assign(actor, employeeIn, { email: rawEmail, personalEmail: rawPersonal, createMailbox = false } = {}) {
+async function assign(actor, employeeIn, { email: rawEmail, personalEmail: rawPersonal, createMailbox = false, password = '' } = {}) {
   const employee = await prisma.employee.findUnique({ where: { id: employeeIn.id } });
   if (!employee) return { status: 404, body: { error: 'Employee not found' } };
   if (LEFT.includes(employee.employmentStatus)) return { status: 409, body: { error: 'This person has left. A company email is not given.' } };
@@ -111,6 +135,9 @@ async function assign(actor, employeeIn, { email: rawEmail, personalEmail: rawPe
   }
   if (!email) return { status: 400, body: { error: 'Write the company email.' } };
   if (createMailbox && !CP.configured()) return { status: 409, body: { error: 'cPanel is not connected on this server. Make the mailbox in cPanel and type the address here.' } };
+  // the password HR typed or generated for the new mailbox (empty: a random one, as before)
+  const typedPassword = String(password || '');
+  if (createMailbox && typedPassword) { const weak = strengthError(typedPassword, { email, name: employee.name }); if (weak) return { status: 400, body: { error: weak } }; }
   if (c.companyEmail && norm(c.companyEmail) === email) return { status: 200, body: { ok: true, unchanged: true, message: 'That is already the company email.' } };
 
   const personalNow = norm(c.personalEmail) || norm(rawPersonal) || (employee.email && !c.companyEmail ? norm(employee.email) : '');
@@ -123,7 +150,7 @@ async function assign(actor, employeeIn, { email: rawEmail, personalEmail: rawPe
   // the mailbox first: when cPanel says no, nothing here has changed
   let mailbox = null;
   if (createMailbox) {
-    const made = await CP.createMailbox({ localPart: email.split('@')[0] });
+    const made = await CP.createMailbox({ localPart: email.split('@')[0], ...(typedPassword ? { password: typedPassword } : {}) });
     if (!made.ok) return { status: 502, body: { error: made.error } };
     mailbox = made;
     await logAudit({ userId: actor.id, action: 'Company mailbox created in cPanel', entity: 'Employee', entityId: employee.id, toValue: email });
@@ -171,6 +198,58 @@ async function assign(actor, employeeIn, { email: rawEmail, personalEmail: rawPe
   };
 }
 
+// SEND CREDENTIALS (founder 2026-11-09): the password HR typed or generated becomes the person's TeamLink password AND their webmail
+// password (cPanel), and one mail to the personal email carries both links with the sign-in details. The password is never kept:
+// TeamLink keeps only its hash, the audit says THAT details were sent, and TeamLink asks for a new password at the first sign-in.
+/** -> { status, body } */
+async function sendCredentials(actor, employeeIn, { password, to: rawTo } = {}) {
+  const employee = await prisma.employee.findUnique({ where: { id: employeeIn.id } });
+  if (!employee) return { status: 404, body: { error: 'Employee not found' } };
+  if (LEFT.includes(employee.employmentStatus)) return { status: 409, body: { error: 'This person has left.' } };
+  const c = (await columns(employee.id)) || {};
+  const company = norm(c.companyEmail);
+  if (!company) return { status: 409, body: { error: 'Give the company email first.' } };
+  const pw = String(password || '');
+  const weak = strengthError(pw, { email: company, name: employee.name });
+  if (weak) return { status: 400, body: { error: weak } };
+  const to = norm(rawTo) || norm(c.personalEmail);
+  if (!to || !LA.looksLikeEmail(to)) return { status: 400, body: { error: 'Write the personal email the details go to.' } };
+  if (to === company) return { status: 400, body: { error: 'Send the details to their personal email, not to the new mailbox they cannot open yet.' } };
+  const user = employee.userId ? await prisma.user.findUnique({ where: { id: employee.userId } }) : null;
+  if (!user) return { status: 409, body: { error: 'This person has no TeamLink login yet.' } };
+  { const why = require('./roleGuard').checkPasswordTarget({ actor, target: user }); if (why) return { status: 403, body: { error: why } }; } // eslint-disable-line global-require
+
+  // the webmail password first: when cPanel says no, the TeamLink password has not changed either
+  const onCpanel = CP.configured() && company.split('@')[1] === CP.domain();
+  if (onCpanel) {
+    const set = await CP.setMailboxPassword({ email: company, password: pw });
+    if (!set.ok) return { status: 502, body: { error: set.error } };
+  }
+  await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await bcrypt.hash(pw, 10), ...passwordEventData('admin'), setPasswordTokenHash: null, setPasswordExpiresAt: null } });
+  const after = await prisma.user.findUnique({ where: { id: user.id } });
+  await require('./passwordReset').afterPasswordChange({ user: after, method: 'admin_reset', byUserId: actor.id, byName: actor.name }).catch(() => {}); // eslint-disable-line global-require
+
+  let mailed = { ok: false, error: 'not tried' };
+  try {
+    // eslint-disable-next-line global-require
+    mailed = await require('./mailer').sendMail({ to, subject: 'Your TeamLink and company email sign-in details', text: credentialsMail({ name: employee.name, company, password: pw }), useEmployeeFrom: false, fromName: 'TeamLink HR' });
+  } catch (e) { mailed = { ok: false, error: e.message }; }
+  await logAudit({
+    userId: actor.id, action: `Sign-in details ${mailed && mailed.ok ? 'sent' : 'set, mail not sent'}`, entity: 'Employee', entityId: employee.id, toValue: to,
+    reason: `TeamLink password${onCpanel ? ' and webmail password' : ''} set by ${actor.name || 'HR'}; change required at the next sign-in${mailed && mailed.ok ? '' : ` (mail: ${String((mailed && mailed.error) || '').slice(0, 150)})`}`,
+  });
+  const both = onCpanel ? 'TeamLink and webmail' : 'TeamLink';
+  return {
+    status: 200,
+    body: {
+      ok: true, mailed: !!(mailed && mailed.ok), to, webmail: onCpanel,
+      message: mailed && mailed.ok
+        ? `Done. The ${both} password is set and the details went to ${to}.${onCpanel ? '' : ' The mailbox is not on cPanel here, so its password was not changed.'}`
+        : `The ${both} password is set, but the mail to ${to} did not go. Please give them the details yourself.`,
+    },
+  };
+}
+
 // the employee whose PERSONAL address this is, once their login has moved to the company email
 async function movedEmployee(typed) {
   const e = norm(typed);
@@ -205,5 +284,5 @@ async function emailLocked(employeeId, email) {
 }
 
 module.exports = {
-  TASK, state, assign, movedLogin, recoveryLogin, emailLocked, allowedDomains,
+  TASK, state, assign, sendCredentials, generatedPassword, movedLogin, recoveryLogin, emailLocked, allowedDomains,
 };

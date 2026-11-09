@@ -22,11 +22,13 @@ const have = dbx.prepare('PRAGMA table_info("Employee")').all().map((c) => c.nam
 if (!have.includes('personalEmail')) dbx.exec(fs.readFileSync(path.join(BACK, 'prisma', 'migrations', '20261106100000_employee_company_email', 'migration.sql'), 'utf8'));
 dbx.close();
 
+const MAILS = path.join(os.tmpdir(), `zz-company-email-mails-${process.pid}.jsonl`);
+const mailsTo = (to) => (fs.existsSync(MAILS) ? fs.readFileSync(MAILS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []).filter((m) => String(m.to).toLowerCase().includes(to));
 const PORT = 4034;
 const API = `http://localhost:${PORT}/api`;
 const env = {
   ...process.env, TEAMLINK_SANDBOX: '1', TEST_MODE: '1', PORT: String(PORT), JWT_SECRET: 'company-email-test', DATABASE_URL: `file:${COPY.split(path.sep).join('/')}`,
-  TEST_MOCK_PORTS: '4035', CPANEL_BASE_URL: 'http://localhost:4035', CPANEL_USER: 'teamlink', CPANEL_TOKEN: 'stand-in-token', CPANEL_DOMAIN: 'teamlink.test', CPANEL_HOST: 'localhost',
+  TEST_MOCK_PORTS: '4035', TEST_MAIL_CAPTURE: MAILS, CPANEL_BASE_URL: 'http://localhost:4035', CPANEL_USER: 'teamlink', CPANEL_TOKEN: 'stand-in-token', CPANEL_DOMAIN: 'teamlink.test', CPANEL_HOST: 'localhost',
 };
 Object.assign(process.env, env);
 const jwt = require('jsonwebtoken');
@@ -59,6 +61,7 @@ async function stop(code) {
   await prisma.$disconnect().catch(() => {});
   setTimeout(() => {
     for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(COPY + s); } catch { /* none */ } }
+    try { fs.unlinkSync(MAILS); } catch { /* none */ }
     process.exit(code);
   }, 800);
 }
@@ -73,7 +76,7 @@ async function stop(code) {
     // eslint-disable-next-line no-await-in-loop
     await new Promise((r) => { setTimeout(r, 500); });
   }
-  const list = await prisma.employee.findMany({ where: { userId: { not: null }, email: { contains: '@' }, employmentStatus: { in: ['Active', 'On Probation', 'Confirmed'] }, user: { status: 'Active', role: { not: 'SUPER_ADMIN' } } }, take: 3, include: { user: true } });
+  const list = await prisma.employee.findMany({ where: { userId: { not: null }, email: { contains: '@' }, employmentStatus: { in: ['Active', 'On Probation', 'Confirmed'] }, user: { status: 'Active', role: { not: 'SUPER_ADMIN' } } }, take: 4, include: { user: true } });
   const admin = (await prisma.user.findMany({ where: { status: 'Active', role: 'SUPER_ADMIN' }, take: 5 })).find((u) => !/zztest|example\.test/i.test(`${u.name}${u.email}`));
   await prisma.user.updateMany({ where: { id: { in: [admin.id, ...list.map((x) => x.userId)] } }, data: { passwordResetRequired: false, passwordChangedAt: new Date(Date.now() - 86400000) } }); // (the copy) a starting password would stop every call
   await new Promise((r) => { setTimeout(r, 1100); });
@@ -153,6 +156,45 @@ async function stop(code) {
   check('a second change moves the login again, and the personal email stays what it was', ch.status === 200 && st3.body.personalEmail === personal && st3.body.loginEmail === 'ravi.k@teamlink.test', st3.body);
   const p = await prisma.employee.findUnique({ where: { id: third.id } });
   check('the third person is on the mailbox made for them', p.email === 'new.person@teamlink.test' && (await call('GET', url3, null, hr)).body.personalEmail === p3);
+
+  console.log('Sign-in details: generate, create with it, send credentials (founder 2026-11-09)');
+  const gen = CE.generatedPassword({ dateOfJoining: new Date('2026-08-12T00:00:00+05:30') });
+  check('Generate gives Teamlink@ + month and year of joining', gen === 'Teamlink@082026', gen);
+  check('(a joining late on 31 July UTC is 1 August in India)', CE.generatedPassword({ dateOfJoining: new Date('2026-07-31T20:00:00Z') }) === 'Teamlink@082026');
+  check('HR sees the generated password for this person', /^Teamlink@\d{6}$/.test((await call('GET', url3, null, hr)).body.generatedPassword || ''));
+  const fourth = list[3];
+  const url4 = `/employees/${fourth.id}/company-email`;
+  check('a weak typed mailbox password is refused before cPanel is asked', (await call('POST', url4, { email: 'four.th@teamlink.test', createMailbox: true, password: 'abc' }, hr)).status === 400);
+  cpanelSeen.length = 0;
+  const made4 = await call('POST', url4, { email: 'four.th@teamlink.test', createMailbox: true, password: 'Teamlink@082026' }, hr);
+  check('the mailbox is made with the password HR gave', made4.status === 200 && /password=Teamlink%40082026/.test((cpanelSeen[0] || {}).body || ''), { st: made4.status, body: made4.body, cp: cpanelSeen[0] });
+  const p4 = (await call('GET', url4, null, hr)).body.personalEmail;
+  const curl = `${url4}/credentials`;
+  check('send credentials with a weak password is refused', (await call('POST', curl, { password: '1234' }, hr)).status === 400);
+  check('send credentials to the new mailbox itself is refused', (await call('POST', curl, { password: 'Teamlink@082026', to: 'four.th@teamlink.test' }, hr)).status === 400);
+  check('an employee cannot send credentials for somebody else', (await call('POST', curl, { password: 'Teamlink@082026' }, await tokenOf(other.userId))).status === 403);
+  cpanelAnswer = { status: 0, errors: ['The password is too weak.'] };
+  const before4 = (await prisma.user.findUnique({ where: { id: fourth.userId } })).passwordHash;
+  const no4 = await call('POST', curl, { password: 'Teamlink@082026' }, hr);
+  check('cPanel says no: its words are shown and the TeamLink password is not changed', no4.status === 502 && /too weak/.test(no4.body.error) && (await prisma.user.findUnique({ where: { id: fourth.userId } })).passwordHash === before4, no4.body);
+  cpanelAnswer = { status: 1, errors: null };
+  cpanelSeen.length = 0;
+  // mail on (the sandbox's fake transport, captured to a file: nothing leaves the machine)
+  const emailValues = JSON.stringify({ 'SMTP host': 'smtp.example.test', Port: '587', 'Encryption (SSL / STARTTLS / None)': 'STARTTLS', Username: 'zz', 'From address': 'noreply@teamlink.example.test', 'Default from name': 'TeamLink' });
+  await prisma.integration.upsert({ where: { id: 'email' }, update: { enabled: true, connected: true, state: 'Connected', values: emailValues }, create: { id: 'email', enabled: true, connected: true, state: 'Connected', values: emailValues } });
+  const sent = await call('POST', curl, { password: 'Teamlink@082026' }, hr);
+  check('send credentials: done, to the personal email', sent.status === 200 && sent.body.ok && sent.body.to === p4 && sent.body.webmail === true, sent.body);
+  const cp4 = cpanelSeen[0] || {};
+  check('the webmail password is set in cPanel (password in the body)', cp4.url === '/execute/Email/passwd_pop' && /email=four\.th/.test(cp4.body) && /password=Teamlink%40082026/.test(cp4.body), cp4);
+  const u4 = await prisma.user.findUnique({ where: { id: fourth.userId } });
+  check('the TeamLink password is now that password', await bcrypt.compare('Teamlink@082026', u4.passwordHash));
+  check('and TeamLink asks for a new one at the first sign-in', u4.passwordResetRequired === true);
+  const signIn = await call('POST', '/auth/login', { email: 'four.th@teamlink.test', password: 'Teamlink@082026' });
+  check('they can sign in with the company email and that password', signIn.status === 200 && !!signIn.body.token, signIn.body);
+  const mail = mailsTo(p4).find((m) => /sign-in details/.test(m.subject || ''));
+  check('one mail to the personal email with the HRMS link, the webmail link, the email and the password', !!mail && /\/login/.test(mail.text) && /https:\/\/webmail\.teamlink\.test/.test(mail.text) && mail.text.includes('four.th@teamlink.test') && mail.text.includes('Teamlink@082026'), { mailed: sent.body.mailed, subjects: mailsTo('').map((m) => `${m.to} | ${m.subject}`).slice(-4), text: mail && mail.text });
+  const aud4 = await prisma.auditLog.findFirst({ where: { entity: 'Employee', entityId: fourth.id, action: { startsWith: 'Sign-in details' } }, orderBy: { createdAt: 'desc' } });
+  check('the audit says details were sent, never the password', !!aud4 && !JSON.stringify(aud4).includes('Teamlink@082026'), aud4);
 
   console.log(failed ? `\n${failed} of ${total} checks FAILED` : `\nAll ${total} checks passed`);
   await stop(failed ? 1 : 0);
