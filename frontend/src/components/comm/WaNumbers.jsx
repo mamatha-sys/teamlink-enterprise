@@ -27,6 +27,14 @@ const ago = (iso) => {
 };
 const errOf = (e, d) => (e && e.response && e.response.data && e.response.data.error) || d;
 
+// Template language choices. '' = English as en AND en_US: whichever Meta approved is sent.
+const LANG_CHOICES = [
+  { value: '', label: 'English: en and en_US (both)' },
+  { value: 'en', label: 'English (en) first' },
+  { value: 'en_US', label: 'English US (en_US) first' },
+  { value: 'te', label: 'Telugu (te)' },
+  { value: 'hi', label: 'Hindi (hi)' },
+];
 const BLANK = {
   label: '', displayNumber: '', phoneNumberId: '', wabaId: '', tokenMode: 'own', token: '', appSecret: '', verifyToken: '', language: '', tplLink: '', tplOtp: '', tplBulk: '', makeDefault: false, departments: [],
 };
@@ -345,7 +353,20 @@ function EditModal({ data, n, onClose, onSaved }) {
           {!main && <div><label htmlFor="wn-sec">App secret <span className="cm-sub">only if this number is in another Meta app</span></label><input id="wn-sec" type="password" autoComplete="new-password" value={f.appSecret} placeholder={editing && n.appSecretOwn ? 'Saved. Leave empty to keep it.' : 'Empty = the shared one'} onChange={(e) => set('appSecret', e.target.value)} /></div>}
           {!main && <div><label htmlFor="wn-ver">Webhook verify token <span className="cm-sub">only if this number is in another Meta app</span></label><input id="wn-ver" type="password" autoComplete="new-password" value={f.verifyToken} placeholder={editing && n.verifyTokenOwn ? 'Saved. Leave empty to keep it.' : 'Empty = the shared one'} onChange={(e) => set('verifyToken', e.target.value)} /></div>}
           <div className="cm-sub" style={{ gridColumn: '1 / -1' }}><b>Leave these empty.</b> Every number then uses the same templates as every other number (the ones set in Administration &gt; Integrations &gt; WhatsApp Business, and the templates in Manage Templates). Fill a box only if this one number must use a different template name.</div>
-          <div><label htmlFor="wn-lang">Template language <span className="cm-sub">optional</span></label><input id="wn-lang" value={f.language} placeholder="Empty = same as every number (en)" onChange={(e) => set('language', e.target.value)} /></div>
+          {/* founder 2026-11-09: "language kuda marali, rendu EN, EN_US templates thisukovali". Empty = both: a template approved as en or as
+              en_US is sent in the language Meta approved it in (backend outreach/tplWaba.js metaLanguage), so both kinds work on this number. */}
+          <div>
+            <label htmlFor="wn-lang">Template language</label>
+            <select id="wn-lang" value={LANG_CHOICES.some((c) => c.value === (f.language || '')) ? (f.language || '') : 'other'}
+              onChange={(e) => set('language', e.target.value === 'other' ? (f.language && !LANG_CHOICES.some((c) => c.value === f.language) ? f.language : ' ') : e.target.value)}>
+              {LANG_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              <option value="other">Another language code…</option>
+            </select>
+            {!LANG_CHOICES.some((c) => c.value === (f.language || '')) && (
+              <input aria-label="Language code" value={f.language.trim()} placeholder="For example: ta, kn, mr" onChange={(e) => set('language', e.target.value)} style={{ marginTop: 6 }} />
+            )}
+            <div className="cm-sub">{!f.language ? 'Templates approved as en and as en_US both work on this number.' : 'Templates in this language are sent first; the same language with another region (en / en_US) still works.'}</div>
+          </div>
           <div><label htmlFor="wn-tl">Different template for the agreement link <span className="cm-sub">optional</span></label><input id="wn-tl" value={f.tplLink} placeholder="Empty = same template as every number" onChange={(e) => set('tplLink', e.target.value)} /></div>
           <div><label htmlFor="wn-to">Different template for the OTP <span className="cm-sub">optional</span></label><input id="wn-to" value={f.tplOtp} placeholder="Empty = same template as every number" onChange={(e) => set('tplOtp', e.target.value)} /></div>
           <div><label htmlFor="wn-tb">Different template for bulk / general messages <span className="cm-sub">optional</span></label><input id="wn-tb" value={f.tplBulk} placeholder="Empty = same template as every number" onChange={(e) => set('tplBulk', e.target.value)} /></div>
