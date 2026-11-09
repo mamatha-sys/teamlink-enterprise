@@ -122,6 +122,7 @@ class ScriptDialogue extends D.Dialogue {
       if (ps && sameShape(ps.steps, mainSplit.steps)) { this.byLang[lang] = ps.steps; this.declines[lang] = ps.decline; this.convinces[lang] = ps.convince; } // a version that does not match line for line is not used
     });
     this.scriptLanguage = first;
+    this.contactNumber = opts.contactNumber || null; // the recruiter's number: told to a candidate who asks where to send the resume
     this.facts = opts.facts || null; // the facts of a vacancy: a person's questions about the pay, the place ... are answered from them
     // no question in the script (only what the AI says): the call says all of it and ends
     this.noQuestion = !mainSplit.steps.some((s) => isAsk(s.kind));
@@ -287,6 +288,12 @@ class ScriptDialogue extends D.Dialogue {
         const v = this.vacancyTurn(text, k, cur, turn);
         if (v && v.result) return v.result;
         if (v && v.k) { k = v.k; lead = v.lead || ''; }
+      }
+      // "which number?" in a script that is not a vacancy: the recruiter's number given with the campaign is told, then the question again
+      if (!this.facts && this.contactNumber && vacancy.asksWhere(text) && (cur.kind === 'ask' || cur.kind === 'interest' || cur.kind === 'say')) {
+        turn.understood = 'question_noted';
+        const tell = { English: `Please send it to ${this.contactNumber}.`, Telugu: `దయచేసి ${this.contactNumber} కి పంపండి.`, Hindi: `कृपया ${this.contactNumber} पर भेजिए।` }[this.language] || `Please send it to ${this.contactNumber}.`;
+        return { say: this.speak(tell, cur.kind === 'ask' || cur.kind === 'interest' ? this.line(sc.idx) : this.again()), done: false };
       }
       // a question the script cannot answer from verified facts is noted for the recruiter, never answered from memory
       if (this.facts && st.pitchAt !== sc.idx && (k.intent === 'info_q' || k.intent === 'salary_q' || k.intent === 'other_cand' || (k.intent === 'unclear' && vacancy.answer(this.facts, text, this.language, true))) && vacancy.answer(this.facts, text, this.language)) {

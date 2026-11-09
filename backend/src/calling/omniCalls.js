@@ -140,6 +140,13 @@ function normalizeScript(raw) {
   return out.join('\n');
 }
 
+/** a phone number the AI may say: digits, spaces, + and - only, 8 to 15 digits; '' otherwise */
+function cleanNumber(v) {
+  const t = String(v == null ? '' : v).replace(/[^\d+\s-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 24);
+  const n = t.replace(/\D/g, '').length;
+  return n >= 8 && n <= 15 ? t : '';
+}
+
 const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || '';
 
 // the script of the agent: checked here the same way as an ATS AI Voice agent's (the lines it may not say, one Opening, a Closing, one question)
@@ -162,6 +169,9 @@ async function create(input, deps = {}) {
   if (!externalId) return { ok: false, status: 400, code: 'externalId', reason: 'externalId is needed.' };
   // the FACTS of a vacancy (Role / Location / Salary ...): the call is built from them in all three languages, nothing is translated by a model
   const facts = vacancy.parseFacts(input.script);
+  // the recruiter's number (asked for when the campaign is made): said to a candidate who asks where to send the resume
+  const contactNumber = cleanNumber(input.contactNumber);
+  if (facts && contactNumber && !facts.channel) facts.channel = contactNumber;
   let text; let scriptLang; let scripts;
   if (facts) {
     const built = vacancy.build(facts);
@@ -180,7 +190,7 @@ async function create(input, deps = {}) {
   const scriptJson = {
     omni: { name: String(input.name || '').slice(0, 80), externalId },
     fields: {},
-    agentScript: { text, language: scriptLang, texts: scripts, facts: facts || null, name: String(input.agentName || 'AI agent').slice(0, 60) },
+    agentScript: { text, language: scriptLang, texts: scripts, facts: facts || null, contactNumber: contactNumber || null, name: String(input.agentName || 'AI agent').slice(0, 60) },
   };
   const r = await require('./voice/sipCall').dialOmni({ externalId, toNumber: input.toNumber, language: scriptLang, scriptJson }, deps); // eslint-disable-line global-require
   return r.ok ? { ok: true, id: r.id } : { ok: false, status: r.code === 'not_ready' || r.code === 'not_dialled' ? 503 : 409, code: r.code, reason: r.reason };
@@ -205,7 +215,7 @@ function dialogueFor(row, s) {
   const name = (j.omni && j.omni.name) || '';
   const d = new ScriptDialogue({
     purpose: row.purpose, language: row.language || 'English', data: { name, firstName: firstName(name), jobTitle: '', company: '' }, fields: {},
-    recordingNotice: !!(s && (s.recording || s.keepTranscripts)), script: a.text, scriptLanguage: a.language, scripts: a.texts, scriptName: a.name, seed: row.id, limits: LIMITS, facts: a.facts || null,
+    recordingNotice: !!(s && (s.recording || s.keepTranscripts)), script: a.text, scriptLanguage: a.language, scripts: a.texts, scriptName: a.name, seed: row.id, limits: LIMITS, facts: a.facts || null, contactNumber: a.contactNumber || null,
   });
   const snap = svc.safeJson(row.botStateJson);
   if (snap && snap.step) d.restore(snap);
