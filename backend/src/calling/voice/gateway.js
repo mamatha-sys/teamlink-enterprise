@@ -471,6 +471,14 @@ function handle(sock, engines, opts = {}) {
       }
       if (byScript) first = { text: '', conf: null }; // heard again below in the language found
       mark('decided');
+      // A SHORT ANSWER THAT ALREADY MAKES SENSE IN THE CALL'S LANGUAGE IS NOT A SWITCH - decided HERE, before the second listeners run
+      // (founder 2026-11-09: "proper ga theeskovatledhu"; real calls waited 1.3-2.6 s more on a short Telugu reply while a Hindi / English
+      // listener checked a language Whisper had guessed wrong on a second of sound, and the rule below then kept the call's language anyway).
+      // The same test as `understood` below, so the language picked never changes: only the wait goes.
+      if (!byScript && found && found !== cur && pcm.length < A.RATE * 2 * 2 && !['unclear', 'silence'].includes(require('../dialogue').classify(first.text).intent)) { // eslint-disable-line global-require
+        if (DEBUG) debug(`${row.id} sound said ${found}, but "${first.text}" is a short ${cur} answer that makes sense: no second listener`);
+        found = null;
+      }
       let pre = null; // the words already heard in the language decided by teluguOrHindi
       if (found && found !== cur && ['Telugu', 'Hindi'].includes(found) && engines.stt) {
         const known = ['Telugu', 'Hindi'].includes(cur) ? { ...spec, [cur]: first.text } : { ...spec };
