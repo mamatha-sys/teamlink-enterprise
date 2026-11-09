@@ -331,6 +331,15 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     const empty = await require(path.join(BACK, 'src/omniwa/tools')).searchJobs('I am looking for a job');
     check('nothing matches: an honest empty list; only "a job" with no kind: no search', none.searched === true && none.jobs.length === 0 && empty.searched === false);
 
+    // ---- 6a. an employee's number is answered too (founder 2026-11-09)
+    const empNo = phoneOf(94);
+    await Agent.onInbound({ channel: 'WhatsApp', from: empNo, text: 'hi', id: `wamid.ZZemp${SUFFIX}`, at: new Date(), name: 'ZZTEST Staff' }, { stored: true, personType: 'EMPLOYEE', personId: 'zz-emp' });
+    stub.calls.length = 0;
+    await run();
+    const empConv = await convAt(empNo);
+    const empMsgs = empConv ? await Inbox.leadMessages(empConv.id) : [];
+    check('an employee who writes gets an answer too, and no CRM lead is made for them', !!empConv && !empConv.leadContactId && /looking for a job/.test((empMsgs[empMsgs.length - 1] || {}).text || ''), [empConv, empMsgs.slice(-1)]);
+
     // ---- 6b. one number on a candidate and an employee
     console.log('\n-- a number shared with an employee');
     const s1 = await mkCandidate(20, 'Sravya');
@@ -342,7 +351,8 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     const sentS = stub.calls[0] ? JSON.stringify(stub.calls[0].messages.slice(1)) : '';
     check('one candidate + an employee on a number: the AI answers as that candidate and sees the message', (await aiMsgs(s1.id)).length === 1 && sentS.includes('Yes I am interested'), sentS.slice(0, 200));
     await Agent.onInbound({ channel: 'WhatsApp', from: phoneOf(21), text: 'Yes', id: `wamid.ZZt${SUFFIX}`, at: new Date() }, { review: true, reason: 'ambiguous', possible: [{ type: 'CANDIDATE', id: 'a' }, { type: 'CANDIDATE', id: 'b' }] });
-    check('two candidates on a number: it stays in Needs review, the AI does not guess', !(await convAt(phoneOf(21))));
+    const twoConv = await convAt(phoneOf(21));
+    check('two candidates on a number: answered, but on neither record (the AI does not guess whose) and no CRM lead', !!twoConv && !twoConv.candidateId && !twoConv.leadContactId, twoConv);
 
     // ---- 7. human takeover
     console.log('\n-- a person takes over');

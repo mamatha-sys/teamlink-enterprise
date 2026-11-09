@@ -92,13 +92,14 @@ async function leadFor(e164, name) {
 async function onInbound(info, result) {
   try {
     if ((info.channel || 'WhatsApp') !== 'WhatsApp' || !result || result.duplicate) return null;
-    if (result.personType) return null; // a client's contact, an employee or a vendor: their chat stays a person's
+    // everybody who writes is answered (founder 2026-11-09: "anni numbers ki reply evvu"): an employee, a client's contact, a vendor or a number
+    // on two candidates too. Only someone with no record becomes a Lead in the CRM; the others keep their own record.
     // a number shared by ONE candidate and an employee or a client contact: the WhatsApp chat is about a job, so it is the candidate's (founder's test 2026-11-05).
     // Two candidates on one number stay in Needs review: the AI must not guess whose record it reads.
     const shared = result.review && result.reason === 'ambiguous' ? (result.possible || []).filter((p) => p.type === 'CANDIDATE') : [];
     const candidateId = result.candidateId || (shared.length === 1 ? shared[0].id : null);
     const isCandidate = !!candidateId;
-    if (!isCandidate && !(result.review && result.reason === 'none')) return null;
+    const stranger = !isCandidate && !result.personType && result.review && result.reason === 'none';
     await ensure();
     const e164 = delivery.digitsOf(info.from);
     const now = Date.now();
@@ -107,7 +108,7 @@ async function onInbound(info, result) {
     let conv = await convOf(e164);
     if (!conv) {
       const id = S.newId('wac');
-      const leadContactId = isCandidate ? null : await leadFor(e164, info.name);
+      const leadContactId = stranger ? await leadFor(e164, info.name) : null;
       await S.run('INSERT OR IGNORE INTO "OmniWaConv" (id, e164, personType, candidateId, leadContactId, name, numberId, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?,?,?)', id, e164, isCandidate ? 'CANDIDATE' : 'LEAD', candidateId, leadContactId, clip(info.name, 120) || null, info.numberId || null, now, now);
       conv = await convOf(e164);
     } else if (isCandidate && conv.candidateId !== candidateId) {
