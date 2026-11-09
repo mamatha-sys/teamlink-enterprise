@@ -16,6 +16,7 @@ import Pager, { usePaged } from '../../components/Pager.jsx';
 import { useKeptState } from '../../utils/useKeptState.js';
 import { money2, fmtD } from './invFormat';
 import './creditNotes.css';
+import StatementView from '../bank/StatementView.jsx';
 
 const sum = (list, f) => Math.round(list.reduce((s, r) => s + (Number(f(r)) || 0), 0) * 100) / 100;
 const lineLink = (txnId, invoiceId) => `/bank?line=${encodeURIComponent(txnId)}${invoiceId ? `&invoice=${encodeURIComponent(invoiceId)}` : ''}`;
@@ -41,6 +42,9 @@ export default function PaymentCheckPanel({ rows = [], canBankView = false }) {
   const [q, setQ] = useKeptState('invoices.check.q', '');
   const [bank, setBank] = useState(null);
   const [bankErr, setBankErr] = useState('');
+  // View statement (founder 2026-11-09): the bank statement opens in a window ON this page - Close leaves the list where it was.
+  const [stmtOf, setStmtOf] = useState(null);
+  const viewBtn = (id) => <button type="button" className="link-btn" onClick={() => setStmtOf(id)}>View statement</button>;
 
   useEffect(() => {
     if (!canBankView) return undefined;
@@ -140,7 +144,7 @@ export default function PaymentCheckPanel({ rows = [], canBankView = false }) {
                       <td style={{ maxWidth: 360 }} className="small-muted">{r.verify.reason}</td>
                       <td>
                         {(r.proofTxnIds || []).length
-                          ? (r.proofTxnIds || []).map((id, n) => <div key={id}><Link to={lineLink(id, r.id)}>Open bank line{r.proofTxnIds.length > 1 ? ` ${n + 1}` : ''}</Link></div>)
+                          ? (r.proofTxnIds || []).map((id, n) => <div key={id}>{viewBtn(id)}{' · '}<Link to={lineLink(id, r.id)}>Open bank line{r.proofTxnIds.length > 1 ? ` ${n + 1}` : ''}</Link></div>)
                           : <span className="small-muted">—</span>}
                       </td>
                     </tr>
@@ -182,7 +186,7 @@ export default function PaymentCheckPanel({ rows = [], canBankView = false }) {
                       <td className="n">{money2(t.amount)}</td>
                       <td style={{ maxWidth: 320 }}><b>{t.thinks}</b>{t.why ? <div className="small-muted">{t.why}</div> : null}</td>
                       <td>{t.invoiceId ? <Link to={`/invoices/${t.invoiceId}`}>{t.invoiceNumber}</Link> : <span className="small-muted">—</span>}{t.client ? <div className="small-muted">{t.client}</div> : null}</td>
-                      <td><Link to={lineLink(t.id, t.invoiceId)}>Open bank line</Link></td>
+                      <td style={{ whiteSpace: 'nowrap' }}>{viewBtn(t.id)}{' · '}<Link to={lineLink(t.id, t.invoiceId)}>Open bank line</Link></td>
                     </tr>
                   ))}
                 </tbody>
@@ -203,7 +207,7 @@ export default function PaymentCheckPanel({ rows = [], canBankView = false }) {
                       <td className="n">{money2(d.amount)}</td>
                       <td className="n">{d.copies}</td>
                       <td className="n">{d.postedCopies}</td>
-                      <td>{d.ids.map((id, n) => <div key={id}><Link to={lineLink(id)}>Open copy {n + 1}</Link></div>)}</td>
+                      <td>{d.ids.map((id, n) => <div key={id}>{viewBtn(id)}{' · '}<Link to={lineLink(id)}>Open copy {n + 1}</Link></div>)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -214,6 +218,7 @@ export default function PaymentCheckPanel({ rows = [], canBankView = false }) {
         </div>
       )}
       {list.length > 25 && <Pager page={page} noun="rows" />}
+      {stmtOf && <StatementView txnId={stmtOf} onClose={() => setStmtOf(null)} />}
     </div>
   );
 }
