@@ -37,7 +37,8 @@ $word = if ($Apply) { '' } else { ' (dry run)' }
 Write-Host "[1/4] Uploading the workbooks..." -ForegroundColor Cyan
 ssh $VpsHost "mkdir -p $Remote"
 foreach ($f in $files) {
-  scp (Join-Path $Dir $f) "${VpsHost}:'$Remote/$f'"
+  # no quotes inside: today's scp (SFTP) takes the remote name as it is, so quotes would become part of the file name
+  scp (Join-Path $Dir $f) "${VpsHost}:$Remote/$f"
   if ($LASTEXITCODE -ne 0) { throw "Upload failed ($f)." }
 }
 
