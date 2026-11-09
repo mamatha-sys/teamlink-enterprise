@@ -528,10 +528,6 @@ function DashboardTab({ user, isHR, canEditPolicy, canApprove, canConfigure, rel
     onReload();
   }
   async function toggleType(type) { await api.put(`/leave/types/${type.id}`, { active: !type.active }); onReload(); }
-  async function deleteType(type) {
-    if (!window.confirm(`Delete the leave type ${type.name} (${type.code})?`)) return;
-    try { await api.delete(`/leave/types/${type.id}`); onReload(); } catch (e) { window.alert(e.response?.data?.error || 'Could not delete it.'); }
-  }
   async function addType() {
     const name = prompt('Leave type name?');
     if (!name || !name.trim()) return;
@@ -634,7 +630,6 @@ function DashboardTab({ user, isHR, canEditPolicy, canApprove, canConfigure, rel
                 <span className="cell-muted">{capLabel(t)}</span>
                 {canEditPolicy && <button className="btn btn-sm" onClick={() => editCap(t)}>Edit</button>}
                 {canEditPolicy && <button className="btn btn-sm" onClick={() => toggleType(t)}>{t.active ? 'Pause' : 'Resume'}</button>}
-                {canEditPolicy && <button className="btn btn-sm btn-danger" onClick={() => deleteType(t)}>Delete</button>}
               </span>
             </AssignRow>
           ))}

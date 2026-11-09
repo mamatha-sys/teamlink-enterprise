@@ -1236,23 +1236,6 @@ router.put('/types/:id', require('../utils/internalHr').blockRoute('settings'), 
   res.json(type);
 });
 
-// DELETE a leave type (founder 2026-11-09: "sick leave two times repeat ayindhi ... delete cheyyu"). A repeated name goes at once: balances and
-// requests are kept by the NAME, so the other row of that name carries them. A type whose name nothing else has and that leave already uses
-// is paused instead, so no balance or request loses its type.
-router.delete('/types/:id', require('../utils/internalHr').blockRoute('settings'), requirePerm(null, 'hrms', 'Leave & Holidays', 'configure'), async (req, res) => {
-  const type = await prisma.leaveType.findUnique({ where: { id: req.params.id } });
-  if (!type) return res.status(404).json({ error: 'That leave type is not there any more.' });
-  const key = String(type.name || '').trim().toLowerCase();
-  const twins = (await prisma.leaveType.findMany({ where: { NOT: { id: type.id } }, select: { name: true } })).filter((t) => String(t.name || '').trim().toLowerCase() === key);
-  if (!twins.length) {
-    const used = (await prisma.leaveRequest.count({ where: { type: type.name } })) + (await prisma.leaveBalance.count({ where: { type: type.name } }));
-    if (used) return res.status(409).json({ error: `${type.name} is used in ${used} leave balance(s) or request(s), so it cannot be deleted. Use Pause to hide it.` });
-  }
-  await prisma.leaveType.delete({ where: { id: type.id } });
-  await logAudit({ userId: req.user.id, action: 'Leave type deleted', entity: 'LeaveType', entityId: type.id, fromValue: `${type.name} (${type.code})` });
-  return res.json({ ok: true, message: `${type.name} (${type.code}) is deleted.` });
-});
-
 router.get('/reasons', async (req, res) => {
   const reasons = await prisma.leaveReason.findMany({ orderBy: { label: 'asc' } });
   res.json(reasons);
