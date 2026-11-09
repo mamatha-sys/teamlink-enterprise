@@ -360,6 +360,7 @@ app.use('/api/auto-messages', require('./routes/autoMessages'));
 app.use('/api/conversations', require('./routes/conversations'));
 app.use('/api/omni-wa', require('./routes/omniWa')); // Omni-Channel > WhatsApp: inbox with the AI agent, promotions, AI settings (omniwa/)
 app.use('/api/wa-chats', require('./routes/waChats')); // the recruiter's WhatsApp chat screen: list, chat, send, follow-up, media, Admin test tools (utils/waChats.js)
+app.use('/api/admin/full-delete', require('./routes/testPersonDelete')); // Super Admin: delete a test person completely
 app.use('/api/admin/view-as', require('./routes/viewAs')); // Super Admin read-only View as
 app.use('/api/admin/integration-health', require('./routes/integrationHealth')); // Job Portal / Email / eSSL / AI health (read-only + person-pressed retry)
 app.use('/api/admin/logins', require('./routes/adminLogins')); // separate logins on one email: status, existing-logins panel, per-login activation / sign-out (2026-10-21)

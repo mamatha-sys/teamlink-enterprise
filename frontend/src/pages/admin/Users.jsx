@@ -13,6 +13,7 @@ import ScopeChecklist from '../../components/ScopeChecklist.jsx';
 import ListFilterBar, { useListFilters, ListEmpty } from '../../components/ui/ListFilters.jsx';
 import Pager, { usePaged } from '../../components/Pager.jsx';
 import { ViewAsButton } from '../../components/ViewAs.jsx';
+import FullDeleteButton, { mayDeleteCompletely } from '../../components/FullDeleteButton.jsx';
 import ActAsHistory from '../../components/ActAsHistory.jsx';
 import { MultiLoginBanner, ExistingLogins, CreatedLogin } from './LoginAccounts.jsx';
 import { clientLabel } from '../../utils/clientLocation.js'; // "Name - Location" for same-name clients (2026-10-22)
@@ -748,6 +749,9 @@ export default function Users() {
                   {' '}
                   <ViewAsButton userId={u.id} name={u.name} active={u.status === 'Active'}
                     superAdmin={u.role === 'SUPER_ADMIN' || u.hrmsRole === 'SUPER_ADMIN'} />
+                  {mayDeleteCompletely(me) && u.id !== me?.id && u.role !== 'SUPER_ADMIN' && u.role !== 'ADMIN' && u.createdAt && Date.now() - new Date(u.createdAt).getTime() <= 30 * 86400000 && (
+                    <>{' '}<FullDeleteButton userId={u.id} name={u.name} onDone={(msg) => { setUsers((list) => list.filter((x) => x.id !== u.id)); setNotice(msg); }} /></>
+                  )}
                   </div>
                 </td>
               </tr>

@@ -23,6 +23,7 @@ import { SelectionMailBox } from './SelectionMailPopup.jsx'; // the Selected con
 import DropCandidate, { DROP, dropKind } from './candidate/DropCandidate.jsx'; // "Dropped" in Move step: reason + note
 import AskToBook, { askable, InterviewRequested } from './interviews/AskToBook.jsx'; // only the BDE books: others ask the client manager
 import { ctcAsk, CtcAsk, CtcAskButtons } from './CtcConfirm.jsx';
+import FullDeleteButton, { mayDeleteCompletely } from './FullDeleteButton.jsx'; // Super Admin: a test person, gone from HRMS and ATS
 import './CandidateDrawer.css';
 
 // ---------------------------------------------------------------------------
@@ -690,6 +691,7 @@ export function CandidateActions({
     // v3: the one Reject window (then "other matching jobs").
     app && mayReject && ['reject', 'Reject', () => setStepPop('reject')],
   ].filter(Boolean);
+  const fullDelete = mayDeleteCompletely(user) && c && c.id;
   return (
     <section className={`c360-actions${compact ? ' is-compact' : ''}`}>
       <div className="cdw-label">Actions</div>
@@ -722,6 +724,7 @@ export function CandidateActions({
           </button>
         ))}
         <WaButton entityType="candidate" id={c.id} name={c.name} hasNumber={'phone' in c ? !!c.phone : undefined} applicationId={app ? app.id : undefined} label="WhatsApp" />
+        {fullDelete && <FullDeleteButton candidateId={c.id} name={c.name} onDone={(msg) => { window.alert(msg); window.location.assign('/candidates'); }} />}
       </div>
       <WaOptInToggle entityType="candidate" id={c.id} />
 
