@@ -252,23 +252,6 @@ async function sendText(conv, text, { user = null, ai: byAi = true } = {}) {
 }
 
 // ---- states ---------------------------------------------------------------------------------------------------------------------------------------
-// The phone number in the last message WE sent them (a campaign template carries the contact line), not their own number. Null when none.
-const PHONE_IN_TEXT = /(?:\+?91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}|(?:\+?91[\s-]?)?\d{3,5}[\s-]\d{3,4}[\s-]\d{3,4}/g;
-async function contactNumber(conv) {
-  const own = String(conv.e164 || '').slice(-10);
-  const rows = await S.q('SELECT body FROM "OmniWaMessage" WHERE e164 = ? AND direction = \'OUT\' AND aiGenerated = 0 AND body IS NOT NULL ORDER BY at DESC LIMIT 10', conv.e164).catch(() => []);
-  if (conv.candidateId) {
-    const more = await prisma.candidateMessage.findMany({ where: { candidateId: conv.candidateId, channel: 'WhatsApp', template: { in: ['BULK', 'MANUAL'] } }, orderBy: { createdAt: 'desc' }, take: 10, select: { body: true } }).catch(() => []);
-    rows.push(...more);
-  }
-  for (const r of rows) {
-    for (const m of String(r.body || '').match(PHONE_IN_TEXT) || []) {
-      const digits = m.replace(/\D/g, '');
-      if (digits.length >= 10 && digits.slice(-10) !== own) return m.trim();
-    }
-  }
-  return null;
-}
 async function handoff(conv, reason, now = Date.now()) {
   await S.run('UPDATE "OmniWaConv" SET state = \'needs_human\', handoffReason = ?, updatedAt = ? WHERE id = ?', clip(reason, 200), now, conv.id);
   if (conv.ownerUserId) await require('../utils/notify').pushNotification({ userId: conv.ownerUserId, title: `${conv.name || 'A person'} needs you on WhatsApp`, message: `${clip(reason, 120)}. Open Omni-Channel > Inbox & Replies > WhatsApp.` }).catch(() => null); // eslint-disable-line global-require
@@ -425,9 +408,10 @@ async function askModel(conv, cfg, input) {
     }
     await remember({ intakeOn: false, intakeDone: true, answers, cardShown: false });
     ctx.handoff = 'Interested: their answers are in the chat';
-    const link = talkJob ? await T.run('send_apply_link', {}, conv, ctx) : null;
+    // the link of the job our template was about, or the template's own link, or "apply through this number" + registration (tools.js applyLink)
+    const link = (talkJob || conv.campaignId) ? await T.run('send_apply_link', {}, conv, ctx) : null;
     if (link) calls.push({ tool: 'send_apply_link', args: {}, result: link });
-    return { ctx, calls, reply: link && link.sent ? `${closing}\nYou can also apply here:` : closing, written: true };
+    return { ctx, calls, reply: link && link.sent ? `${closing}\n${T.applyWords(link, 'You can also apply here:')}` : closing, written: true };
   }
   // a question about this chat's job: answered from the ATS requirement, the model is not asked
   if (job.available) {
@@ -443,7 +427,7 @@ async function askModel(conv, cfg, input) {
       await T.run('save_candidate_data', { interested: true }, conv, ctx);
       const link = await T.run('send_apply_link', {}, conv, ctx);
       calls.push({ tool: 'send_apply_link', args: {}, result: link });
-      if (link.sent) return { ctx, calls, reply: 'Thank you. Please apply here:', written: true };
+      if (link.sent) return { ctx, calls, reply: `Thank you. ${T.applyWords(link, 'Please apply here:')}`, written: true };
       if (/already/.test(String(link.note))) return { ctx, calls, reply: 'You already have the apply link above. Tell me if you need anything else.', written: true };
       ctx.handoff = `Wants to apply for ${job.title}`;
       return { ctx, calls, reply: 'Thank you for your interest. Our recruiter will contact you about this job soon.', written: true };
@@ -534,7 +518,7 @@ async function runTurn(row, defaults, now = Date.now()) {
   if (G.isAbusive(input)) return passOn('Abusive message', 'handoff_abuse');
   if (G.wantsCall(input)) {
     // the number to call is the one our own message gave them (the template's contact line), never a guessed one
-    const number = await contactNumber(conv);
+    const number = await T.contactNumber(conv);
     const text = `Okay, I will connect you soon.${number ? ` You can also call us now at ${number}.` : ' Our team will call you shortly.'}`;
     const s = await sendText(conv, text);
     await handoff(conv, 'They asked for a call', now);

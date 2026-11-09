@@ -14,7 +14,7 @@ const TOOL_HELP = `Tools (each is {"tool":"name","args":{...}}):
 - get_job_details {}: the job they replied to.
 - search_knowledge_base {"query":"..."}: company and process FAQs.
 - save_candidate_data {"availability":"","expected_salary":"","notice_period":"","location":"","interested":true|false}: send only what the person told you.
-- send_apply_link {}: adds the job's apply and registration link to your reply.
+- send_apply_link {}: adds the job's apply link to your reply (a person without a login registers first), or the number to apply through.
 - send_interview_link {}: adds the AI interview link to your reply.
 - handoff_to_recruiter {"reason":"..."}: a recruiter takes over.`;
 
@@ -294,19 +294,98 @@ async function saveData(conv, args, ctx) {
   return { saved: true, collected: next };
 }
 
+// WHAT WE SENT THEM: the bodies of our own (not AI) WhatsApp messages, newest first; the promotion of this chat first when there is one.
+async function sentBodies(conv) {
+  const rows = [];
+  if (conv.campaignId) rows.push(...await S.q('SELECT body FROM "OmniWaMessage" WHERE e164 = ? AND direction = \'OUT\' AND aiGenerated = 0 AND campaignId = ? AND body IS NOT NULL ORDER BY at DESC LIMIT 3', conv.e164, conv.campaignId).catch(() => []));
+  rows.push(...await S.q('SELECT body FROM "OmniWaMessage" WHERE e164 = ? AND direction = \'OUT\' AND aiGenerated = 0 AND body IS NOT NULL ORDER BY at DESC LIMIT 10', conv.e164).catch(() => []));
+  if (conv.candidateId) {
+    rows.push(...await prisma.candidateMessage.findMany({ where: { candidateId: conv.candidateId, channel: 'WhatsApp', template: { in: ['BULK', 'MANUAL'] } }, orderBy: { createdAt: 'desc' }, take: 10, select: { body: true } }).catch(() => []));
+  }
+  return rows.map((r) => String(r.body || '')).filter(Boolean);
+}
+
+// The phone number in the last message WE sent them (a campaign template carries the contact line), not their own number. Null when none.
+const PHONE_IN_TEXT = /(?:\+?91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}|(?:\+?91[\s-]?)?\d{3,5}[\s-]\d{3,4}[\s-]\d{3,4}/g;
+async function contactNumber(conv, bodies = null) {
+  const own = String(conv.e164 || '').slice(-10);
+  for (const body of bodies || await sentBodies(conv)) {
+    for (const m of body.match(PHONE_IN_TEXT) || []) {
+      const digits = m.replace(/\D/g, '');
+      if (digits.length >= 10 && digits.slice(-10) !== own) return m.trim();
+    }
+  }
+  return null;
+}
+
+// THE APPLY LINK (founder 2026-11-09: the link opens the job role of the template we sent; someone without a login registers first, the Job Portal
+// does not just open; no such job -> "please apply through this number" and our Job Portal; a client's link we sent -> that job role's link):
+//   1. the template we sent carried the client's own apply link -> that link
+//   2. the job is on our Job Portal -> its page with tl_apply=1: a visitor without a login goes to registration first ("You're applying for
+//      <job>") and the application goes in right after they register (job-portal-app/embed/apply-link-addon.js + the portal's own apply flow)
+//   3. neither -> "Please apply through this number" (the template's contact number) and our Job Portal's registration page
+const URL_IN_TEXT = /https?:\/\/[^\s<>"'\])]+/gi;
+const NOT_A_JOB_LINK = /(wa\.me|whatsapp\.com|maps\.|goo\.gl\/maps|youtube\.|youtu\.be|facebook\.com|instagram\.com|twitter\.com|\/\/x\.com|unsubscribe|opt-?out)/i;
+const hostOf = (u) => { try { return new URL(u).host.toLowerCase(); } catch { return ''; } };
+function withApply(url) {
+  const at = String(url).indexOf('#');
+  const head = at >= 0 ? url.slice(0, at) : String(url);
+  const hash = at >= 0 ? url.slice(at) : '';
+  return `${head}${head.includes('?') ? '&' : '?'}tl_apply=1${hash}`;
+}
+function templateLink(bodies) {
+  const ours = hostOf(Portal.portalUrl());
+  for (const body of bodies) {
+    for (const raw of body.match(URL_IN_TEXT) || []) {
+      const u = raw.replace(/[.,;:!?]+$/, '');
+      if (NOT_A_JOB_LINK.test(u) || !hostOf(u)) continue;
+      // our own Job Portal: a job page is used with registration first; its other pages are not a job's link
+      if (hostOf(u) === ours) {
+        if (/#\/job\//.test(u)) return { url: /[?&]tl_apply=1/.test(u) ? u : withApply(u), how: 'portal' };
+        continue;
+      }
+      return { url: u, how: 'client' };
+    }
+  }
+  return null;
+}
+function registerUrl(conv) {
+  const q = new URLSearchParams({ src: 'whatsapp', utm_source: 'whatsapp', utm_medium: 'ai' });
+  if (conv.campaignId) q.set('utm_campaign', String(conv.campaignId).slice(0, 100));
+  return `${Portal.portalUrl()}/?${q}#/register/candidate`;
+}
+// the words before the link(s), by what was sent
+function applyWords(link, usual) {
+  if (!link || link.how !== 'number') return usual;
+  return link.number ? 'Please apply through this number, or register on our Job Portal:' : 'Please register on our Job Portal, and our recruiter will contact you:';
+}
+
 async function applyLink(conv, ctx) {
   const collected = JSON.parse(conv.collected || '{}');
   if (collected.applyLinkSentAt) return { sent: false, note: 'The apply link was already sent in this chat.' };
-  const job = await jobFacts(conv.requirementId);
-  if (!job.available) return { sent: false, note: job.note };
-  const live = await prisma.requirement.findUnique({ where: { id: conv.requirementId }, select: { portalPublished: true } }).catch(() => null);
-  if (!live || !live.portalPublished) return { sent: false, note: 'This job is not on the Job Portal yet, so there is no link: use handoff_to_recruiter.' };
-  const link = Portal.jobUrl(conv.requirementId, 'whatsapp', { utm_source: 'whatsapp', utm_medium: 'ai', utm_campaign: conv.campaignId || undefined });
-  ctx.links.push(link);
+  const job = conv.requirementId ? await jobFacts(conv.requirementId) : null;
+  if (job && !job.available) return { sent: false, note: job.note };
+  const bodies = await sentBodies(conv);
+  let out = templateLink(bodies);
+  if (!out && conv.requirementId) {
+    const live = await prisma.requirement.findUnique({ where: { id: conv.requirementId }, select: { portalPublished: true } }).catch(() => null);
+    if (live && live.portalPublished) out = { url: withApply(Portal.jobUrl(conv.requirementId, 'whatsapp', { utm_source: 'whatsapp', utm_medium: 'ai', utm_campaign: conv.campaignId || undefined })), how: 'portal' };
+  }
+  let number = null;
+  if (!out) {
+    number = await contactNumber(conv, bodies);
+    out = { url: registerUrl(conv), how: 'number' };
+    if (number) ctx.links.push(`Apply through: ${number}`);
+    ctx.handoff = ctx.handoff || `Wants to apply${job && job.title ? ` for ${job.title}` : ''}: the job is not on the Job Portal`;
+  }
+  ctx.links.push(out.url);
   collected.applyLinkSentAt = Date.now();
   conv.collected = JSON.stringify(collected);
   await S.run('UPDATE "OmniWaConv" SET collected = ? WHERE id = ?', conv.collected, conv.id);
-  return { sent: true, note: 'TeamLink adds the link to your reply. Do not write any link yourself. The link works while the job is open.' };
+  const note = out.how === 'number'
+    ? 'This job is not on the Job Portal: TeamLink adds the number to apply through and the registration link to your reply. Say "Please apply through this number, or register on our Job Portal." Do not write any link or number yourself.'
+    : 'TeamLink adds the link to your reply. Do not write any link yourself. Someone without a login registers first, then the application goes in.';
+  return { sent: true, how: out.how, number, note };
 }
 
 async function interviewLink(conv, ctx) {
@@ -335,4 +414,4 @@ async function run(name, args, conv, ctx) {
 }
 
 const NAMES = ['get_candidate_profile', 'get_job_details', 'search_knowledge_base', 'save_candidate_data', 'send_apply_link', 'send_interview_link', 'handoff_to_recruiter'];
-module.exports = { daysOf, isJoiningQuestion, joiningGap, joiningNudgeText, answerFits, askAgainText, GREETING_TEXT, isGreeting, isClosing, mentionsJobs, isYes, isNo, nextQuestion, fieldOf, jobOfCampaign, onlyThisJobText, jobCardText, quickAnswer, run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };
+module.exports = { contactNumber, applyWords, templateLink, withApply, daysOf, isJoiningQuestion, joiningGap, joiningNudgeText, answerFits, askAgainText, GREETING_TEXT, isGreeting, isClosing, mentionsJobs, isYes, isNo, nextQuestion, fieldOf, jobOfCampaign, onlyThisJobText, jobCardText, quickAnswer, run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };

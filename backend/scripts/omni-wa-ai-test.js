@@ -110,7 +110,7 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     stub.script = [{ tool: 'save_candidate_data', args: { notice_period: '30 days', expected_salary: '8 LPA' } }, { tool: 'send_apply_link', args: {} }, { reply: 'Thank you. Please apply here.' }];
     await run();
     sent = await aiMsgs(a.id);
-    check('apply link: TeamLink adds the real link to the reply', sent.length === 2 && LINK.test(sent[1].body) && /src=whatsapp/.test(sent[1].body), sent[1] && sent[1].body);
+    check('apply link: TeamLink adds the real link to the reply, and without a login it opens registration first (tl_apply=1)', sent.length === 2 && LINK.test(sent[1].body) && /src=whatsapp/.test(sent[1].body) && /tl_apply=1/.test(sent[1].body), sent[1] && sent[1].body);
     stub.calls.length = 0;
     await inbound(phoneOf(1), 'I want to talk to someone');
     await run();
@@ -358,6 +358,26 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     check('a call request: "I will connect you soon" with the number from our template, a recruiter is told, the model is not asked', /connect you soon/.test(clLast.body) && /90323 21414/.test(clLast.body) && clConv.handoffReason === 'They asked for a call' && stub.calls.length === 0, [clLast.body, clConv.handoffReason]);
     const Gd = require(path.join(BACK, 'src/omniwa/guard'));
     check('call words: English and Telugu-English; an ordinary sentence is not one', ['call me', 'please call', 'connect on call', 'call cheyandi', 'can we talk', 'phone cheyandi'].every(Gd.wantsCall) && !['I called yesterday', 'what is the salary', 'yes'].some(Gd.wantsCall));
+
+    // ---- 5d. the apply link follows the template we sent (founder 2026-11-09)
+    const Tl = require(path.join(BACK, 'src/omniwa/tools'));
+    const linkFor = async (n, text, requirementId, campaign) => {
+      const c = await mkCandidate(n, `ZZ Apply ${n}`);
+      await Promo.logBulk({ id: campaign, kind: 'bulk', audience: 'candidates', purpose: 'ZZTEST apply', requirementId, templates: { WhatsApp: { name: 'zz_apply' } }, sender: {} },
+        [{ channel: 'WhatsApp', status: 'sent', address: `+${phoneOf(n)}`, text, entityId: c.id, providerRef: `zzap${n}${SUFFIX}`, sentAt: new Date() }]);
+      const ctx = { links: [] };
+      const out = await Tl.run('send_apply_link', {}, { id: `zzconv${n}`, e164: phoneOf(n), candidateId: c.id, campaignId: campaign, requirementId, collected: '{}' }, ctx);
+      return { out, ctx };
+    };
+    await prisma.requirement.update({ where: { id: job.id }, data: { portalPublished: true } });
+    const viaPortal = await linkFor(60, 'ZZTEST Physics lecturer needed. Contact 90323 21414', job.id, `zzapA${SUFFIX}`);
+    check('a job on our Job Portal: its page, with registration first for someone without a login', viaPortal.out.how === 'portal' && viaPortal.ctx.links.length === 1 && LINK.test(viaPortal.ctx.links[0]) && /tl_apply=1/.test(viaPortal.ctx.links[0]), viaPortal);
+    const viaClient = await linkFor(61, 'ZZTEST MBBS doctors needed. Apply: https://careers.zzclient.example/jobs/mbbs-42. Contact 90323 21414', null, `zzapB${SUFFIX}`);
+    check("the client's own link in our template: that job's link goes", viaClient.out.how === 'client' && viaClient.ctx.links[0] === 'https://careers.zzclient.example/jobs/mbbs-42', viaClient);
+    const viaNumber = await linkFor(62, 'ZZTEST Nurses needed in Hyderabad. Contact +91 90323 21414', null, `zzapC${SUFFIX}`);
+    check('no job link: "apply through this number" with the template\'s number, and our Job Portal registration; a recruiter is told', viaNumber.out.how === 'number' && /90323 21414/.test(viaNumber.ctx.links[0]) && /#\/register\/candidate$/.test(viaNumber.ctx.links[1]) && /not on the Job Portal/.test(viaNumber.ctx.handoff || '')
+      && /apply through this number/.test(Tl.applyWords(viaNumber.out, 'x')) && Tl.applyWords(viaPortal.out, 'Please apply here:') === 'Please apply here:', viaNumber);
+    check('a WhatsApp or map link in a template is not a job link', Tl.templateLink(['Chat https://wa.me/919000000000 map https://maps.google.com/x']) === null);
 
     // ---- 6a. an employee's number is answered too (founder 2026-11-09)
     const empNo = phoneOf(94);

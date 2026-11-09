@@ -556,6 +556,15 @@ export function teamlinkFrontRouter({ root, express }) {
     res.set('Cache-Control', 'no-cache');
     res.sendFile(join(import.meta.dirname, 'interview-addon.js'));
   });
+  /*
+   * THE APPLY LINK FROM WHATSAPP (founder 2026-11-09): /tl-addon/apply-link.js (embed/apply-link-addon.js). A job link with tl_apply=1 sends a visitor
+   * without a login to registration first ("You're applying for <job>"), and the portal's own apply flow sends the application after they register.
+   */
+  r.get('/tl-addon/apply-link.js', (_req, res) => {
+    res.set('Content-Type', 'application/javascript; charset=utf-8');
+    res.set('Cache-Control', 'no-cache');
+    res.sendFile(join(import.meta.dirname, 'apply-link-addon.js'));
+  });
   r.get('/api/tl-interview/:id/coach', wrap(async (req, res) => {
     res.set('Cache-Control', 'no-store');
     const coach = await import(pathToFileURL(join(import.meta.dirname, 'interview-coach.mjs')).href);
