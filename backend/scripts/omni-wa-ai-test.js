@@ -239,6 +239,8 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
       && !Tg.answerFits('Which date and time would be convenient for you?', 'yes') && Tg.answerFits('Which date and time would be convenient for you?', 'tomorrow 11 am')
       && !Tg.answerFits('Have you already applied for this position, or are you exploring new opportunities?', 'yes') && Tg.answerFits('Have you already applied for this position, or are you exploring new opportunities?', 'exploring')
       && Tg.answerFits('Are you comfortable with the job shift and working hours?', 'yes') && Tg.answerFits('Are you currently working or not working?', 'no'));
+    check('joining time: days, weeks, months and immediate are read; later than the job is a gap', Tg.daysOf('30 days') === 30 && Tg.daysOf('2 weeks') === 14 && Tg.daysOf('1 month') === 30 && Tg.daysOf('immediate') === 0 && Tg.daysOf('Within 15 Days') === 15
+      && !!Tg.joiningGap({ joining: 'Within 15 Days' }, '30 days') && !Tg.joiningGap({ joining: 'Within 15 Days' }, '10 days') && !Tg.joiningGap({ joining: '' }, '30 days'));
     check('a greeting is a greeting, a sentence is not', ['hi', 'Hii', 'HELLO', 'hi sir', 'Good morning', 'hey!'].every(Tg.isGreeting) && !['hi i need a job', 'high salary', 'hello any vacancy?'].some(Tg.isGreeting));
     await Cfg.save(admin, { testNumbers: ['919000000001'] });
     check('with only test numbers on, the bots keep the other chats', (await Agent.ownsChat({ e164: phoneOf(95) })) === false && (await Agent.ownsChat({ e164: '919000000001' })) === true);
@@ -549,7 +551,11 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     await say('2 years');
     qSent = await aiMsgs(q.id);
     check('a line with a value the requirement has shows it from the ATS', /Hyderabad/.test(qSent[qSent.length - 1].body), qSent.slice(-1).map((x) => x.body));
-    for (const a of ['yes', 'yes', 'yes', 'yes', '15 days', '30 days', 'yes', 'tomorrow 10 am', 'yes', 'no']) await say(a);
+    // joining: the job needs 15 days, they say 30, the AI asks them nicely to manage 15, they agree
+    for (const a of ['yes', 'yes', 'yes', 'yes', '30 days']) await say(a);
+    qSent = await aiMsgs(q.id);
+    check('joining later than the job: the AI explains it helps their chance and asks for the time the job needs, it does not just hand over', /needs joining within 15 days/.test(qSent[qSent.length - 1].body) && /better chance/.test(qSent[qSent.length - 1].body), qSent.slice(-1).map((x) => x.body));
+    for (const a of ['yes', '30 days', 'yes', 'tomorrow 10 am', 'yes', 'no']) await say(a);
     conv = await convAt(phoneOf(41));
     const got = JSON.parse(conv.collected);
     qSent = await aiMsgs(q.id);

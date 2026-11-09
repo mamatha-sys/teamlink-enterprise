@@ -172,6 +172,28 @@ const ASK_AGAIN = {
 };
 const askAgainText = (question) => ASK_AGAIN[questionKind(question)] || ASK_AGAIN.words;
 
+// JOINING TIME AGAINST THE JOB (founder 2026-11-09: the job says 15 days, the candidate said 30, and the AI only said "we will discuss with HR").
+// "30 days" / "2 weeks" / "1 month" / "immediate" -> days; null when there is no time in it.
+function daysOf(text) {
+  const t = String(text || '').toLowerCase();
+  if (/\b(immediate(ly)?|asap|right away|today|now)\b/.test(t)) return 0;
+  const m = /(\d+(?:\.\d+)?)\s*(days?|d\b|weeks?|wks?|months?|mons?)?/.exec(t);
+  if (!m) return null;
+  const n = Number(m[1]);
+  const unit = m[2] || 'days';
+  if (/^w/.test(unit)) return Math.round(n * 7);
+  if (/^m/.test(unit)) return Math.round(n * 30);
+  return Math.round(n);
+}
+const isJoiningQuestion = (q) => /how soon|when can you join|joining/i.test(String(q || ''));
+// -> { need, can } when they can join later than the job needs, else null
+function joiningGap(job, answer) {
+  const need = job ? daysOf(job.joining) : null;
+  const can = daysOf(answer);
+  return need != null && can != null && can > need ? { need, can } : null;
+}
+const joiningNudgeText = (gap) => `This position needs joining within ${gap.need} days, and you said ${gap.can} days. Joining within ${gap.need} days gives your profile a much better chance with the client. Many people speak to their manager to shorten the notice, or adjust it with leave. Can you join within ${gap.need} days?`;
+
 function fieldOf(question) {
   const q = String(question).toLowerCase();
   if (/notice period/.test(q)) return 'notice_period';
@@ -313,4 +335,4 @@ async function run(name, args, conv, ctx) {
 }
 
 const NAMES = ['get_candidate_profile', 'get_job_details', 'search_knowledge_base', 'save_candidate_data', 'send_apply_link', 'send_interview_link', 'handoff_to_recruiter'];
-module.exports = { answerFits, askAgainText, GREETING_TEXT, isGreeting, isClosing, mentionsJobs, isYes, isNo, nextQuestion, fieldOf, jobOfCampaign, onlyThisJobText, jobCardText, quickAnswer, run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };
+module.exports = { daysOf, isJoiningQuestion, joiningGap, joiningNudgeText, answerFits, askAgainText, GREETING_TEXT, isGreeting, isClosing, mentionsJobs, isYes, isNo, nextQuestion, fieldOf, jobOfCampaign, onlyThisJobText, jobCardText, quickAnswer, run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };
