@@ -418,6 +418,11 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
         });
         return undefined;
       }
+      if (req.url.startsWith('/api/v1/conversations?')) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        const items = req.headers['x-workspace-id'] === 'ws2' ? [{ lastMessageAt: new Date().toISOString() }] : req.headers['x-workspace-id'] === 'ws1' ? [{ lastMessageAt: new Date(Date.now() - 86400000).toISOString() }] : [];
+        return res.end(JSON.stringify({ success: true, data: { items } }));
+      }
       gsSeen.push({ url: req.url, ws: req.headers['x-workspace-id'], auth: req.headers.authorization });
       res.writeHead(gs.broken ? 500 : 200, { 'Content-Type': 'application/json' });
       if (gs.broken) return res.end('{"message":"down"}');
@@ -457,8 +462,8 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     await GC.mirror(phoneOf(10), 'ZZTEST from Education 2', 'zz-ref-1', 'zz-edu2');
     check('the AI reply goes only to the workspace of the number they wrote to', gsPosts.length === 1 && gsPosts[0] === 'ws2', gsPosts);
     gsPosts.length = 0;
-    await GC.mirror(phoneOf(10), 'ZZTEST not in Omni', 'zz-ref-2', 'zz-not-mapped');
-    check('a number with no workspace is put in no workspace', gsPosts.length === 0, gsPosts);
+    await GC.mirror(phoneOf(10), 'ZZTEST number not in the map', 'zz-ref-2', 'zz-not-mapped');
+    check('a number the map does not name: the reply goes to the workspace where their message just landed, nowhere else', gsPosts.length === 1 && gsPosts[0] === 'ws2', gsPosts);
     gsSeen.length = 0;
     const edu = await GC.recentSend(phoneOf(10), 7, 'zz-edu2');
     const med = await GC.recentSend(phoneOf(10), 7, 'zz-med');

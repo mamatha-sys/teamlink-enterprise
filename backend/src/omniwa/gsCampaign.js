@@ -48,17 +48,41 @@ async function recentSend(e164, days, numberId) {
 
 // a reply TeamLink sent goes into the person's open thread in Green Start, so Channels > WhatsApp shows both sides. Nothing is sent again. The workspace of the number the
 // person wrote to takes it (their reply may still be on its way there: asked once more). Never throws, not awaited: the candidate already has the message.
+// The workspace whose thread with this person moved last: their message has just landed there (Green Start files it by the number it came to).
+// Used when TeamLink's map does not name the number's workspace (founder 2026-11-09: AI replies reached the phone but not the Green Start chat).
+async function newestThread(e164, token, wss) {
+  let best = null;
+  for (const ws of wss) {
+    // eslint-disable-next-line no-await-in-loop
+    const r = await inTime(GI.call('GET', `/conversations?channel=whatsapp&search=${encodeURIComponent(String(e164).slice(-10))}&pageSize=5`, { token, ws: ws.id })).catch(() => null);
+    const at = Math.max(0, ...((r && r.items) || []).map((c) => new Date(c.lastMessageAt || 0).getTime()).filter(Number.isFinite));
+    if (at && (!best || at > best.at)) best = { ws, at };
+  }
+  return best ? [best.ws] : [];
+}
+const LAST_KEY = 'omni.gs.mirrorLast';
+async function remember(row) {
+  try {
+    const value = JSON.stringify({ at: new Date().toISOString(), ...row });
+    await require('../db').appSetting.upsert({ where: { key: LAST_KEY }, create: { key: LAST_KEY, value }, update: { value } }); // eslint-disable-line global-require
+  } catch { /* only for the check script */ }
+}
 async function mirror(e164, text, providerMessageId, numberId, again = true) {
+  const tail = String(e164).slice(-4);
   try {
     const { token, wss } = await inTime(session());
-    const home = await workspacesFor(numberId, wss);
+    const map = (await GI.readWaMap()) || {};
+    const mapped = map[numberId] && map[numberId].workspaceId ? wss.filter((w) => w.id === map[numberId].workspaceId) : [];
+    const home = mapped.length ? mapped : await newestThread(e164, token, wss);
     for (const ws of home) {
       // eslint-disable-next-line no-await-in-loop
       const r = await inTime(GI.call('POST', '/conversations/import-outbound', { token, ws: ws.id, body: { phone: e164, text: String(text).slice(0, 4000), ...(providerMessageId ? { providerMessageId } : {}) } }));
-      if (r && r.stored) return;
+      if (r && r.stored) { await remember({ phone: tail, numberId: numberId || null, by: mapped.length ? 'number map' : 'newest thread', workspace: ws.name, stored: true }); return; }
     }
-    if (again && home.length) setTimeout(() => { mirror(e164, text, providerMessageId, numberId, false); }, RETRY_MS);
+    if (again && home.length) { setTimeout(() => { mirror(e164, text, providerMessageId, numberId, false); }, RETRY_MS); return; }
+    await remember({ phone: tail, numberId: numberId || null, by: mapped.length ? 'number map' : 'newest thread', workspace: home[0] ? home[0].name : null, stored: false, why: home.length ? 'the workspace has no open chat with this person' : 'no workspace has a chat with this person' });
   } catch (err) {
+    await remember({ phone: tail, numberId: numberId || null, stored: false, why: String((err && err.message) || 'error').slice(0, 200) });
     console.error('[omni-wa] Green Start thread:', err && err.message); // eslint-disable-line no-console
   }
 }
