@@ -252,6 +252,23 @@ async function sendText(conv, text, { user = null, ai: byAi = true } = {}) {
 }
 
 // ---- states ---------------------------------------------------------------------------------------------------------------------------------------
+// The phone number in the last message WE sent them (a campaign template carries the contact line), not their own number. Null when none.
+const PHONE_IN_TEXT = /(?:\+?91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}|(?:\+?91[\s-]?)?\d{3,5}[\s-]\d{3,4}[\s-]\d{3,4}/g;
+async function contactNumber(conv) {
+  const own = String(conv.e164 || '').slice(-10);
+  const rows = await S.q('SELECT body FROM "OmniWaMessage" WHERE e164 = ? AND direction = \'OUT\' AND aiGenerated = 0 AND body IS NOT NULL ORDER BY at DESC LIMIT 10', conv.e164).catch(() => []);
+  if (conv.candidateId) {
+    const more = await prisma.candidateMessage.findMany({ where: { candidateId: conv.candidateId, channel: 'WhatsApp', template: { in: ['BULK', 'MANUAL'] } }, orderBy: { createdAt: 'desc' }, take: 10, select: { body: true } }).catch(() => []);
+    rows.push(...more);
+  }
+  for (const r of rows) {
+    for (const m of String(r.body || '').match(PHONE_IN_TEXT) || []) {
+      const digits = m.replace(/\D/g, '');
+      if (digits.length >= 10 && digits.slice(-10) !== own) return m.trim();
+    }
+  }
+  return null;
+}
 async function handoff(conv, reason, now = Date.now()) {
   await S.run('UPDATE "OmniWaConv" SET state = \'needs_human\', handoffReason = ?, updatedAt = ? WHERE id = ?', clip(reason, 200), now, conv.id);
   if (conv.ownerUserId) await require('../utils/notify').pushNotification({ userId: conv.ownerUserId, title: `${conv.name || 'A person'} needs you on WhatsApp`, message: `${clip(reason, 120)}. Open Omni-Channel > Inbox & Replies > WhatsApp.` }).catch(() => null); // eslint-disable-line global-require
@@ -515,6 +532,15 @@ async function runTurn(row, defaults, now = Date.now()) {
     return { handoff: reason };
   };
   if (G.isAbusive(input)) return passOn('Abusive message', 'handoff_abuse');
+  if (G.wantsCall(input)) {
+    // the number to call is the one our own message gave them (the template's contact line), never a guessed one
+    const number = await contactNumber(conv);
+    const text = `Okay, I will connect you soon.${number ? ` You can also call us now at ${number}.` : ' Our team will call you shortly.'}`;
+    const s = await sendText(conv, text);
+    await handoff(conv, 'They asked for a call', now);
+    await stamp('call_asked', { output: text, error: s.ok ? null : s.error });
+    return { handoff: 'They asked for a call' };
+  }
   if (G.wantsHuman(input)) return passOn('They asked for a person', 'handoff_asked');
   if (Number(conv.aiTurns) >= cfg.maxTurns) return passOn(`The AI reached its limit of ${cfg.maxTurns} replies`, 'handoff_limit');
   if (!G.insideHours(cfg, now)) {

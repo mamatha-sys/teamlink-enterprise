@@ -346,6 +346,19 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     const mbLast = (await aiMsgs(mb.id)).pop();
     check('a template sent to one candidate is the new promotion: the old job is not named any more', !mbConv.requirementId && /zzmbbs/.test(String(mbConv.campaignId)) && !new RegExp(job.title).test(mbLast.body), [mbConv.requirementId, mbConv.campaignId, mbLast.body]);
 
+    // ---- 5c. "can we talk on call": OK, I will connect you soon, and the number our template gave (founder 2026-11-09)
+    const cl = await mkCandidate(92, 'Chaitanya');
+    await Promo.logBulk({ id: `zzcall${SUFFIX}`, kind: 'bulk', audience: 'candidates', purpose: 'ZZTEST call', requirementId: null, templates: { WhatsApp: { name: 'mbbs_openings' } }, sender: {} },
+      [{ channel: 'WhatsApp', status: 'sent', address: `+${phoneOf(92)}`, text: 'ZZTEST Interview this week. Contact: +91 90323 21414', entityId: cl.id, providerRef: `zzcl${SUFFIX}`, sentAt: new Date() }]);
+    await inbound(phoneOf(92), 'Can we talk on call?');
+    stub.calls.length = 0;
+    await run();
+    const clLast = (await aiMsgs(cl.id)).pop();
+    const clConv = await convAt(phoneOf(92));
+    check('a call request: "I will connect you soon" with the number from our template, a recruiter is told, the model is not asked', /connect you soon/.test(clLast.body) && /90323 21414/.test(clLast.body) && clConv.handoffReason === 'They asked for a call' && stub.calls.length === 0, [clLast.body, clConv.handoffReason]);
+    const Gd = require(path.join(BACK, 'src/omniwa/guard'));
+    check('call words: English and Telugu-English; an ordinary sentence is not one', ['call me', 'please call', 'connect on call', 'call cheyandi', 'can we talk', 'phone cheyandi'].every(Gd.wantsCall) && !['I called yesterday', 'what is the salary', 'yes'].some(Gd.wantsCall));
+
     // ---- 6a. an employee's number is answered too (founder 2026-11-09)
     const empNo = phoneOf(94);
     await Agent.onInbound({ channel: 'WhatsApp', from: empNo, text: 'hi', id: `wamid.ZZemp${SUFFIX}`, at: new Date(), name: 'ZZTEST Staff' }, { stored: true, personType: 'EMPLOYEE', personId: 'zz-emp' });

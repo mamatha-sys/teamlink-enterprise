@@ -8,6 +8,9 @@ function isStop(text) { const t = String(text || ''); return STOP_WORDS.test(t) 
 
 const HUMAN = /(\b(human|real person|recruiter|someone|somebody|manager|agent|executive|representative|team\s*lead)\b.*\b(talk|speak|call|connect|contact)\b|\b(talk|speak|call|connect)\b.*\b(human|real person|recruiter|someone|somebody|manager|agent|executive|representative|team\s*lead)\b|\bcall me\b|\bcall back\b|మనిషి|రిక్రూటర్|ఎవరైనా|మాట్లాడాలి|కాల్ చేయండి|किसी से बात|बात करनी|इंसान|कॉल करो|कॉल कीजिए|evaraina|evarainaa|manishi tho|recruiter tho|matladali|call cheyandi|call cheyyandi|kisi se baat|baat karni|baat karna|insaan se)/i;
 function wantsHuman(text) { return HUMAN.test(String(text || '')); }
+// "call me", "can we talk on call", "connect on call", "call cheyandi": they want a phone call (founder 2026-11-09: "ok I will connect you soon")
+const CALL = /(\bcall\s*(me|back|now|later|please|pls|plz)\b|\b(please|pls|plz|can you|could you|kindly)\s+call\b|\b(talk|speak|connect|discuss|connected)\b.*\b(on|over|by|via|through)\s+(a\s+)?(call|phone)\b|\b(on|over)\s+(a\s+)?call\b|\bcall\s*(lo|lone|chesi|cheyandi|cheyyandi|cheyyi|chey|cheyu|cheyara|karo|kariye|kijiye)\b|\bphone\s*(cheyandi|chey|cheyyandi|karo|me)\b|\b(can|could|shall|may)\s+(we|you|i)\s+(talk|speak|connect)\b)/i;
+function wantsCall(text) { return CALL.test(String(text || '')); }
 
 const ABUSE = /\b(fuck\w*|bastard|asshole|idiot|stupid|bitch|scam(mer)?|fraud|chutiya|madarchod|bhenchod|bhosdi\w*|lanja|lanjakoduku|dengey|dengu|pichi\s*pooka)\b/i;
 function isAbusive(text) { return ABUSE.test(String(text || '')); }
@@ -68,4 +71,4 @@ function insideHours(cfg, now = Date.now()) {
   return a < b ? n >= a && n < b : n >= a || n < b;
 }
 
-module.exports = { jobClaim, isStop, wantsHuman, isAbusive, promiseProblem, stripLinks, clipReply, insideHours };
+module.exports = { jobClaim, isStop, wantsHuman, wantsCall, isAbusive, promiseProblem, stripLinks, clipReply, insideHours };
