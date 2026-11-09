@@ -363,6 +363,10 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     await run();
     let kConv = await convAt(phoneOf(97));
     check('a template sent to one candidate does not stop the AI', kConv.mode === 'ai' && !!kConv.lastAiAt, kConv);
+    await prisma.candidateMessage.create({ data: { candidateId: kiran.id, channel: 'WhatsApp', template: 'INTERVIEW_SCHEDULED', templateLabel: 'Interview scheduled', trigger: 'Stage', recipient: `+${phoneOf(97)}`, body: 'ZZTEST stage message', status: 'SENT', senderUserId: admin.id, senderName: 'Developer Team', createdAt: new Date(Date.now() + 1500) } });
+    await inbound(phoneOf(97), 'ok');
+    await run();
+    check('an automatic stage message does not stop the AI either', (await convAt(phoneOf(97))).mode === 'ai');
     // a chat the old, wider rule paused comes back to the AI with the next message
     await S.run('UPDATE "OmniWaConv" SET mode = \'paused\', pausedByName = \'Developer Team\' WHERE id = ?', kConv.id);
     await S.run('INSERT INTO "OmniWaAiRun" (id, convId, e164, input, outcome, output, at) VALUES (?,?,?,?,?,?,?)', `war-zz${SUFFIX}`, kConv.id, kConv.e164, 'Yes', 'paused', 'Developer Team is answering this chat.', Date.now() + 2000);

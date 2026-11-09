@@ -255,8 +255,8 @@ async function humanSentSince(conv) {
   // promotion, not an answer (founder 2026-11-09: his campaign to one number paused the AI as "Developer Team is answering this chat").
   return prisma.candidateMessage.findFirst({
     where: {
-      candidateId: conv.candidateId, channel: 'WhatsApp', senderUserId: { not: null }, template: { notIn: ['BULK', 'AI', 'BOT', 'INBOUND'] }, createdAt: { gt: new Date(since) },
-      OR: [{ template: { not: 'MANUAL' } }, { templateLabel: null }, { templateLabel: { in: ['', 'Message'] } }],
+      candidateId: conv.candidateId, channel: 'WhatsApp', senderUserId: { not: null }, createdAt: { gt: new Date(since) },
+      template: 'MANUAL', OR: [{ templateLabel: null }, { templateLabel: { in: ['', 'Message'] } }], // typed words only: a stage or campaign template is not an answer
     },
     orderBy: { createdAt: 'desc' }, select: { senderName: true },
   });
