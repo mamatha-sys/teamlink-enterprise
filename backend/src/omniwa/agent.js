@@ -439,7 +439,6 @@ async function askModel(conv, cfg, input) {
       const link = await T.run('send_apply_link', {}, conv, ctx);
       calls.push({ tool: 'send_apply_link', args: {}, result: link });
       if (link.sent) return { ctx, calls, reply: `Thank you. ${T.applyWords(link, 'Please apply here:')}`, written: true };
-      if (/already/.test(String(link.note))) return { ctx, calls, reply: 'You already have the apply link above. Tell me if you need anything else.', written: true };
       ctx.handoff = `Wants to apply for ${job.title}`;
       return { ctx, calls, reply: 'Thank you for your interest. Our recruiter will contact you about this job soon.', written: true };
     }

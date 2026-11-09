@@ -112,6 +112,12 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     sent = await aiMsgs(a.id);
     check('apply link: TeamLink adds the real link to the reply, and without a login it opens registration first (tl_apply=1)', sent.length === 2 && LINK.test(sent[1].body) && /src=whatsapp/.test(sent[1].body) && /tl_apply=1/.test(sent[1].body), sent[1] && sent[1].body);
     stub.calls.length = 0;
+    // founder 2026-11-09: asked again = answered again, never "you already have it"
+    await inbound(phoneOf(1), 'please send the apply link again');
+    await run();
+    sent = await aiMsgs(a.id);
+    check('the apply link asked for again: sent again, not "you already have it"', sent.length === 3 && LINK.test(sent[2].body) && !/already/i.test(sent[2].body) && stub.calls.length === 0, sent[2] && sent[2].body);
+    stub.calls.length = 0;
     await inbound(phoneOf(1), 'I want to talk to someone');
     await run();
     let conv = await convAt(phoneOf(1));

@@ -389,7 +389,7 @@ function applyWords(link, usual) {
 
 async function applyLink(conv, ctx) {
   const collected = JSON.parse(conv.collected || '{}');
-  if (collected.applyLinkSentAt) return { sent: false, note: 'The apply link was already sent in this chat.' };
+  // asked again = sent again (founder 2026-11-09: "malli adigithey malli reply evvali"): never "you already have it"
   const job = conv.requirementId ? await jobFacts(conv.requirementId) : null;
   if (job && !job.available) return { sent: false, note: job.note };
   const bodies = await sentBodies(conv);
