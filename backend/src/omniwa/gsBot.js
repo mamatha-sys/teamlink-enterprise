@@ -62,9 +62,16 @@ async function save(workspaceId, body = {}, companyAllowed = false) {
   }
   if (Array.isArray(body.numbers) && body.numbers.length) {
     const mine = new Set((await numbersOf(workspaceId)).map((r) => r.id));
+    const saved = new Map((await Cfg.profiles()).map((p) => [p.numberId, p]));
     for (const n of body.numbers) {
       if (!n || !mine.has(String(n.id))) return { ok: false, status: 403, error: 'That WhatsApp number does not belong to this workspace.' };
-      const r = await Cfg.saveProfile(by, String(n.id), { enabled: n.aiOn !== false, systemPrompt: n.systemPrompt, fallbackMessage: n.fallbackMessage }); // eslint-disable-line no-await-in-loop
+      // only what was changed is sent: the rest stays as saved (founder 2026-11-09: switching AI off was refused over an old long fallback)
+      const p = saved.get(String(n.id));
+      const r = await Cfg.saveProfile(by, String(n.id), { // eslint-disable-line no-await-in-loop
+        enabled: n.aiOn !== undefined ? n.aiOn !== false : !(p && p.enabled === false),
+        systemPrompt: n.systemPrompt !== undefined ? n.systemPrompt : (p && p.systemPrompt) || '',
+        fallbackMessage: n.fallbackMessage !== undefined ? n.fallbackMessage : (p && p.fallbackMessage) || '',
+      });
       if (r.error) return { ok: false, status: r.status || 400, error: r.error };
     }
   }

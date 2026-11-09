@@ -112,7 +112,10 @@ async function saveProfile(user, numberId, b = {}) {
   if (!row) return { error: 'This WhatsApp number is gone.', status: 404 };
   const systemPrompt = S.clip(String(b.systemPrompt == null ? '' : b.systemPrompt).trim(), 6000) || null;
   const fallbackMessage = S.clip(String(b.fallbackMessage == null ? '' : b.fallbackMessage).trim(), 700) || null;
-  if (fallbackMessage && (fallbackMessage.length > FALLBACK_MAX || /^#/.test(fallbackMessage))) return { error: FALLBACK_WORDS, status: 400 };
+  // a NEW fallback must be one short message; the one already saved is kept as it is when only the switch or the instructions change
+  const stored = (await S.q('SELECT fallbackMessage FROM "OmniWaAiProfile" WHERE numberId = ?', row.id))[0];
+  const unchanged = !!stored && (stored.fallbackMessage || null) === fallbackMessage;
+  if (fallbackMessage && !unchanged && (fallbackMessage.length > FALLBACK_MAX || /^#/.test(fallbackMessage))) return { error: FALLBACK_WORDS, status: 400 };
   await S.run(`INSERT INTO "OmniWaAiProfile" (numberId, enabled, systemPrompt, fallbackMessage, updatedByName, updatedAt) VALUES (?,?,?,?,?,?)
     ON CONFLICT(numberId) DO UPDATE SET enabled=excluded.enabled, systemPrompt=excluded.systemPrompt, fallbackMessage=excluded.fallbackMessage, updatedByName=excluded.updatedByName, updatedAt=excluded.updatedAt`,
   row.id, b.enabled === false ? 0 : 1, systemPrompt, fallbackMessage, user ? user.name : null, Date.now());

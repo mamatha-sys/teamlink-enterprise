@@ -675,6 +675,12 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     check('nor another workspace\'s number', otherTry.ok === false && otherTry.status === 403);
     const own = await GB.save('zzws-med', { by: 'ZZ dept', numbers: [{ id: nA.id, aiOn: false, systemPrompt: 'ZZ medical own words', fallbackMessage: '' }] }, false);
     check('its own number: AI off and its own instructions, saved in TeamLink', own.ok && own.numbers[0].aiOn === false && own.numbers[0].systemPrompt === 'ZZ medical own words' && (await Cfg.forNumber(await Cfg.read(), nA.id)).numberOff === true, own.numbers);
+    const longOld = `ZZ old long fallback ${'x'.repeat(400)}`;
+    await S.run('UPDATE "OmniWaAiProfile" SET fallbackMessage = ? WHERE numberId = ?', longOld, nA.id);
+    const onlySwitch = await GB.save('zzws-med', { by: 'ZZ dept', numbers: [{ id: nA.id, aiOn: true }] }, false);
+    check('only the switch is sent: AI back on, an old long fallback and the own instructions stay as saved', onlySwitch.ok && onlySwitch.numbers[0].aiOn === true && onlySwitch.numbers[0].fallbackMessage === longOld && onlySwitch.numbers[0].systemPrompt === 'ZZ medical own words', onlySwitch);
+    const newLong = await GB.save('zzws-med', { by: 'ZZ dept', numbers: [{ id: nA.id, fallbackMessage: `ZZ new long ${'y'.repeat(400)}` }] }, false);
+    check('a NEW long fallback is still refused', newLong.ok === false && newLong.status === 400, newLong);
     const cfgBefore = await Cfg.read(); const qBefore = await Cfg.questions();
     const co = await GB.save('zzws-med', { by: 'ZZ company', company: { maxTurns: 9, questions: ['ZZ question one?', 'ZZ question two?'], closing: 'ZZ thanks' } }, true);
     check('the company login changes the shared settings and questions', co.ok && co.company.maxTurns === 9 && co.company.questions.length === 2 && co.company.closing === 'ZZ thanks', co.company);
