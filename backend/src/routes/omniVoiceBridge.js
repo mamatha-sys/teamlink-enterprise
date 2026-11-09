@@ -3,6 +3,7 @@
 // Server to server only: every request carries a short-lived token signed with the shared one-click-sign-in secret.
 //   POST /calls        make one call by a script       GET /calls/:id   how it is going / how it ended
 //   GET  /line         is the phone line ready?        (Green Start shows it as its "carrier")
+//   GET/POST /wa-ai    the WhatsApp AI chatbot's settings, for Bot Builder (omniwa/gsBot.js)
 // ---------------------------------------------------------------------------
 const express = require('express');
 const omni = require('../calling/omniCalls');
@@ -44,6 +45,27 @@ router.get('/marketing-people', async (req, res) => {
   } catch (err) {
     console.error('[omni-marketing-people]', err && err.message); // eslint-disable-line no-console
     return res.json({ ok: false, error: 'TeamLink could not read the employees just now.' }); // 200, never 502/503
+  }
+});
+
+// The WhatsApp AI chatbot in Omni-Channel's Bot Builder (omniwa/gsBot.js): its settings, read and saved there. The workspace says which numbers
+// are that workspace's; company=1 only when Green Start says the person is the company login (organisation admin).
+router.get('/wa-ai', async (req, res) => {
+  try {
+    return res.set('Cache-Control', 'no-store').json(await require('../omniwa/gsBot').view(req.query.workspace)); // eslint-disable-line global-require
+  } catch (err) {
+    console.error('[omni-wa-ai]', err && err.message); // eslint-disable-line no-console
+    return res.json({ ok: false, error: 'TeamLink could not read the chatbot settings just now.' }); // 200, never 502/503
+  }
+});
+router.post('/wa-ai', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const out = await require('../omniwa/gsBot').save(b.workspace, b, b.companyAllowed === true); // eslint-disable-line global-require
+    return res.status(out.ok === false && (out.status === 400 || out.status === 403) ? out.status : 200).json(out);
+  } catch (err) {
+    console.error('[omni-wa-ai]', err && err.message); // eslint-disable-line no-console
+    return res.json({ ok: false, error: 'TeamLink could not save the chatbot settings just now.' }); // 200, never 502/503
   }
 });
 

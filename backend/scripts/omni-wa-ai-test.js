@@ -661,6 +661,29 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     const refused = await Cfg.saveProfile(admin, nums[0].id, { enabled: true, fallbackMessage: doc });
     check('and a new one like that is refused in plain words', refused.status === 400 && /one short message/.test(refused.error), refused);
 
+    // ---- 8d. the chatbot in Omni-Channel's Bot Builder (founder 2026-11-09): the settings, read and saved from Green Start
+    console.log('\n-- the chatbot in Bot Builder');
+    const GB = require(path.join(BACK, 'src/omniwa/gsBot'));
+    const botMapBefore = await prisma.appSetting.findUnique({ where: { key: 'omni.gs.waMap' } });
+    await prisma.appSetting.upsert({ where: { key: 'omni.gs.waMap' }, update: { value: JSON.stringify({ [nA.id]: { workspaceId: 'zzws-med' }, [nB.id]: { workspaceId: 'zzws-edu' } }) }, create: { key: 'omni.gs.waMap', value: JSON.stringify({ [nA.id]: { workspaceId: 'zzws-med' }, [nB.id]: { workspaceId: 'zzws-edu' } }) } });
+    const v1 = await GB.view('zzws-med');
+    check('Bot Builder sees the company settings, the questions, and ONLY this workspace\'s number; no secret', v1.ok && v1.numbers.length === 1 && v1.numbers[0].id === nA.id && v1.company.questions.length > 0 && typeof v1.company.enabled === 'boolean'
+      && !/token|accessToken|testNumbers/.test(JSON.stringify(v1)), v1);
+    const deptTry = await GB.save('zzws-med', { by: 'ZZ dept', company: { systemPrompt: 'ZZ changed by a department' } }, false);
+    check('a department login cannot change the settings every number uses', deptTry.ok === false && deptTry.status === 403 && (await Cfg.read()).systemPrompt !== 'ZZ changed by a department', deptTry);
+    const otherTry = await GB.save('zzws-med', { by: 'ZZ dept', numbers: [{ id: nB.id, aiOn: false }] }, false);
+    check('nor another workspace\'s number', otherTry.ok === false && otherTry.status === 403);
+    const own = await GB.save('zzws-med', { by: 'ZZ dept', numbers: [{ id: nA.id, aiOn: false, systemPrompt: 'ZZ medical own words', fallbackMessage: '' }] }, false);
+    check('its own number: AI off and its own instructions, saved in TeamLink', own.ok && own.numbers[0].aiOn === false && own.numbers[0].systemPrompt === 'ZZ medical own words' && (await Cfg.forNumber(await Cfg.read(), nA.id)).numberOff === true, own.numbers);
+    const cfgBefore = await Cfg.read(); const qBefore = await Cfg.questions();
+    const co = await GB.save('zzws-med', { by: 'ZZ company', company: { maxTurns: 9, questions: ['ZZ question one?', 'ZZ question two?'], closing: 'ZZ thanks' } }, true);
+    check('the company login changes the shared settings and questions', co.ok && co.company.maxTurns === 9 && co.company.questions.length === 2 && co.company.closing === 'ZZ thanks', co.company);
+    const bad = await GB.save('zzws-med', { company: { questions: [] } }, true);
+    check('an empty question list is refused in plain words', bad.ok === false && bad.status === 400 && /at least one question/i.test(bad.error), bad);
+    await Cfg.save(admin, { maxTurns: cfgBefore.maxTurns }); await Cfg.saveQuestions({ list: qBefore.list, closing: qBefore.closing });
+    await Cfg.removeProfile(nA.id);
+    if (botMapBefore) await prisma.appSetting.update({ where: { key: 'omni.gs.waMap' }, data: { value: botMapBefore.value } }); else await prisma.appSetting.delete({ where: { key: 'omni.gs.waMap' } });
+
     // ---- 9. promotions, already contacted, the push, the other responders
     console.log('\n-- promotions and the screen');
     await Promo.onStatus({ providerRef: `zzout2${SUFFIX}`, status: 'delivered' });
