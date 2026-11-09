@@ -12,7 +12,9 @@ const RANK = { received: 0, queued: 0, sent: 1, delivered: 2, read: 3 };
 // job: the bulk job; rows: its recipients that have just finished. Never throws: the send already happened.
 async function logBulk(job, rows) {
   try {
-    if (job.kind === 'individual' || job.audience !== 'candidates') return;
+    // a template sent to ONE candidate is a promotion too (founder 2026-11-09: an MBBS template, and the AI still talked of an old Java job);
+    // only typed words from the chat window ("Message") are not
+    if (job.audience !== 'candidates' || (job.kind === 'individual' && job.purpose === 'Message')) return;
     const wa = (rows || []).filter((r) => r.channel === 'WhatsApp' && ['sent', 'failed'].includes(r.status));
     if (!wa.length) return;
     await ensure();

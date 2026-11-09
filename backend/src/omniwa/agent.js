@@ -129,6 +129,13 @@ async function onInbound(info, result) {
       await S.run('UPDATE "OmniWaConv" SET promoAt = NULL, campaignId = NULL, campaignName = NULL, requirementId = NULL, collected = ?, aiTurns = 0, updatedAt = ? WHERE id = ?', conv.collected, now, conv.id);
     }
     const link = await linkContext(conv, cfg, now);
+    // a NEW promotion starts a new talk: the old job, the list they picked from and the half-done questions stay behind
+    if (link.campaignId && link.campaignId !== conv.campaignId) {
+      const { promoCardSent, cardShown, intakeOn, intakeDone, intakeAt, intakeTries, answers, chosenJob, jobChoices, promoJob, ...keep } = JSON.parse(conv.collected || '{}');
+      conv.collected = JSON.stringify(keep); // a TeamLink promotion's job is read from its campaign row (askModel), as before
+      conv.requirementId = link.requirementId || null;
+      await S.run('UPDATE "OmniWaConv" SET requirementId = ?, collected = ?, aiTurns = 0, state = CASE WHEN state = \'stopped\' THEN state ELSE \'active\' END WHERE id = ?', conv.requirementId, conv.collected, conv.id);
+    }
     await S.run(`UPDATE "OmniWaConv" SET name = ?, numberId = COALESCE(?, numberId), requirementId = COALESCE(?, requirementId), campaignId = COALESCE(?, campaignId), campaignName = COALESCE(?, campaignName),
       ownerUserId = COALESCE(?, ownerUserId), ownerName = COALESCE(?, ownerName), promoAt = COALESCE(?, promoAt), lastInboundAt = ?, lastText = ?, unread = unread + 1, pendingAt = ?, updatedAt = ? WHERE id = ?`,
     conv.name, info.numberId || null, link.requirementId || null, link.campaignId || null, link.campaignName || null, link.ownerUserId || null, link.ownerName || null, link.promoAt || null, at, clip(info.text, 200), now, now, conv.id);
