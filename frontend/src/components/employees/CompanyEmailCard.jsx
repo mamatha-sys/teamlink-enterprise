@@ -28,7 +28,9 @@ export default function CompanyEmailCard({ employeeId, onChanged }) {
       setS(r.data);
       setEmail(r.data.companyEmail || r.data.suggestion || '');
       setPersonal(r.data.personalEmail || '');
-      setTo((t) => t || r.data.personalEmail || '');
+      // their own email from the profile (never a company address); none = the details go to their phone
+      setTo((t) => t || (r.data.personalSuggestion && r.data.personalSuggestion.email) || '');
+      setPw((p) => p || (r.data.companyEmail ? r.data.generatedPassword : ''));
     }).catch(() => setS(null));
   }
   useEffect(() => { load(); }, [employeeId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -49,7 +51,8 @@ export default function CompanyEmailCard({ employeeId, onChanged }) {
   }
 
   async function sendCredentials() {
-    if (!window.confirm(`This makes "${pw}" the TeamLink password${s.cpanel.on ? ' and the webmail password' : ''} for ${s.companyEmail}, and mails both links with it to ${to}. TeamLink asks them for a new password at the first sign-in. Go ahead?`)) return;
+    const where = to.trim() || `their phone ${s.phoneMasked} (WhatsApp, else SMS)`;
+    if (!window.confirm(`This makes "${pw}" the TeamLink password${s.cpanel.on ? ' and the webmail password' : ''} for ${s.companyEmail}, and sends both links with it to ${where}. TeamLink asks them for a new password at the first sign-in. Go ahead?`)) return;
     setBusy(true); setSendError(''); setSentMsg('');
     try {
       const r = await api.post(`/employees/${employeeId}/company-email/credentials`, { password: pw, to });
@@ -106,15 +109,17 @@ export default function CompanyEmailCard({ employeeId, onChanged }) {
         <button type="button" className="btn btn-sm" style={{ marginTop: 6 }} onClick={() => setEditing(true)}>Change company email</button>
       )}
       {s.companyEmail && !editing && (
-        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div id="signin-details" style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <h3 style={{ fontSize: 13, margin: 0 }}>Sign-in details</h3>
           {passwordBox(s.cpanel.on ? 'Password for TeamLink and webmail' : 'Password for TeamLink')}
-          <label className="field"><span>Send to (their personal email)</span><input type="email" value={to} onChange={(e) => setTo(e.target.value)} placeholder="their own email" /></label>
-          {toOnCompanyDomain && <div className="notice amber">{`${to} is a company address, so it may not reach them. Write their own email (Gmail or similar).`}</div>}
+          <label className="field"><span>Send to (their own email)</span><input type="email" value={to} onChange={(e) => setTo(e.target.value)} placeholder={s.phoneMasked ? `empty: by WhatsApp / SMS to ${s.phoneMasked}` : 'their own email'} /></label>
+          {s.personalSuggestion && to === s.personalSuggestion.email && <div className="small-muted">{`Taken from ${s.personalSuggestion.from}.`}</div>}
+          {!to.trim() && s.phoneMasked && <div className="small-muted">{`No own email on the profile, so the details go to their phone ${s.phoneMasked} by WhatsApp (SMS if WhatsApp does not go).`}</div>}
+          {toOnCompanyDomain && <div className="notice amber">{`${to} is a company address. They can read it only after signing in to webmail with this password, so tell them the password too.`}</div>}
           <div className="small-muted">
             {`The mail has the TeamLink HRMS link${s.cpanel.on ? ', the webmail link' : ''}, the email and this password. TeamLink asks them for a new password at the first sign-in.`}
           </div>
-          <div><button type="button" className="btn btn-sm btn-primary" disabled={busy || !pw || !to.trim()} onClick={sendCredentials}>{busy ? 'Sending…' : 'Send credentials'}</button></div>
+          <div><button type="button" className="btn btn-sm btn-primary" disabled={busy || !pw || (!to.trim() && !s.phoneMasked)} onClick={sendCredentials}>{busy ? 'Sending…' : 'Send credentials'}</button></div>
           {sendError && <div className="error-text">{sendError}</div>}
           {sentMsg && <div className="notice green">{sentMsg}</div>}
         </div>

@@ -59,6 +59,9 @@ async function state(employee) {
     domains,
     cpanel: { on: CP.configured(), domain: CP.domain() || null },
     generatedPassword: generatedPassword(employee),
+    // where Send credentials goes on its own: their own email from the profile, else their phone
+    personalSuggestion: await personalOf(employee, c).catch(() => null),
+    phoneMasked: phoneOf(employee) ? `…${phoneOf(employee).slice(-4)}` : null,
   };
 }
 
@@ -98,6 +101,27 @@ function generatedPassword(employee) {
   const d = employee && employee.dateOfJoining ? new Date(employee.dateOfJoining) : new Date();
   const ist = new Date((Number.isNaN(d.getTime()) ? Date.now() : d.getTime()) + 330 * 60000);
   return `Teamlink@${String(ist.getUTCMonth() + 1).padStart(2, '0')}${ist.getUTCFullYear()}`;
+}
+// THEIR OWN EMAIL, FROM THE PROFILE (founder 2026-11-09: "valla personal gmail automatic ga, profile nunchi theeskovali"): the
+// personal email on the record, the email they applied with (the candidate they were hired from), the address their login had
+// before the company email - the first that is not a company address. null = none, and the details go to their phone.
+const companyDomains = (company) => [...new Set([...allowedDomains(), CP.domain(), String(company || '').split('@')[1]].filter(Boolean).map((d) => d.toLowerCase()))];
+async function personalOf(employee, c = null) {
+  const cols = c || (await columns(employee.id)) || {};
+  const own = (e) => { const x = norm(e); return x && LA.looksLikeEmail(x) && !companyDomains(cols.companyEmail || employee.email).includes(x.split('@')[1]) ? x : null; };
+  const tries = [{ email: cols.personalEmail, from: 'the profile' }];
+  const apps = await prisma.application.findMany({ where: { hrmsEmployeeId: employee.id }, select: { candidate: { select: { email: true } } }, take: 5 }).catch(() => []);
+  apps.forEach((a) => tries.push({ email: a.candidate && a.candidate.email, from: 'the candidate record they were hired from' }));
+  if (employee.userId) {
+    const moved = await prisma.auditLog.findMany({ where: { action: 'Login email changed', entityId: employee.userId }, select: { fromValue: true }, orderBy: { createdAt: 'asc' }, take: 5 }).catch(() => []);
+    moved.forEach((m) => tries.push({ email: m.fromValue, from: 'their earlier login' }));
+  }
+  for (const t of tries) { const e = own(t.email); if (e) return { email: e, from: t.from }; }
+  return null;
+}
+const phoneOf = (employee) => { const m = require('./messagingCore').normalizeMobile(employee && employee.phone); return m.ok ? m.e164 : null; }; // eslint-disable-line global-require
+function credentialsText({ name, company, password, webmail }) {
+  return `TeamLink sign-in for ${String(name || '').split(' ')[0]}: HRMS ${appLink()} | ${webmail ? `Webmail ${webmailLink(company)} | ` : ''}Email ${company} | Password ${password} | You will be asked for a new password at the first sign-in. - TeamLink HR`;
 }
 const appLink = () => `${require('./passwordReset').baseUrl()}/login`; // eslint-disable-line global-require
 const webmailLink = (company) => `https://webmail.${String(company).split('@')[1]}`;
@@ -212,9 +236,13 @@ async function sendCredentials(actor, employeeIn, { password, to: rawTo } = {}) 
   const pw = String(password || '');
   const weak = strengthError(pw, { email: company, name: employee.name });
   if (weak) return { status: 400, body: { error: weak } };
-  const to = norm(rawTo) || norm(c.personalEmail);
-  if (!to || !LA.looksLikeEmail(to)) return { status: 400, body: { error: 'Write the personal email the details go to.' } };
-  if (to === company) return { status: 400, body: { error: 'Send the details to their personal email, not to the new mailbox they cannot open yet.' } };
+  // where it goes: the email HR wrote, else their own email from the profile, else their phone (WhatsApp, then SMS)
+  const typedTo = norm(rawTo);
+  if (typedTo && !LA.looksLikeEmail(typedTo)) return { status: 400, body: { error: 'That email does not look right.' } };
+  const found = typedTo ? null : await personalOf(employee, c);
+  const to = typedTo || (found && found.email) || null;
+  const phone = to ? null : phoneOf(employee);
+  if (!to && !phone) return { status: 400, body: { error: 'There is no personal email and no mobile number on the profile. Write where the details should go.' } };
   const user = employee.userId ? await prisma.user.findUnique({ where: { id: employee.userId } }) : null;
   if (!user) return { status: 409, body: { error: 'This person has no TeamLink login yet.' } };
   { const why = require('./roleGuard').checkPasswordTarget({ actor, target: user }); if (why) return { status: 403, body: { error: why } }; } // eslint-disable-line global-require
@@ -230,22 +258,32 @@ async function sendCredentials(actor, employeeIn, { password, to: rawTo } = {}) 
   await require('./passwordReset').afterPasswordChange({ user: after, method: 'admin_reset', byUserId: actor.id, byName: actor.name }).catch(() => {}); // eslint-disable-line global-require
 
   let mailed = { ok: false, error: 'not tried' };
+  let via = 'mail';
   try {
-    // eslint-disable-next-line global-require
-    mailed = await require('./mailer').sendMail({ to, subject: 'Your TeamLink and company email sign-in details', text: credentialsMail({ name: employee.name, company, password: pw }), useEmployeeFrom: false, fromName: 'TeamLink HR' });
+    if (to) {
+      // eslint-disable-next-line global-require
+      mailed = await require('./mailer').sendMail({ to, subject: 'Your TeamLink and company email sign-in details', text: credentialsMail({ name: employee.name, company, password: pw }), useEmployeeFrom: false, fromName: 'TeamLink HR' });
+    } else {
+      const M = require('./messaging'); // eslint-disable-line global-require
+      const text = credentialsText({ name: employee.name, company, password: pw, webmail: onCpanel });
+      via = 'WhatsApp';
+      mailed = await M.send('WhatsApp', { to: phone, kind: 'bulk', text, vars: [text] });
+      if (!mailed.ok) { via = 'SMS'; mailed = await M.send('SMS', { to: phone, kind: 'bulk', text, vars: [text] }); }
+    }
   } catch (e) { mailed = { ok: false, error: e.message }; }
+  const where = to || `${via} to …${phone.slice(-4)}`;
   await logAudit({
-    userId: actor.id, action: `Sign-in details ${mailed && mailed.ok ? 'sent' : 'set, mail not sent'}`, entity: 'Employee', entityId: employee.id, toValue: to,
+    userId: actor.id, action: `Sign-in details ${mailed && mailed.ok ? 'sent' : 'set, message not sent'}`, entity: 'Employee', entityId: employee.id, toValue: where,
     reason: `TeamLink password${onCpanel ? ' and webmail password' : ''} set by ${actor.name || 'HR'}; change required at the next sign-in${mailed && mailed.ok ? '' : ` (mail: ${String((mailed && mailed.error) || '').slice(0, 150)})`}`,
   });
   const both = onCpanel ? 'TeamLink and webmail' : 'TeamLink';
   return {
     status: 200,
     body: {
-      ok: true, mailed: !!(mailed && mailed.ok), to, webmail: onCpanel,
+      ok: true, mailed: !!(mailed && mailed.ok), to: where, via: to ? 'mail' : via, webmail: onCpanel,
       message: mailed && mailed.ok
-        ? `Done. The ${both} password is set and the details went to ${to}.${onCpanel ? '' : ' The mailbox is not on cPanel here, so its password was not changed.'}`
-        : `The ${both} password is set, but the mail to ${to} did not go. Please give them the details yourself.`,
+        ? `Done. The ${both} password is set and the details went to ${where}${found ? ` (their email from ${found.from})` : ''}.${onCpanel ? '' : ' The mailbox is not on cPanel here, so its password was not changed.'}`
+        : `The ${both} password is set, but the message to ${where} did not go${mailed && mailed.error ? ` (${String(mailed.error).slice(0, 120)})` : ''}. Please give them the details yourself.`,
     },
   };
 }

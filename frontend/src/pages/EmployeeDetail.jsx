@@ -217,6 +217,10 @@ export default function EmployeeDetail() {
 
   // Re-issue the single-use sign-in link. Any earlier link stops working.
   async function sendCredentials() {
+    // with a company email the details carry a password for TeamLink AND webmail: that is the Sign-in details box on this page
+    // (CompanyEmailCard, founder 2026-11-09: "generate chesina password kuda vellali"), so the button takes HR there
+    const box = document.getElementById('signin-details');
+    if (box) { box.scrollIntoView({ behavior: 'smooth', block: 'center' }); const b = box.querySelector('.btn-primary'); if (b) b.focus(); return; }
     setError(''); setNotice(''); setCredentials(null); setBusy('credentials');
     try {
       const res = await api.post(`/employees/${id}/send-credentials`);

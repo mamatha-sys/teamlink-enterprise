@@ -171,7 +171,9 @@ async function stop(code) {
   const p4 = (await call('GET', url4, null, hr)).body.personalEmail;
   const curl = `${url4}/credentials`;
   check('send credentials with a weak password is refused', (await call('POST', curl, { password: '1234' }, hr)).status === 400);
-  check('send credentials to the new mailbox itself is refused', (await call('POST', curl, { password: 'Teamlink@082026', to: 'four.th@teamlink.test' }, hr)).status === 400);
+  check('a bad Send to address is refused', (await call('POST', curl, { password: 'Teamlink@082026', to: 'not an email' }, hr)).status === 400);
+  const st4 = (await call('GET', url4, null, hr)).body;
+  check('Send to is filled from the profile: their own email, never a company address', !!st4.personalSuggestion && st4.personalSuggestion.email === p4 && !/@teamlink\.test$/.test(st4.personalSuggestion.email), st4.personalSuggestion);
   check('an employee cannot send credentials for somebody else', (await call('POST', curl, { password: 'Teamlink@082026' }, await tokenOf(other.userId))).status === 403);
   cpanelAnswer = { status: 0, errors: ['The password is too weak.'] };
   const before4 = (await prisma.user.findUnique({ where: { id: fourth.userId } })).passwordHash;
@@ -183,7 +185,7 @@ async function stop(code) {
   const emailValues = JSON.stringify({ 'SMTP host': 'smtp.example.test', Port: '587', 'Encryption (SSL / STARTTLS / None)': 'STARTTLS', Username: 'zz', 'From address': 'noreply@teamlink.example.test', 'Default from name': 'TeamLink' });
   await prisma.integration.upsert({ where: { id: 'email' }, update: { enabled: true, connected: true, state: 'Connected', values: emailValues }, create: { id: 'email', enabled: true, connected: true, state: 'Connected', values: emailValues } });
   const sent = await call('POST', curl, { password: 'Teamlink@082026' }, hr);
-  check('send credentials: done, to the personal email', sent.status === 200 && sent.body.ok && sent.body.to === p4 && sent.body.webmail === true, sent.body);
+  check('send credentials with nothing typed: done, to their own email from the profile', sent.status === 200 && sent.body.ok && sent.body.to === p4 && sent.body.webmail === true, sent.body);
   const cp4 = cpanelSeen[0] || {};
   check('the webmail password is set in cPanel (password in the body)', cp4.url === '/execute/Email/passwd_pop' && /email=four\.th/.test(cp4.body) && /password=Teamlink%40082026/.test(cp4.body), cp4);
   const u4 = await prisma.user.findUnique({ where: { id: fourth.userId } });
@@ -195,6 +197,18 @@ async function stop(code) {
   check('one mail to the personal email with the HRMS link, the webmail link, the email and the password', !!mail && /\/login/.test(mail.text) && /https:\/\/webmail\.teamlink\.test/.test(mail.text) && mail.text.includes('four.th@teamlink.test') && mail.text.includes('Teamlink@082026'), { mailed: sent.body.mailed, subjects: mailsTo('').map((m) => `${m.to} | ${m.subject}`).slice(-4), text: mail && mail.text });
   const aud4 = await prisma.auditLog.findFirst({ where: { entity: 'Employee', entityId: fourth.id, action: { startsWith: 'Sign-in details' } }, orderBy: { createdAt: 'desc' } });
   check('the audit says details were sent, never the password', !!aud4 && !JSON.stringify(aud4).includes('Teamlink@082026'), aud4);
+
+  console.log('No own email on the profile: the details go to the phone');
+  const fifth = await prisma.employee.findFirst({ where: { userId: { not: null }, id: { notIn: list.map((x) => x.id) }, employmentStatus: { in: ['Active', 'On Probation', 'Confirmed'] }, user: { status: 'Active', role: { not: 'SUPER_ADMIN' } } } });
+  await prisma.employee.update({ where: { id: fifth.id }, data: { phone: '9876501234' } });
+  await prisma.$executeRawUnsafe('UPDATE "Employee" SET "personalEmail" = ?, "companyEmail" = ?, "email" = ? WHERE "id" = ?', 'five.old@teamlink.test', 'five.th@teamlink.test', 'five.th@teamlink.test', fifth.id);
+  await prisma.$executeRawUnsafe('UPDATE "Application" SET "hrmsEmployeeId" = NULL WHERE "hrmsEmployeeId" = ?', fifth.id).catch(() => {});
+  await prisma.auditLog.deleteMany({ where: { action: 'Login email changed', entityId: fifth.userId } });
+  const st5 = (await call('GET', `/employees/${fifth.id}/company-email`, null, hr)).body;
+  check('a personal email on the company domain is not offered; the phone is shown instead', st5.personalSuggestion === null && st5.phoneMasked === '…1234', { s: st5.personalSuggestion, p: st5.phoneMasked });
+  const ph = await call('POST', `/employees/${fifth.id}/company-email/credentials`, { password: 'Teamlink@082026' }, hr);
+  check('send credentials goes to the phone (WhatsApp, else SMS) and says so', ph.status === 200 && /…1234/.test(ph.body.to) && ['WhatsApp', 'SMS'].includes(ph.body.via), ph.body);
+  check('the password is set even when the phone message could not go', await bcrypt.compare('Teamlink@082026', (await prisma.user.findUnique({ where: { id: fifth.userId } })).passwordHash));
 
   console.log(failed ? `\n${failed} of ${total} checks FAILED` : `\nAll ${total} checks passed`);
   await stop(failed ? 1 : 0);
