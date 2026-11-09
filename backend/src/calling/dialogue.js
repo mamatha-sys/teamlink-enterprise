@@ -63,7 +63,7 @@ const L = {
   no: ['no', 'nope', 'nah', 'not', 'cannot', 'cant', 'can t', 'wont', 'dont', 'wrong', 'nahi', 'nahin', 'nhi', 'नहीं', 'नही', 'కాదు', 'లేదు', 'లేద', 'వద్దు', 'kaadu', 'ledu', 'vaddu', 'not interested', 'not me', 'నో', 'నొ', 'नो', 'नॉट'],
   yes: ['yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'correct', 'right', 'speaking', 'sounds good', 'go ahead', 'interested', 'available', 'i can', 'of course', 'definitely', 'absolutely', 'haan', 'han', 'haa', 'ji', 'theek', 'bilkul', 'avunu', 'sare', 'sari', 'हाँ', 'हां', 'जी', 'ठीक', 'बिल्कुल', 'सही', 'అవున', 'సరే', 'సరి', 'అలాగే', 'ఓకే', 'హా', 'హాఁ', 'ఆ', 'ఆఁ', 'ఉన్నాను', 'ఆసక్తి ఉంది', 'ఇంట్రెస్ట్ ఉంది', 'ఇంట్రెస్ట్ ఉందండి', 'ఇంట్రెస్ట్ ఉంటుంది', 'ఇంట్రెస్టే', 'ఇంట్రెస్టెడ్', 'इंटरेस्ट है', 'इंटरेस्टेड', 'interest undi', 'interest undhi', 'interest hai', 'ఇష్టం', 'ఎస్', 'యెస్', 'యస్', 'యా', 'ఓకే', 'ఓకె', 'కరెక్ట్', 'స్పీకింగ్', 'యస', 'यस', 'येस', 'यस्', 'एस', 'ओके', 'ओक', 'करेक्ट', 'स्पीकिंग', 'या'],
   info: ['what', 'where', 'which', 'who', 'when', 'how', 'why', 'details', 'tell me', 'more info', 'location', 'address', 'company', 'client', 'link', 'kya', 'kahan', 'kaun', 'kab', 'kaise', 'क्या', 'कहाँ', 'कहां', 'कौन', 'कब', 'कैसे', 'क्यों', 'ఏమిటి', 'ఎక్కడ', 'ఎవరు', 'ఎప్పుడు', 'ఎలా', 'ఎందుకు', 'ఏంటి'],
-  immediate: ['immediate', 'immediately', 'serving', 'free', 'fresher', 'तुरंत', 'वेंटनहीं', 'వెంటనే', 'ఇప్పుడే'],
+  immediate: ['immediate', 'immediately', 'serving', 'free', 'fresher', 'तुरंत', 'वेंटनहीं', 'వెంటనే', 'ఇప్పుడే', 'ఇమీడియట్', 'ఇమ్మీడియట్', 'ఇమీడియెట్', 'इमीडिएट', 'इमिडिएट', 'इमीडियेट'], // + 'immediate' in Telugu / Hindi letters
   // the person is upset (user rule 2026-10-28: stay calm, apologise, keep it short, offer a recruiter; never argue)
   angry: ['irritating', 'irritated', 'annoying', 'annoyed', 'disturbing', 'frustrating', 'frustrated', 'nonsense', 'rubbish', 'stupid', 'idiot', 'useless', 'wasting', 'time waste',
     'waste of time', 'shut up', 'angry', 'how many times', 'already told', 'again and again', 'bakwas', 'pareshan', 'baar baar', 'kitni baar', 'बकवास', 'परेशान', 'बार बार', 'कितनी बार',
@@ -275,11 +275,18 @@ const NUM_WORDS = {
   forty: 40, 'forty-five': 45, fortyfive: 45, pandra: 15, pandrah: 15, bees: 20, tees: 30, saath: 60, nabbe: 90, padihenu: 15, iravai: 20, muppai: 30, aravai: 60, tombhai: 90,
   पंद्रह: 15, पन्द्रह: 15, पंद्रा: 15, पदह: 15, बीस: 20, तीस: 30, पैंतालीस: 45, साठ: 60, नब्बे: 90, // + the listener's spellings
   పదిహేను: 15, ఇరవై: 20, ముప్పై: 30, నలభై: 40, నలభైఐదు: 45, అరవై: 60, తొంభై: 90,
+  // ENGLISH numbers as the Telugu / Hindi listener writes them (founder's test call 2026-11-09: "two years" came out "టూ ఇయర్స్" and was not understood)
+  వన్: 1, టూ: 2, త్రీ: 3, థ్రీ: 3, ఫోర్: 4, ఫైవ్: 5, సిక్స్: 6, సెవెన్: 7, ఎయిట్: 8, నైన్: 9, టెన్: 10, ఎలెవెన్: 11, ట్వెల్వ్: 12, ఫిఫ్టీన్: 15,
+  ట్వంటీ: 20, ట్వెంటీ: 20, థర్టీ: 30, ఫార్టీ: 40, ఫోర్టీ: 40, సిక్స్టీ: 60, నైంటీ: 90,
+  वन: 1, टू: 2, थ्री: 3, फोर: 4, फ़ोर: 4, फाइव: 5, फ़ाइव: 5, सिक्स: 6, सेवन: 7, एट: 8, नाइन: 9, टेन: 10, इलेवन: 11, ट्वेल्व: 12, फिफ्टीन: 15,
+  ट्वेंटी: 20, थर्टी: 30, फोर्टी: 40, फ़ोर्टी: 40, सिक्सटी: 60, नाइंटी: 90,
+  // and a half (ఒకటిన్నర / डेढ़ / ढाई)
+  ఒకటిన్నర: 1.5, రెండున్నర: 2.5, మూడున్నర: 3.5, నాలుగున్నర: 4.5, डेढ़: 1.5, डेढ: 1.5, ढाई: 2.5, साढ़े: null,
 };
 function firstNumber(t) {
   const m = /(\d{1,3}(?:\.\d)?)/.exec(t);
   if (m) return Number(m[1]);
-  for (const w of t.split(' ')) if (Object.prototype.hasOwnProperty.call(NUM_WORDS, w)) return NUM_WORDS[w];
+  for (const w of t.split(' ')) if (Object.prototype.hasOwnProperty.call(NUM_WORDS, w) && NUM_WORDS[w] != null) return NUM_WORDS[w];
   return null;
 }
 function readYears(text) {
@@ -293,9 +300,9 @@ function readNotice(text) {
   if (has(t, L.immediate)) return { days: 0, text: 'immediate' };
   const n = firstNumber(t);
   if (n == null) return { days: null, text: null };
-  if (has(t, ['month', 'months', 'महीना', 'महीने', 'నెల', 'నెలలు', 'nelalu', 'mahine'])) return { days: Math.round(n * 30), text: `${n} month${n === 1 ? '' : 's'}` };
+  if (has(t, ['month', 'months', 'महीना', 'महीने', 'నెల', 'నెలలు', 'nelalu', 'mahine', 'మంత్', 'మంత్స్', 'मंथ', 'मंथ्स'])) return { days: Math.round(n * 30), text: `${n} month${n === 1 ? '' : 's'}` };
   if (has(t, ['week', 'weeks', 'हफ्ता', 'हफ्ते', 'వారం', 'వారాలు'])) return { days: Math.round(n * 7), text: `${n} week${n === 1 ? '' : 's'}` };
-  if (has(t, ['day', 'days', 'दिन', 'రోజులు', 'రోజు', 'din', 'rojulu'])) return { days: Math.round(n), text: `${n} days` };
+  if (has(t, ['day', 'days', 'दिन', 'రోజులు', 'రోజు', 'din', 'rojulu', 'డేస్', 'డేస్‌', 'डेज', 'डेज़', 'डेस'])) return { days: Math.round(n), text: `${n} days` };
   if (n >= 7 && n <= 365) return { days: Math.round(n), text: `${n} days` };
   return { days: null, text: `${n}` };
 }

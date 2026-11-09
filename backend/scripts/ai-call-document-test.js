@@ -196,6 +196,13 @@ const MATCH = [...TO_INTEREST, 'Maybe, tell me more.', '3 years', 'Yes, in manuf
   const s5 = await talk([['Yes, speaking.', 'English'], ['Telegu', 'English']]);
   check('"Telegu" (the name as the phone line wrote it) at the language question picks Telugu', s5.language === 'Telugu', s5.language);
 
+  console.log('Numbers as the Telugu / Hindi listener writes them (founder\'s test call 2026-11-09: "టూ ఇయర్స్" was not understood)');
+  const DL = require('../src/calling/dialogue');
+  check('"టూ ఇయర్స్" (two years in Telugu letters) is 2 years', DL.readYears('టూ ఇయర్స్') === 2, DL.readYears('టూ ఇయర్స్'));
+  check('"टू ईयर्स" is 2, "ఫైవ్ ఇయర్స్" is 5, "ఒకటిన్నర సంవత్సరం" is 1.5', DL.readYears('टू ईयर्स') === 2 && DL.readYears('ఫైవ్ ఇయర్స్') === 5 && DL.readYears('ఒకటిన్నర సంవత్సరం') === 1.5);
+  check('a plain "okay" is still not a number', DL.readYears('సరే చెప్పు') === null);
+  check('notice period: "థర్టీ డేస్" is 30 days, "टू मंथ्स" 60 days, "ఇమీడియట్" immediate', DL.readNotice('థర్టీ డేస్').days === 30 && DL.readNotice('टू मंथ्स').days === 60 && DL.readNotice('ఇమీడియట్').days === 0);
+
   console.log(failed ? `\n${failed} of ${total} checks FAILED` : `\nAll ${total} checks passed`);
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

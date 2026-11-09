@@ -561,7 +561,9 @@ function handle(sock, engines, opts = {}) {
       const { text } = r2;
       // A SCRIPT CALL ANSWERS ONLY WHAT IT HEARD CLEARLY (founder 2026-11-05: "candidate voice ni clear ga vinaka answer cheyali"): a Telugu / Hindi reply of a word or two that has no real Telugu / Hindi
       // word and means nothing ("సచ్చే", "The model is in the video" written for a sentence that was not caught) is not an answer: the person is asked to say it once more
+      // (a NUMBER is an answer: "టూ ఇయర్స్" - "two years" in Telugu letters - has no Telugu word but says 2; founder's test call 2026-11-09)
       if (heardAs === 'clear' && d && d.scriptName && ['Telugu', 'Hindi'].includes(lang) && pcm.length / (A.RATE * 2) >= 2 && !nativeScore(text, lang) && String(text).trim().split(/\s+/).length <= 2
+        && require('../dialogue').readYears(text) == null // eslint-disable-line global-require
         && !isBackchannel(text) && !GREETING.test(String(text).trim()) && ['unclear', 'silence'].includes(require('../dialogue').classify(text).intent)) heardAs = 'unclear'; // eslint-disable-line global-require
       // A LISTENING NOISE OVER THE ASSISTANT (founder 2026-10-30: "matladuthu matladuthu agi pothundhi"): "ఆ", "హా", "ok",
       // "हाँ", a cough - said while the assistant was still explaining - is not an answer. The assistant goes on with the rest of
