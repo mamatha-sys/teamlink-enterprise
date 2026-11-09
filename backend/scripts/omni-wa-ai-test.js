@@ -519,6 +519,9 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     await say('Not working');
     qSent = await aiMsgs(q.id);
     check('someone not working is not asked which company', !qSent.some((m) => /which company/i.test(m.body) || /designation/.test(m.body)) && /total work experience/.test(qSent[qSent.length - 1].body), qSent.slice(-1).map((x) => x.body));
+    for (const t of ['yes', 'yes', 'yes']) await say(t);
+    qSent = await aiMsgs(q.id);
+    check('"yes" to the experience question, again and again: the same question again, with a plain request', qSent.slice(-3).every((m) => /correct answer/.test(m.body) && /total work experience/.test(m.body)), qSent.slice(-3).map((x) => x.body));
     await say('3 years');
     await say('2 years');
     qSent = await aiMsgs(q.id);

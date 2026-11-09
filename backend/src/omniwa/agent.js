@@ -359,9 +359,9 @@ async function askModel(conv, cfg, input) {
     if (startIntake) await T.run('save_candidate_data', { interested: true }, conv, ctx);
     else {
       const q = String(list[now2.intakeAt] || '');
-      // an answer that does not fit is not taken: the same question again, at most twice, then it moves on so nobody is stuck
+      // an answer that does not fit is not taken: the same question again until it is answered (founder 2026-11-09: "exact answer este ne next question")
       const tries = Number(now2.intakeTries) || 0;
-      if (!T.answerFits(q, input) && tries < 2) {
+      if (!T.answerFits(q, input)) {
         const same = T.nextQuestion(list, Number(now2.intakeAt), talkJob ? { ...talkJob, candidate: conv.name } : { candidate: conv.name }, answers);
         await remember({ intakeTries: tries + 1 });
         return { ctx, calls, reply: `${T.askAgainText(q)}\n${same ? same.text : q}`, written: true };

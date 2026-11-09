@@ -165,10 +165,10 @@ function answerFits(question, text) {
   return !bare && /[a-z\u0C00-\u0C7F\u0900-\u097F]{2,}/i.test(t);
 }
 const ASK_AGAIN = {
-  choice: 'Please tell me which one applies to you.',
-  number: 'Please tell me in numbers, for example "2 years" or "immediate".',
-  day: 'Please tell me a day and time, for example "tomorrow 11 am".',
-  words: 'Please answer this question.',
+  choice: 'Please give a correct answer: tell me which one applies to you.',
+  number: 'Please give a correct answer, in numbers, for example "2 years" or "immediate".',
+  day: 'Please give a correct answer: a day and time, for example "tomorrow 11 am".',
+  words: 'Please give a correct answer to this question.',
 };
 const askAgainText = (question) => ASK_AGAIN[questionKind(question)] || ASK_AGAIN.words;
 
