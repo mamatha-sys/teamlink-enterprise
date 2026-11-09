@@ -71,6 +71,9 @@ router.get('/reminders/live', wrap((req) => SALES.liveReminders(req.user)));
 // the CRM running by itself (crm/autopilot.js)
 router.get('/autopilot', wrap((req) => AUTO.get(req.user)));
 router.put('/autopilot', wrap((req) => AUTO.save(req.user, req.body || {})));
+// the AI sales assistant: answers leads who write back (crm/salesAgent.js)
+router.get('/sales-ai', wrap((req) => require('../crm/salesAgent').get(req.user))); // eslint-disable-line global-require
+router.put('/sales-ai', wrap((req) => require('../crm/salesAgent').save(req.user, req.body || {}))); // eslint-disable-line global-require
 router.post('/leads/:id/auto', wrap((req) => AUTO.pauseLead(req.user, req.params.id, !!(req.body && req.body.paused))));
 router.post('/activities', wrap((req) => CRM.addActivity(req.user, req.body || {})));
 

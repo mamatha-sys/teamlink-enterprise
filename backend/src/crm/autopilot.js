@@ -299,12 +299,16 @@ async function leadsOf({ phone, email }) {
  * follow-up to answer it. It runs with the automatic follow-through off as well: a reply is worth seeing either way. "stop" is an opt-out. Nothing is read into the words beyond that: a person decides.
  * -> how many leads it was
  */
-async function onReply({ channel, phone, email, subject, text, stop = false }) {
+// opts.wait: wait for the AI assistant's answer (tests); in a live inbound webhook it answers in the background, so the provider never waits for the model
+async function onReply({ channel, phone, email, subject, text, stop = false }, { wait = false, deps = {} } = {}) {
   if (channel === 'Email' && NOT_A_PERSON.test(`${subject || ''}`)) return 0;
   const leads = await leadsOf({ phone, email });
   if (!leads.length) return 0;
   const body = S.clip(text, 1000);
   const wantsOut = stop || (channel === 'Email' && STOP_MAIL.test(String(text || '')));
+  // the AI sales assistant answers instead of a person (crm/salesAgent.js): then no "Answer ..." follow-up is made; it hands over when a person is needed
+  const SA = require('./salesAgent'); // eslint-disable-line global-require
+  const aiAnswers = !wantsOut && (await SA.load()).on;
   const CMP = require('./campaigns'); // eslint-disable-line global-require
   const names = SALES.stageNames(await SETTINGS.load());
   const word = CHANNEL_WORD[channel] || channel;
@@ -331,7 +335,7 @@ async function onReply({ channel, phone, email, subject, text, stop = false }) {
     }
     // one follow-up however many messages they send: a person answers them all at once
     const open = !wantsOut && lead.ownerId && await DB.one('SELECT "id" FROM "CrmTask" WHERE "leadId" = ? AND "status" = \'Open\' AND "title" LIKE \'Answer %\'', lead.id);
-    if (!wantsOut && lead.ownerId && !open) {
+    if (!wantsOut && lead.ownerId && !open && !aiAnswers) {
       const iso = new Date(stamp + 5.5 * HOUR).toISOString();
       const now = DB.nowIso();
       await S.insert('CrmTask', {
@@ -341,13 +345,19 @@ async function onReply({ channel, phone, email, subject, text, stop = false }) {
     }
     /* eslint-enable no-await-in-loop */
   }
+  if (aiAnswers) {
+    const lead = await DB.one('SELECT * FROM "CrmLead" WHERE "id" = ?', leads[0].id);
+    const job = SA.respond({ channel, lead, message: text, subject }, { deps }).catch((e) => { console.error('[crm] AI assistant:', e.message); return null; }); // eslint-disable-line no-console
+    if (wait) await job;
+  }
   return leads.length;
 }
 
 // Nothing else reads the mailbox by itself, and a mail reply has to be seen for the sequence to stop. Only while the automatic follow-through is on, and only when a mailbox is connected.
 async function checkMailbox({ pollOnce } = {}) {
   const st = await load();
-  if (!st.on) return { off: true };
+  // the AI assistant answers mail too, so the mailbox is read while either is on
+  if (!st.on && !(await require('./salesAgent').load()).on) return { off: true }; // eslint-disable-line global-require
   // eslint-disable-next-line global-require
   const imap = require('../utils/imapInbox');
   if (!pollOnce && !(await imap.status()).configured) return { notConfigured: true };
