@@ -432,8 +432,8 @@ async function runTurn(row, defaults, now = Date.now()) {
   if (!cfg.enabled) return { skipped: 'off' };
   if (cfg.numberOff) return { skipped: 'number_off' };
   if (cfg.testNumbers.length && !cfg.testNumbers.includes(conv.e164)) return { skipped: 'not_a_test_number' };
-  // somebody who said no and later says hi is talking again; STOP is the isBlocked check below
-  if (conv.mode === 'ai' && ((conv.state === 'needs_human' && !STAYS_WITH_PEOPLE.test(conv.handoffReason || '')) || (conv.state === 'not_interested' && T.isGreeting(input)))) {
+  // somebody who said no and writes again ("Yes", a question) is talking again; "bye" / "thanks" ends it; STOP is the isBlocked check below
+  if (conv.mode === 'ai' && ((conv.state === 'needs_human' && !STAYS_WITH_PEOPLE.test(conv.handoffReason || '')) || (conv.state === 'not_interested' && !T.isClosing(input)))) {
     await S.run('UPDATE "OmniWaConv" SET state = \'active\', handoffReason = NULL, updatedAt = ? WHERE id = ?', now, conv.id);
     conv.state = 'active'; conv.handoffReason = null;
   }

@@ -171,6 +171,9 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     stub.calls.length = 0;
     await run();
     check('not interested: marked, thanked once, no more messages', conv.state === 'not_interested' && (await aiMsgs(c.id)).length === 1 && stub.calls.length === 0);
+    await inbound(phoneOf(3), 'Yes');
+    await run();
+    check('a person who said no and then says Yes is answered again', (await convAt(phoneOf(3))).state === 'active' && (await aiMsgs(c.id)).length === 2);
 
     stub.down = true;
     const d = await mkCandidate(4, 'Deepa');
@@ -229,6 +232,7 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     check('hi from anybody: answered at once, the model is not asked', stub.calls.length === 0 && /looking for a job/.test(hiMsgs[hiMsgs.length - 1].text), hiMsgs);
     const Tg = require(path.join(BACK, 'src/omniwa/tools'));
     check('a stretched yes or no is still a yes or no; a sentence is not', ['yesssssssssss', 'Yes', 'yess sir', 'okkk', 'yaa', 'Interested'].every(Tg.isYes) && ['noooo', 'No', 'vaddu'].every(Tg.isNo) && !['yes but salary?', 'yesterday', 'not now', 'nothing'].some((x) => Tg.isYes(x) || Tg.isNo(x)));
+    check('bye and thanks close a talk, a yes does not', ['bye', 'Byeee', 'thank you', 'ok thanks', 'thanks sir'].every(Tg.isClosing) && !['yes', 'Yes please', 'hi'].some(Tg.isClosing));
     check('a greeting is a greeting, a sentence is not', ['hi', 'Hii', 'HELLO', 'hi sir', 'Good morning', 'hey!'].every(Tg.isGreeting) && !['hi i need a job', 'high salary', 'hello any vacancy?'].some(Tg.isGreeting));
     await Cfg.save(admin, { testNumbers: ['919000000001'] });
     check('with only test numbers on, the bots keep the other chats', (await Agent.ownsChat({ e164: phoneOf(95) })) === false && (await Agent.ownsChat({ e164: '919000000001' })) === true);

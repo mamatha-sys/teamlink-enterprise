@@ -120,6 +120,7 @@ const titleHas = (title, text) => wordsOf(text).some((w) => wordStarts(title, st
 // YES to a promotion: the details are asked here, one question at a time, and saved. No model: on the live server it was too slow and could not hold the order (founder 2026-11-05)
 // "yesssss", "okkk", "yaa", "noooo": people stretch the word, and a stretched yes must not wait for the slow model (founder 2026-11-09)
 const isYes = (t) => /^\W*(y+e+s+|y+e+a+h*|y+a+|y+e+p+|y+|o+k+|o+k+a+y+|k+|s+u+r+e+|interested|i am interested|im interested|i'm interested|a+v+u+n+u+|h+a+a*n*|h+a+)\W*(sir|madam|mam|maam)?\W*$/i.test(String(t || ''));
+const isClosing = (t) => /^\W*(o+k+|o+k+a+y+|k+|b+y+e+|bye bye|thanks?( you)?|thank u|thx|ok(ay)? thanks?|tq|good ?night|gn)\W*(sir|madam|mam|maam)?\W*$/i.test(String(t || ''));
 const isNo = (t) => /^\W*(n+o+|n+o+p+e+|no thanks|no thank you|not interested|v+a+d+d+u+|n+a+h+i+)\W*(sir|madam|mam|maam)?\W*$/i.test(String(t || ''));
 // the next line of the list to ask from position i: { index, text } or null when the list is done. Placeholders come from the job; a line with no value is skipped.
 function nextQuestion(list, i, job, answers = {}) {
@@ -279,4 +280,4 @@ async function run(name, args, conv, ctx) {
 }
 
 const NAMES = ['get_candidate_profile', 'get_job_details', 'search_knowledge_base', 'save_candidate_data', 'send_apply_link', 'send_interview_link', 'handoff_to_recruiter'];
-module.exports = { GREETING_TEXT, isGreeting, mentionsJobs, isYes, isNo, nextQuestion, fieldOf, jobOfCampaign, onlyThisJobText, jobCardText, quickAnswer, run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };
+module.exports = { GREETING_TEXT, isGreeting, isClosing, mentionsJobs, isYes, isNo, nextQuestion, fieldOf, jobOfCampaign, onlyThisJobText, jobCardText, quickAnswer, run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };
