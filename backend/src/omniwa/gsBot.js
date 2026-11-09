@@ -78,4 +78,24 @@ async function save(workspaceId, body = {}, companyAllowed = false) {
   return view(workspaceId);
 }
 
-module.exports = { view, save, numbersOf, COMPANY_FIELDS };
+// A BOT BUILDER BOT HANDS THE CHAT TO THE AI (founder 2026-11-09: "kotha chatbot create chesaa kanii andhuloo nunchii ai chat kavlii").
+// The bot's "Handover" step set to "WhatsApp AI": from here the AI answers this person, even on a number whose AI is off (the bot owned the
+// first part), for a day. The person's last message is answered at once. Only a chat on one of this workspace's numbers.
+const BY_BOT_MS = 24 * 3600 * 1000;
+async function take(workspaceId, body = {}, now = Date.now()) {
+  const S = require('../outreach/store'); // eslint-disable-line global-require
+  const e164 = String(body.phone || '').replace(/\D/g, '');
+  if (e164.length < 10) return { ok: false, status: 400, error: 'No phone number for this chat.' };
+  const conv = (await S.q('SELECT * FROM "OmniWaConv" WHERE e164 = ?', e164))[0];
+  if (!conv) return { ok: false, status: 404, error: 'TeamLink has no WhatsApp chat with this number yet.' };
+  const mine = new Set((await numbersOf(workspaceId)).map((r) => r.id));
+  if (!conv.numberId || !mine.has(conv.numberId)) return { ok: false, status: 403, error: "This chat is not on one of this workspace's WhatsApp numbers." };
+  if (conv.state === 'stopped') return { ok: false, status: 409, error: 'This person asked for no more messages.' };
+  const collected = { ...JSON.parse(conv.collected || '{}'), aiByBotUntil: now + BY_BOT_MS, aiByBot: clip(body.bot, 80) || 'Bot Builder' };
+  await S.run(`UPDATE "OmniWaConv" SET collected = ?, mode = 'ai', state = 'active', handoffReason = NULL, pausedByName = NULL, aiTurns = 0, pendingAt = ?, updatedAt = ? WHERE id = ?`, JSON.stringify(collected), now, now, conv.id);
+  // the message that reached the bot's last step is answered by the AI (the AI skipped it while the number was off)
+  await S.run(`UPDATE "OmniWaMessage" SET consumedAt = NULL WHERE id = (SELECT id FROM "OmniWaMessage" WHERE convId = ? AND direction = 'IN' ORDER BY at DESC LIMIT 1)`, conv.id);
+  return { ok: true, until: collected.aiByBotUntil };
+}
+
+module.exports = { view, save, take, numbersOf, COMPANY_FIELDS };

@@ -467,7 +467,8 @@ async function runTurn(row, defaults, now = Date.now()) {
   const stamp = (outcome, extra = {}) => log(conv, { input, outcome, ...extra });
 
   if (!cfg.enabled) return { skipped: 'off' };
-  if (cfg.numberOff) return { skipped: 'number_off' };
+  // a number with the AI off still gets the AI in a chat a Bot Builder bot handed to it, for a day (omniwa/gsBot.js take)
+  if (cfg.numberOff && !(Number(JSON.parse(conv.collected || '{}').aiByBotUntil) > now)) return { skipped: 'number_off' };
   // a business lead in a CRM sales talk: the CRM's AI sales assistant answers it (crm/salesAgent.js), not this recruitment agent
   if (await require('../crm/salesAgent').handles(conv.e164).catch(() => false)) return { skipped: 'crm_sales' }; // eslint-disable-line global-require
   if (cfg.testNumbers.length && !cfg.testNumbers.includes(conv.e164)) return { skipped: 'not_a_test_number' };

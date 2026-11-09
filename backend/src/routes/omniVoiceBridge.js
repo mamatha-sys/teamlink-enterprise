@@ -69,6 +69,18 @@ router.post('/wa-ai', async (req, res) => {
   }
 });
 
+// A Bot Builder bot's Handover step set to "WhatsApp AI": the AI takes this chat (omniwa/gsBot.js take)
+router.post('/wa-ai/take', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const out = await require('../omniwa/gsBot').take(b.workspace, b); // eslint-disable-line global-require
+    return res.status(out.ok === false && [400, 403, 404, 409].includes(out.status) ? out.status : 200).json(out);
+  } catch (err) {
+    console.error('[omni-wa-ai-take]', err && err.message); // eslint-disable-line no-console
+    return res.json({ ok: false, error: 'TeamLink could not hand the chat to the AI just now.' }); // 200, never 502/503
+  }
+});
+
 router.post('/calls', async (req, res) => {
   const b = req.body || {};
   const r = await omni.create({ externalId: b.externalId, toNumber: b.toNumber, name: b.name, script: b.script, scriptLanguage: b.scriptLanguage, scripts: b.scripts, agentName: b.agentName });

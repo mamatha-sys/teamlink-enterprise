@@ -681,6 +681,23 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     check('only the switch is sent: AI back on, an old long fallback and the own instructions stay as saved', onlySwitch.ok && onlySwitch.numbers[0].aiOn === true && onlySwitch.numbers[0].fallbackMessage === longOld && onlySwitch.numbers[0].systemPrompt === 'ZZ medical own words', onlySwitch);
     const newLong = await GB.save('zzws-med', { by: 'ZZ dept', numbers: [{ id: nA.id, fallbackMessage: `ZZ new long ${'y'.repeat(400)}` }] }, false);
     check('a NEW long fallback is still refused', newLong.ok === false && newLong.status === 400, newLong);
+    // a Bot Builder bot's Handover step set to "WhatsApp AI": the AI takes the chat on a number whose AI is off
+    await GB.save('zzws-med', { by: 'ZZ dept', numbers: [{ id: nA.id, aiOn: false }] }, false);
+    const hb = await mkCandidate(63, 'Harika');
+    await onNumber(nA.id, phoneOf(63), 'Talk to us');
+    stub.calls.length = 0;
+    await run();
+    const beforeTake = (await aiMsgs(hb.id)).length;
+    const wrongWs = await GB.take('zzws-edu', { phone: phoneOf(63), bot: 'ZZ bot' });
+    const took = await GB.take('zzws-med', { phone: phoneOf(63), bot: 'ZZ Medical bot' });
+    stub.script = [{ reply: 'ZZ the AI took over this chat' }];
+    await run();
+    const afterTake = await aiMsgs(hb.id);
+    check('the number\'s AI is off: silent; the bot hands over: the AI answers the last message, only for this workspace\'s chat', beforeTake === 0 && wrongWs.status === 403 && took.ok && afterTake.length === 1, [beforeTake, wrongWs, took, afterTake.map((m) => m.body)]);
+    await onNumber(nA.id, phoneOf(63), 'What is the salary?');
+    stub.script = [{ reply: 'ZZ second AI answer' }];
+    await run();
+    check('and keeps answering in that chat after the hand-over', (await aiMsgs(hb.id)).length === 2);
     const cfgBefore = await Cfg.read(); const qBefore = await Cfg.questions();
     const co = await GB.save('zzws-med', { by: 'ZZ company', company: { maxTurns: 9, questions: ['ZZ question one?', 'ZZ question two?'], closing: 'ZZ thanks' } }, true);
     check('the company login changes the shared settings and questions', co.ok && co.company.maxTurns === 9 && co.company.questions.length === 2 && co.company.closing === 'ZZ thanks', co.company);
