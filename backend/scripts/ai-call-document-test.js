@@ -175,6 +175,27 @@ const MATCH = [...TO_INTEREST, 'Maybe, tell me more.', '3 years', 'Yes, in manuf
   check('the assistant never says అండి', !said.includes('అండి'));
   check('the call opens with గారేనా మాట్లాడేది', said.includes('{name} గారేనా మాట్లాడేది?') && !said.includes('గారితో మాట్లాడుతున్నానా'));
 
+  console.log('Language after the language question (founder 2026-11-09: "language switch avvatledhu")');
+  // turn by turn: [what was heard, the language the phone line's sound check gave]
+  const talk = async (turns) => {
+    const d = open('English');
+    d.start();
+    for (const [text, lang] of turns) await d.hear(text, { lang }); // eslint-disable-line no-await-in-loop
+    return d;
+  };
+  const picked = [['Yes, speaking.', 'English'], ['English', 'English'], ['Yes, go ahead.', 'English']];
+  const s1 = await talk([...picked, ['నాకు మూడు సంవత్సరాల అనుభవం ఉంది', 'Telugu']]);
+  check('English was picked, then the person speaks a full Telugu sentence: the call goes on in Telugu', s1.language === 'Telugu', s1.language);
+  const s2 = await talk([...picked, ['ఆ', 'Telugu']]);
+  check('one stray sound after picking English does not switch the call', s2.language === 'English', s2.language);
+  const s3 = await talk([...picked, ['ok sure', 'Hindi']]);
+  const s3b = await talk([...picked, ['ok sure', 'Hindi'], ['ok fine', 'Hindi']]);
+  check('the sound says Hindi once (words unclear): stays; twice running: the call goes to Hindi', s3.language === 'English' && s3b.language === 'Hindi', `${s3.language} / ${s3b.language}`);
+  const s4 = await talk([...picked, ['ok sure', 'Hindi'], ['Yes, three years.', 'English'], ['ok fine', 'Hindi']]);
+  check('Hindi, then English, then Hindi again is not "twice running": stays in English', s4.language === 'English', s4.language);
+  const s5 = await talk([['Yes, speaking.', 'English'], ['Telegu', 'English']]);
+  check('"Telegu" (the name as the phone line wrote it) at the language question picks Telugu', s5.language === 'Telugu', s5.language);
+
   console.log(failed ? `\n${failed} of ${total} checks FAILED` : `\nAll ${total} checks passed`);
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

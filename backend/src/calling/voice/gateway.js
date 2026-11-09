@@ -353,6 +353,7 @@ function handle(sock, engines, opts = {}) {
   // what the assistant is saying now, sentence by sentence, and the line frame where each sentence ends
   let current = null; // { parts: [sentence], ends: [frame] }
   let interrupted = null; // { rest: 'the sentences not said yet', at: ms } - set when the person talks over the assistant
+  let gapFrom = 0; let gapMarks = ''; // when the answer was taken in, and where the time went: for the "gap" line in the log
   async function say(text) {
     const my = ++gen; // a newer reply (or a barge-in) cancels the rest of this one
     current = { parts: [], ends: [] }; interrupted = null;
@@ -368,6 +369,8 @@ function handle(sock, engines, opts = {}) {
       if (my !== gen || sock.destroyed) return;
       speaker.add(pcm); speaker.add(E.silence(GAP_MS));
       current.parts.push(sentences(text)[jobs.indexOf(job)]); current.ends.push(speaker.sent + speaker.queue.length);
+      // how long the person waited after their answer ended (plus the pause that told us it ended): one line per answer, times only
+      if (firstOut && gapFrom) { log(`gap ${row ? row.id : '-'} [${lang}]: reply sound ${Date.now() - gapFrom} ms after the answer was taken (${gapMarks}, voice ${Date.now() - t0})`); gapFrom = 0; }
       if (DEBUG && row && firstOut) { firstOut = false; debug(`${row.id} voice ready in ${Date.now() - t0} ms`); }
     }
   }
@@ -378,9 +381,13 @@ function handle(sock, engines, opts = {}) {
     const out = await d.hear(text, meta);
     // switched language: this job's lines in the new language are made in the background now, so the next replies are ready
     if (d.language !== before && !out.done) prepareCall(engines, d, { ownOnly: true });
-    await svc.setRow(row.id, { botStateJson: JSON.stringify({ ...d.snapshot(), done: !!out.done }) }).catch((e) => log('state not saved:', e.message));
-    await keepTurns();
+    // saved WHILE the reply is spoken, not before it (founder 2026-11-09: "gap ekkuva theesuntundhi"): the person waited for two database writes
+    const saving = Promise.all([
+      svc.setRow(row.id, { botStateJson: JSON.stringify({ ...d.snapshot(), done: !!out.done }) }).catch((e) => log('state not saved:', e.message)),
+      keepTurns(),
+    ]);
     await say(out.say);
+    await saving;
     if (out.done) {
       ended = true;
       await speaker.whenIdle();
@@ -401,7 +408,7 @@ function handle(sock, engines, opts = {}) {
     try {
       // which language + the words, at the same time; only when the person really switched is it heard again in the new one
       // (a clip under ~2 s with its end pause - "yes", "haan theek" - is too short to tell a language by sound)
-      const t0 = Date.now();
+      const t0 = Date.now(); gapFrom = t0;
       const marks = []; const mark = (what) => marks.push(`${what} ${Date.now() - t0}`);
       const cur = d.language;
       // the words AND Whisper's sureness ({ text, conf }); an engine without sttEx gives words only (conf null)
@@ -562,6 +569,7 @@ function handle(sock, engines, opts = {}) {
       if (['Telugu', 'Hindi'].includes(lang) && heardAs === 'clear' && nativeScore(text, lang)) spoken = lang;
       if (opts.onHeard) opts.onHeard(text, lang);
       if (DEBUG) debug(`${row.id} heard [${lang}${found ? ' by sound' : ''}] ${(pcm.length / 16000).toFixed(1)}s in ${Date.now() - t0} ms (${marks.join(', ')}), ${heardAs}: ${text}`);
+      gapMarks = `${(pcm.length / 16000).toFixed(1)} s heard, ${marks.join(', ')}, words ready ${Date.now() - t0}`;
       await reply(text, { heard: heardAs, lang });
     } catch (e) {
       // the brain / an engine / the database failed on this answer: say a safe line and wait for the next one

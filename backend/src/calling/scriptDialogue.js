@@ -238,9 +238,16 @@ class ScriptDialogue extends D.Dialogue {
       const bySound = meta.lang && meta.lang !== this.language && S.LANGS.includes(meta.lang) ? { lang: meta.lang, only: !!(byWords && byWords.only) } : null;
       const lg = bySound || byWords;
       const shortEnglish = lg && lg.lang === 'English' && this.language !== 'English' && !lg.only && text.trim().split(/\s+/).length < 4;
-      if (lg && lg.lang !== this.language && !shortEnglish && this.byLang[lg.lang] && (!st.langPicked || lg.only)) { // the language the person picked stays, unless they ask for another
+      // after the language question the picked language stays against ONE stray sentence, but not against the person really speaking another one
+      // (founder 2026-11-09: "language switch avvatledhu"): the sound and the words agree, or the sound says the same language twice running
+      if (meta.lang && meta.lang === this.language) st.langVote = null;
+      else if (bySound) st.langVote = st.langVote && st.langVote.lang === bySound.lang ? { lang: bySound.lang, n: st.langVote.n + 1 } : { lang: bySound.lang, n: 1 };
+      const agree = !!(bySound && byWords && byWords.lang === bySound.lang);
+      const twice = !!(lg && st.langVote && st.langVote.lang === lg.lang && st.langVote.n >= 2);
+      if (lg && lg.lang !== this.language && !shortEnglish && this.byLang[lg.lang] && (!st.langPicked || lg.only || agree || twice)) {
         this.setLanguage(lg.lang);
         st.switched = (st.switched || 0) + 1;
+        st.langVote = null;
         if (lg.only) { turn.understood = 'language'; return { say: this.speak(this.line(sc.idx)), done: false }; } // "Telugu lo matladandi": the same question, now in Telugu
       }
     }

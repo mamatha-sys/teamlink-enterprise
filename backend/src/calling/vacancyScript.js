@@ -301,8 +301,8 @@ function stepOf(facts, lang, lineText) {
 // "Telugu", "Telugu + English", "తెలుగులో": the language picked (a mix = the Indian language: the lines of that version are in that mix already)
 function languageChoice(text) {
   const t = String(text || '').toLowerCase();
-  if (/telugu|తెలుగు|तेलुगु/.test(t)) return 'Telugu';
-  if (/hindi|हिंदी|हिन्दी|హిందీ/.test(t)) return 'Hindi';
+  if (/t+h?el+[aeu]?g+[ou]+|telgu|తెలుగు|तेलुगु/.test(t)) return 'Telugu'; // "Telgu", "Telegu", "Thelugu": the name as a phone line writes it
+  if (/hind+h?i|हिंदी|हिन्दी|హిందీ/.test(t)) return 'Hindi';
   if (/english|ఇంగ్లీష్|ఇంగ్లిష్|इंग्लिश|अंग्रेज़ी|अंग्रेजी/.test(t)) return 'English';
   return null;
 }

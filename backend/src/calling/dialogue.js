@@ -139,8 +139,8 @@ const ROMAN = {
 // "can we talk in English", "हिंदी में बात करो", "తెలుగులో మాట్లాడండి": a request to switch, not an answer
 const LANG_ASK = /\b(talk|speak|continue|switch|change|explain|tell)\b|\bbaat\b|\bbol|matlad|మాట్లాడ|बात|बोल/i;
 const LANG_NAMES = [
-  ['Telugu', /\btelugu\b|తెలుగు|तेलुगु/i],
-  ['Hindi', /\bhindi\b|हिंदी|हिन्दी|హిందీ/i],
+  ['Telugu', /\bt+h?el+[aeu]?g+[ou]+\b|\btelgu\b|తెలుగు|तेलुगु/i],
+  ['Hindi', /\bhind+h?i\b|हिंदी|हिन्दी|హిందీ/i],
   ['English', /\benglish\b|इंग्लिश|अंग्रेज़?ी|ఇంగ్లీష్|ఇంగ్లిష్|ఆంగ్ల/i],
 ];
 // "I'm interested" in any of the three languages (an interest said at "shall I tell you about it?")
