@@ -16,6 +16,7 @@ import api from '../../api';
 import { money, money2, fmtD } from './invFormat';
 import WaButton from '../../components/wa/WaButton.jsx'; // free WhatsApp quick chat (payment reminder)
 import './clientInvoice.css';
+import StatementView from '../bank/StatementView.jsx';
 
 // Founder spec 2026-10-15: 24 columns, Invoice No pinned left, Actions pinned right.
 export const CI_HEADS = [
@@ -89,6 +90,8 @@ function Panel({
   const tdsWord = g.tdsLines === 0 ? '—' : g.tdsInHand === g.tdsLines ? 'Received' : (g.tdsInHand ? `${g.tdsInHand} of ${g.tdsLines} received` : 'Pending');
   const sentWord = g.sentAll ? `${g.sentVia}${g.sentDate ? ` · ${fmtD(g.sentDate)}` : ''}` : (g.sentSome ? 'Sent for some candidates only' : 'Not sent');
   const row = (k, v, cls) => (<div className={`ci-kv${cls ? ` ${cls}` : ''}`}><span>{k}</span><b>{v}</b></div>);
+  // Bank statement opens ON this page (founder 2026-11-09): closing it leaves the list exactly where it was - no page change, no Back.
+  const [stmtOf, setStmtOf] = useState(null);
   return (
     <div className="ci-panel-in">
       <section className="ci-sec">
@@ -179,7 +182,9 @@ function Panel({
                     <td>{p.reference || p.bankLineReference || '—'}</td>
                     <td>
                       {p.proof === 'bank statement'
-                        ? <Link to={`/invoices/${p.invoiceId}#proof`}>Bank statement</Link>
+                        ? (p.bankTxnId
+                          ? <button type="button" className="link-btn" onClick={(e) => { e.stopPropagation(); setStmtOf(p.bankTxnId); }}>Bank statement</button>
+                          : <Link to={`/invoices/${p.invoiceId}#proof`}>Bank statement</Link>)
                         : (p.proof || <span className="small-muted">—</span>)}
                     </td>
                   </tr>
@@ -196,6 +201,7 @@ function Panel({
         <button type="button" className="btn btn-sm" onClick={onView}>Printable invoice</button>
         {payable && <button type="button" className="btn btn-sm btn-gold" onClick={onPay}>Record a payment</button>}
       </div>
+      {stmtOf && <StatementView txnId={stmtOf} onClose={() => setStmtOf(null)} />}
     </div>
   );
 }
