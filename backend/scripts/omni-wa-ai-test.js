@@ -233,6 +233,12 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     const Tg = require(path.join(BACK, 'src/omniwa/tools'));
     check('a stretched yes or no is still a yes or no; a sentence is not', ['yesssssssssss', 'Yes', 'yess sir', 'okkk', 'yaa', 'Interested'].every(Tg.isYes) && ['noooo', 'No', 'vaddu'].every(Tg.isNo) && !['yes but salary?', 'yesterday', 'not now', 'nothing'].some((x) => Tg.isYes(x) || Tg.isNo(x)));
     check('bye and thanks close a talk, a yes does not', ['bye', 'Byeee', 'thank you', 'ok thanks', 'thanks sir'].every(Tg.isClosing) && !['yes', 'Yes please', 'hi'].some(Tg.isClosing));
+    check('an answer must fit its question', !Tg.answerFits('If working, which company are you currently working with?', 'yes')
+      && Tg.answerFits('If working, which company are you currently working with?', 'Apollo Hospitals')
+      && !Tg.answerFits('What is your total work experience?', 'yes') && Tg.answerFits('What is your total work experience?', '3 years') && Tg.answerFits('What is your total work experience?', 'fresher')
+      && !Tg.answerFits('Which date and time would be convenient for you?', 'yes') && Tg.answerFits('Which date and time would be convenient for you?', 'tomorrow 11 am')
+      && !Tg.answerFits('Have you already applied for this position, or are you exploring new opportunities?', 'yes') && Tg.answerFits('Have you already applied for this position, or are you exploring new opportunities?', 'exploring')
+      && Tg.answerFits('Are you comfortable with the job shift and working hours?', 'yes') && Tg.answerFits('Are you currently working or not working?', 'no'));
     check('a greeting is a greeting, a sentence is not', ['hi', 'Hii', 'HELLO', 'hi sir', 'Good morning', 'hey!'].every(Tg.isGreeting) && !['hi i need a job', 'high salary', 'hello any vacancy?'].some(Tg.isGreeting));
     await Cfg.save(admin, { testNumbers: ['919000000001'] });
     check('with only test numbers on, the bots keep the other chats', (await Agent.ownsChat({ e164: phoneOf(95) })) === false && (await Agent.ownsChat({ e164: '919000000001' })) === true);

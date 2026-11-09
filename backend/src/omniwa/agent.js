@@ -359,6 +359,13 @@ async function askModel(conv, cfg, input) {
     if (startIntake) await T.run('save_candidate_data', { interested: true }, conv, ctx);
     else {
       const q = String(list[now2.intakeAt] || '');
+      // an answer that does not fit is not taken: the same question again, at most twice, then it moves on so nobody is stuck
+      const tries = Number(now2.intakeTries) || 0;
+      if (!T.answerFits(q, input) && tries < 2) {
+        const same = T.nextQuestion(list, Number(now2.intakeAt), talkJob ? { ...talkJob, candidate: conv.name } : { candidate: conv.name }, answers);
+        await remember({ intakeTries: tries + 1 });
+        return { ctx, calls, reply: `${T.askAgainText(q)}\n${same ? same.text : q}`, written: true };
+      }
       answers[q.replace(/^if working,?\s*/i, '')] = clip(input, 300);
       const field = T.fieldOf(q);
       if (field) await T.run('save_candidate_data', { [field]: input }, conv, ctx);
@@ -366,7 +373,7 @@ async function askModel(conv, cfg, input) {
     }
     const next = T.nextQuestion(list, from, talkJob ? { ...talkJob, candidate: conv.name } : { candidate: conv.name }, answers);
     if (next) {
-      await remember({ intakeOn: true, intakeAt: next.index, answers, cardShown: false });
+      await remember({ intakeOn: true, intakeAt: next.index, answers, cardShown: false, intakeTries: 0 });
       const hello = startIntake ? `Thank you for your interest. I have a few questions${talkJob ? ` about the ${talkJob.title} position` : ''}.\n` : '';
       return { ctx, calls, reply: `${hello}${next.text}`, written: true };
     }

@@ -139,6 +139,39 @@ function nextQuestion(list, i, job, answers = {}) {
   return null;
 }
 // which saved field of the person an answer also fills
+// DOES THE ANSWER FIT THE QUESTION? (founder 2026-11-09: "yes" to "Which company are you working with?" moved on to the next question.)
+// A yes/no question takes any answer. A question with a choice ("..., or are you exploring?") needs more than a bare yes or no.
+// Experience, salary, notice and joining need a number or a word like "fresher" / "immediate"; a date question needs a day or a time;
+// what / which / where questions need real words, not "yes" or "ok".
+const YESNO_Q = /^(are|is|do|does|have|has|will|would|can|could|did|shall)\b/i;
+const NUMBER_WORDS = /\b(fresher|immediate(ly)?|no experience|zero|none|nil|negotiable|half|one|two|three|four|five|six|seven|eight|nine|ten|weeks?|months?|days?|years?|yrs?|serving|asap|today|tomorrow|lakh|lakhs|lpa|k)\b/i;
+const DAY_WORDS = /\b(today|tomorrow|tmrw|day after|monday|tuesday|wednesday|thursday|friday|saturday|sunday|morning|afternoon|evening|night|anytime|any time|next week|weekend|am|pm)\b/i;
+function questionKind(question) {
+  const q = String(question || '').replace(/^if working,?\s*/i, '').toLowerCase();
+  if (YESNO_Q.test(q)) return /,\s*or\b/.test(q) ? 'choice' : 'yesno';
+  if (/experience|salary|package|ctc|notice period|how soon/.test(q)) return 'number';
+  if (/date and time|what time|\bwhen\b/.test(q)) return 'day';
+  return 'words';
+}
+function answerFits(question, text) {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  const bare = isYes(t) || isNo(t) || isClosing(t);
+  const kind = questionKind(question);
+  if (kind === 'yesno') return true;
+  if (kind === 'choice') return !bare;
+  if (kind === 'number') return /\d/.test(t) || NUMBER_WORDS.test(t);
+  if (kind === 'day') return /\d/.test(t) || DAY_WORDS.test(t);
+  return !bare && /[a-z\u0C00-\u0C7F\u0900-\u097F]{2,}/i.test(t);
+}
+const ASK_AGAIN = {
+  choice: 'Please tell me which one applies to you.',
+  number: 'Please tell me in numbers, for example "2 years" or "immediate".',
+  day: 'Please tell me a day and time, for example "tomorrow 11 am".',
+  words: 'Please answer this question.',
+};
+const askAgainText = (question) => ASK_AGAIN[questionKind(question)] || ASK_AGAIN.words;
+
 function fieldOf(question) {
   const q = String(question).toLowerCase();
   if (/notice period/.test(q)) return 'notice_period';
@@ -280,4 +313,4 @@ async function run(name, args, conv, ctx) {
 }
 
 const NAMES = ['get_candidate_profile', 'get_job_details', 'search_knowledge_base', 'save_candidate_data', 'send_apply_link', 'send_interview_link', 'handoff_to_recruiter'];
-module.exports = { GREETING_TEXT, isGreeting, isClosing, mentionsJobs, isYes, isNo, nextQuestion, fieldOf, jobOfCampaign, onlyThisJobText, jobCardText, quickAnswer, run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };
+module.exports = { answerFits, askAgainText, GREETING_TEXT, isGreeting, isClosing, mentionsJobs, isYes, isNo, nextQuestion, fieldOf, jobOfCampaign, onlyThisJobText, jobCardText, quickAnswer, run, jobFacts, searchJobs, offerJobs, selectJob, jobListText, NO_MATCH_TEXT, askedAboutJob, pickedNumber, titleHas, collectedView, NAMES, TOOL_HELP };
