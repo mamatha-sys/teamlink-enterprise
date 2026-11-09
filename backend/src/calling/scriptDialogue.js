@@ -127,6 +127,9 @@ class ScriptDialogue extends D.Dialogue {
     // no question in the script (only what the AI says): the call says all of it and ends
     this.noQuestion = !mainSplit.steps.some((s) => isAsk(s.kind));
     this.longMessage = this.noQuestion && mainSplit.steps.reduce((n, s) => n + s.text.length, 0) > CHUNK + 60; // told in parts, not all at once
+    // EVERY CALL ASKS WHICH LANGUAGE (founder 2026-11-09: "every time which language would you like to speak anii adagali"): after the opening, in every language version, unless the call only tells a short message
+    this.asksLanguage = process.env.AI_CALL_ASK_LANGUAGE !== '0' && !this.facts && !(this.noQuestion && !this.longMessage); // AI_CALL_ASK_LANGUAGE=0 switches the question off
+    if (this.asksLanguage) Object.keys(this.byLang).forEach((l) => { this.byLang[l] = [this.byLang[l][0], { kind: 'language', text: vacancy.words({}, l).lang() }, ...this.byLang[l].slice(1)]; });
     this.autoLanguage = Object.keys(this.byLang).length > 1; // follow the person's language only when there is another version to speak
     // the language the call starts in: the call's own if the script has it, else the script's
     if (!this.byLang[this.language]) this.setLanguage(first);
@@ -289,7 +292,7 @@ class ScriptDialogue extends D.Dialogue {
       const pick = vacancy.languageChoice(text) || (meta.lang && S.LANGS.includes(meta.lang) ? meta.lang : (byWords && byWords.lang));
       if (pick && this.byLang[pick] && pick !== this.language) { this.setLanguage(pick); st.switched = (st.switched || 0) + 1; }
       st.langPicked = true;
-      lead = vacancy.words(this.facts, this.language).langOk();
+      lead = vacancy.words(this.facts || {}, this.language).langOk();
     } else {
       if (this.facts) {
         const v = this.vacancyTurn(text, k, cur, turn);

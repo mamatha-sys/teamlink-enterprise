@@ -90,7 +90,7 @@ async function versionsFor(text, lang, given, tdeps) {
 /** Ask for the other-language versions of a script to be made now (Green Start does it when an agent is saved and when a campaign starts). */
 async function prepare(textIn, tdeps) {
   let text = textIn;
-  if (vacancy.parseFacts(text)) return { ok: true, language: vacancy.startLanguage(vacancy.parseFacts(text)), ready: ['English', 'Telugu', 'Hindi'], pending: [] }; // built from the facts: nothing to translate
+  if (vacancy.factsFrom(text)) return { ok: true, language: vacancy.startLanguage(vacancy.factsFrom(text)), ready: ['English', 'Telugu', 'Hindi'], pending: [] }; // built from the facts: nothing to translate
   text = normalizeScript(text);
   const err = checkScript(text, {});
   if (err) return { ok: false, error: err };
@@ -168,7 +168,9 @@ async function create(input, deps = {}) {
   const externalId = String(input.externalId || '').slice(0, 120);
   if (!externalId) return { ok: false, status: 400, code: 'externalId', reason: 'externalId is needed.' };
   // the FACTS of a vacancy (Role / Location / Salary ...): the call is built from them in all three languages, nothing is translated by a model
-  const facts = vacancy.parseFacts(input.script);
+  // a script that names a job in plain sentences is turned into a human conversation about that job; a script with its own Convince / Decline lines (written objection handling) is kept as written
+  const own = /^(convince|decline)\s*[:\-–]/im.test(normalizeScript(input.script));
+  const facts = own ? vacancy.parseFacts(input.script) : vacancy.factsFrom(input.script);
   // the recruiter's number (asked for when the campaign is made): said to a candidate who asks where to send the resume
   const contactNumber = cleanNumber(input.contactNumber);
   if (facts && contactNumber && !facts.channel) facts.channel = contactNumber;

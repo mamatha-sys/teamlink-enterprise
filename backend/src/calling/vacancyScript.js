@@ -375,6 +375,43 @@ const lastNum = (t) => { const m = String(t || '').match(/\d+(?:\.\d+)?/g); retu
 const needsYears = (facts) => firstNum(facts && facts.experience); // the least experience the job asks for, in years
 const maxNotice = (facts) => lastNum(facts && facts.notice); // the longest notice period the job takes, in days
 
+// ---- A SCRIPT THAT NAMES A JOB (founder 2026-11-09: "ai script lo job role petinadhi human laga nene matladali, ichina script antha chadavadhu") ----------------------
+// A script written as plain sentences ("We have an opening for HR Recruiter in Kukatpally, salary 10K ...") is not read out: the role and whatever else it says (place, pay,
+// qualification, experience, company) are taken out of it, and the call is built from them like any vacancy - a human conversation about that role.
+const CITIES = ['Hyderabad', 'Secunderabad', 'Kukatpally', 'Madhapur', 'Gachibowli', 'Hitech City', 'Ameerpet', 'Banjara Hills', 'Uppal', 'LB Nagar', 'Miyapur', 'Dilsukhnagar', 'Bangalore', 'Bengaluru', 'Chennai', 'Mumbai', 'Pune', 'Delhi', 'Noida', 'Gurgaon', 'Kolkata', 'Vijayawada', 'Visakhapatnam', 'Vizag', 'Guntur', 'Warangal', 'Tirupati', 'Nellore', 'Kakinada', 'Karimnagar', 'Ahmedabad', 'Jaipur', 'Kochi', 'Coimbatore', 'Nagpur', 'Lucknow', 'Indore'];
+const NOT_ROLE = /^(you|your|us|our|this|that|it|the|a|an|candidates?|people|someone|anyone|freshers?|them|now|more|good|many|few|new|job|jobs)$/i;
+function inferFacts(raw) {
+  const text = String(raw == null ? '' : raw).replace(/\r/g, '\n').split('\n').map((l) => l.replace(/^\s*(opening|say|ask|interest|closing|decline|convince|language|ifyes|ifno)\s*[:\-–]\s*/i, '').trim()).filter(Boolean).join(' ').replace(/\s+/g, ' ');
+  if (text.length < 15) return null;
+  let role = null;
+  const up = /\b(?:opening|openings|vacancy|vacancies|position|post|role|hiring|recruiting|requirement|looking)\s+(?:for|of|as)\s+(?:an?\s+|the\s+)?((?:[A-Z][A-Za-z&/+.-]*)(?:\s+(?:[A-Z][A-Za-z&/+.-]*|of|and|&)){0,4})/.exec(text);
+  if (up) role = up[1];
+  if (!role) {
+    const lo = /\b(?:opening|openings|vacancy|vacancies|position|hiring|recruiting)\s+(?:for|of)\s+(?:an?\s+|the\s+)?([a-z][a-z &/-]{2,40}?)(?=\s+(?:in|at|with|near|for|who|that|having|from|on)\b|[.,;!?]|$)/i.exec(text);
+    if (lo) role = lo[1];
+  }
+  if (!role) return null;
+  role = role.replace(/\s+(?:position|role|post|job|vacancy|opening)s?$/i, '').replace(/\s+(?:in|at|of|and|&)$/i, '').trim();
+  if (role.length < 3 || role.length > 50 || NOT_ROLE.test(role) || CITIES.some((c) => c.toLowerCase() === role.toLowerCase())) return null;
+  const facts = { role };
+  const city = CITIES.find((c) => new RegExp(`\\b${c}\\b`, 'i').test(text));
+  if (city) facts.location = city;
+  const sal = /\b(?:salary|pay|package|ctc)\s*(?:is|of|up to|:)?\s*((?:up to\s+)?(?:₹|rs\.?\s*)?\d[\d,]*(?:\.\d+)?\s*(?:k|thousand|lakhs?|lpa)?(?:\s*(?:per|a|\/)\s*(?:month|annum|year))?)/i.exec(text) || /((?:₹|rs\.?\s*)\d[\d,]*(?:\.\d+)?\s*(?:k|thousand|lakhs?|lpa)?(?:\s*(?:per|a|\/)\s*(?:month|annum|year))?|\b\d+(?:\.\d+)?\s*(?:k|lpa|lakhs?)\b(?:\s*(?:per|a|\/)\s*(?:month|annum|year))?)/i.exec(text);
+  if (sal) facts.salary = sal[1].trim();
+  const q = /\b(any graduate|post[- ]?graduate|graduate|b\.?\s?tech|b\.?\s?e\b|mba|diploma|10th|12th|intermediate|degree|b\.?\s?com|m\.?\s?com|b\.?\s?sc|m\.?\s?sc|iti)\b/i.exec(text);
+  if (q) facts.qualification = q[1];
+  const ex = /\b(\d+(?:\s*(?:-|to)\s*\d+)?\s*\+?\s*years?)\b/i.exec(text);
+  if (ex) facts.experience = ex[1];
+  const co = /\b(?:calling|speaking|call|calls|assistant|agent|team|recruiter|representative)\s+(?:from|on behalf of|at|of)\s+((?:[A-Z][\w&-]*)(?:\s+[A-Z][\w&-]*){0,3})/.exec(text) || /\b(?:from|at)\s+([A-Z][\w&-]*(?:\s+(?:Consultants|Consultancy|Solutions|Technologies|Services|Pvt|Ltd|Limited|Group|Hiring))+)/.exec(text);
+  if (co && co[1].toLowerCase() !== role.toLowerCase()) facts.company = co[1].trim();
+  const det = /([^.!?]*\b(?:responsib\w*|duties|involves?|work includes|you will)\b[^.!?]*)/i.exec(text);
+  if (det) facts.details = det[1].replace(/^.*?\b(?:involves?|includes?|responsib\w*(?: are| include)?|duties(?: are| include)?|you will)\b[:\s]*/i, '').replace(/\s+/g, ' ').trim().slice(0, 240);
+  if (facts.details && facts.details.length < 8) delete facts.details;
+  return facts;
+}
+/** the facts of a vacancy: the labelled ones (Role: ...) when the team wrote them so, else what a plain-sentence script says about a job; null when it names no job */
+const factsFrom = (raw) => parseFacts(raw) || inferFacts(raw);
+
 const callbackQuestion = (lang) => (L[lang] || L.English).cbq();
 const callbackOk = (lang) => (L[lang] || L.English).cbok();
 const GREET = {
@@ -387,5 +424,5 @@ function greeting(lang, now = new Date()) {
 }
 
 module.exports = {
-  callbackQuestion, callbackOk, parseFacts, build, startLanguage, answer, near, words, stepOf, languageChoice, topic, asksWhere, notInterested, hostile, overBudget, needsYears, maxNotice, greeting, KEYS,
+  callbackQuestion, callbackOk, parseFacts, inferFacts, factsFrom, build, startLanguage, answer, near, words, stepOf, languageChoice, topic, asksWhere, notInterested, hostile, overBudget, needsYears, maxNotice, greeting, KEYS,
 };
