@@ -55,7 +55,9 @@ async function load(req, res, { internalOnly = false } = {}) {
   return { ...loaded, kind, internal: kind === 'internal' };
 }
 
-const docOut = (d, internal) => ({
+// `resume`: the newest original resume file on the Resume tab. A Resume row written by the Add Candidate form holds only the
+// file's NAME (founder 2026-11-09: "keep the view option for documents"), so its View / Download open that file instead.
+const docOut = (d, internal, resume = null) => ({
   id: d.id,
   docType: d.docType,
   name: d.name,
@@ -64,7 +66,8 @@ const docOut = (d, internal) => ({
   uploadedByName: d.uploadedByName,
   createdAt: d.createdAt,
   hasFile: !!d.file,
-  fileName: internal ? d.fileName : undefined,
+  resumeId: internal && !d.file && d.docType === 'Resume' && resume ? resume.id : undefined,
+  fileName: internal ? (d.fileName || (!d.file && d.docType === 'Resume' && resume ? resume.fileName : undefined)) : undefined,
   mime: internal ? d.mime : undefined,
   size: internal ? d.size : undefined,
 });
@@ -87,7 +90,7 @@ router.get('/:id/record', async (req, res) => {
   const ctx = await load(req, res);
   if (!ctx) return undefined;
   const { candidate, internal } = ctx;
-  const [documents, certifications, drive, latestResume] = await Promise.all([
+  const [documents, certifications, drive, latestResume, resumeFile] = await Promise.all([
     prisma.candidateDocument.findMany({
       where: { candidateId: candidate.id, deletedAt: null, ...(internal ? {} : { internalOnly: false }) },
       orderBy: { createdAt: 'desc' },
@@ -98,6 +101,11 @@ router.get('/:id/record', async (req, res) => {
       where: { candidateId: candidate.id, kind: 'ORIGINAL', hiddenAt: null },
       orderBy: { createdAt: 'desc' },
       select: { id: true, text: true },
+    }) : null,
+    internal ? prisma.candidateResume.findFirst({
+      where: { candidateId: candidate.id, kind: 'ORIGINAL', hiddenAt: null, file: { not: null } },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, fileName: true },
     }) : null,
   ]);
   // Certifications the latest resume lists that are not on the record yet.
@@ -121,7 +129,7 @@ router.get('/:id/record', async (req, res) => {
     referredBy: candidate.referredByName ? { name: candidate.referredByName, employeeId: internal ? candidate.referredByEmployeeId : undefined } : null,
     campusDrive: drive ? { id: drive.id, collegeName: drive.collegeName, driveDate: drive.driveDate } : null,
     attribution: internal ? appRows.map((a) => ({ ...a, requirementTitle: titleOf.get(a.id) || null })) : [],
-    documents: documents.map((d) => docOut(d, internal)),
+    documents: documents.map((d) => docOut(d, internal, resumeFile)),
     docTypes: DOC_TYPES,
     certifications: certifications.map((c) => certOut(c, internal)),
     fromResume,

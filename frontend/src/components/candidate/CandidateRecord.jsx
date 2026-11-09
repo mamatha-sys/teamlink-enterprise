@@ -423,8 +423,19 @@ export function RecordDocuments({ c, internal }) {
               </span>
               {d.note && <span className="small-muted">{d.note}</span>}
             </div>
-            {files && d.hasFile && <button type="button" className="btn btn-sm" onClick={() => open(`/candidates/${c.id}/documents/${d.id}/file`, d.fileName, false)}>View</button>}
-            {files && d.hasFile && <button type="button" className="btn btn-sm" onClick={() => open(`/candidates/${c.id}/documents/${d.id}/file`, d.fileName, true)}>Download</button>}
+            {/* View is always offered: the file itself, or for a Resume row named on the Add Candidate form the resume on the Resume tab */}
+            {files && (() => {
+              const path = d.hasFile ? `/candidates/${c.id}/documents/${d.id}/file` : (d.resumeId ? `/candidate-resumes/${c.id}/file/${d.resumeId}` : null);
+              if (!path) {
+                return <button type="button" className="btn btn-sm" title="Only the name was saved for this document" onClick={() => setMsg({ bad: true, text: `No file was saved for ${d.name} - only its name. Use + Upload document to add the file.` })}>View</button>;
+              }
+              return (
+                <>
+                  <button type="button" className="btn btn-sm" onClick={() => open(path, d.fileName, false)}>View</button>
+                  <button type="button" className="btn btn-sm" onClick={() => open(path, d.fileName, true)}>Download</button>
+                </>
+              );
+            })()}
             {canEdit && asking !== `d:${d.id}` && <button type="button" className="btn btn-sm crx-ghost" onClick={() => setAsking(`d:${d.id}`)}>Delete</button>}
             {asking === `d:${d.id}` && <DeleteAsk what="document" onCancel={() => setAsking(null)} onDelete={(r) => del(`/candidates/${c.id}/documents/${d.id}/delete`, r)} />}
           </div>
