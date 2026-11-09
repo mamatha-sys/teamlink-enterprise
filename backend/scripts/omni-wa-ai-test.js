@@ -228,6 +228,7 @@ const check = (name, ok, info) => { if (ok) { pass += 1; console.log(`  PASS ${n
     const hiMsgs = await Inbox.leadMessages(hiConv.id);
     check('hi from anybody: answered at once, the model is not asked', stub.calls.length === 0 && /looking for a job/.test(hiMsgs[hiMsgs.length - 1].text), hiMsgs);
     const Tg = require(path.join(BACK, 'src/omniwa/tools'));
+    check('a stretched yes or no is still a yes or no; a sentence is not', ['yesssssssssss', 'Yes', 'yess sir', 'okkk', 'yaa', 'Interested'].every(Tg.isYes) && ['noooo', 'No', 'vaddu'].every(Tg.isNo) && !['yes but salary?', 'yesterday', 'not now', 'nothing'].some((x) => Tg.isYes(x) || Tg.isNo(x)));
     check('a greeting is a greeting, a sentence is not', ['hi', 'Hii', 'HELLO', 'hi sir', 'Good morning', 'hey!'].every(Tg.isGreeting) && !['hi i need a job', 'high salary', 'hello any vacancy?'].some(Tg.isGreeting));
     await Cfg.save(admin, { testNumbers: ['919000000001'] });
     check('with only test numbers on, the bots keep the other chats', (await Agent.ownsChat({ e164: phoneOf(95) })) === false && (await Agent.ownsChat({ e164: '919000000001' })) === true);

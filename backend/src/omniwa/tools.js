@@ -118,8 +118,9 @@ const pickedNumber = (text) => { const m = /^\D*([1-5])\D*$/.exec(String(text ||
 const titleHas = (title, text) => wordsOf(text).some((w) => wordStarts(title, stemOf(w)));
 
 // YES to a promotion: the details are asked here, one question at a time, and saved. No model: on the live server it was too slow and could not hold the order (founder 2026-11-05)
-const isYes = (t) => /^\W*(yes|yeah|yep|y|ok|okay|sure|interested|i am interested|im interested|i'm interested|avunu|haan|ha)\W*$/i.test(String(t || ''));
-const isNo = (t) => /^\W*(no|nope|no thanks|no thank you|not interested|vaddu|nahi)\W*$/i.test(String(t || ''));
+// "yesssss", "okkk", "yaa", "noooo": people stretch the word, and a stretched yes must not wait for the slow model (founder 2026-11-09)
+const isYes = (t) => /^\W*(y+e+s+|y+e+a+h*|y+a+|y+e+p+|y+|o+k+|o+k+a+y+|k+|s+u+r+e+|interested|i am interested|im interested|i'm interested|a+v+u+n+u+|h+a+a*n*|h+a+)\W*(sir|madam|mam|maam)?\W*$/i.test(String(t || ''));
+const isNo = (t) => /^\W*(n+o+|n+o+p+e+|no thanks|no thank you|not interested|v+a+d+d+u+|n+a+h+i+)\W*(sir|madam|mam|maam)?\W*$/i.test(String(t || ''));
 // the next line of the list to ask from position i: { index, text } or null when the list is done. Placeholders come from the job; a line with no value is skipped.
 function nextQuestion(list, i, job, answers = {}) {
   const notWorking = Object.entries(answers).some(([q, v]) => /currently working/i.test(q) && /\b(not|no|nope|fresher|unemployed)\b/i.test(String(v)));
