@@ -432,7 +432,12 @@ function liveStatus(dev, onLeave, now) {
     if (dev.pausedState === 'stopped') return 'Stopped';
     return dev.currentIdle ? 'Idle' : 'Online';
   }
-  return onLeave ? 'On leave' : 'Offline';
+  if (onLeave) return 'On leave';
+  // the person closed the agent (Stop recording and close) or clocked out: that stays on the board until the PC reports again,
+  // instead of turning into a plain Offline after 3 minutes (founder 2026-11-09: two people working, both shown Offline)
+  if (dev && dev.pausedState === 'stopped') return 'Stopped';
+  if (dev && dev.pausedState === 'clockout' && dev.lastSeenAt && istDay(dev.lastSeenAt) === istDay(now)) return 'Clocked out';
+  return 'Offline';
 }
 
 // Only what changes by the second, for the Live Dashboard's fast refresh: no activity records, so it stays light.
@@ -736,6 +741,6 @@ function startSweep() {
 }
 
 module.exports = {
-  liveUpdate, liveRows, istTime, hmOf, addDays, validDay, shiftDay, atShift, overrideIndex, effective, saveOverride, listOverrides, removeOverride, latestAgent, needsUpdate, isSuper, isIt, isItIn, canManageDevices, totalsOf, newSetupCode, readSetupCode, endSetupCode, agentSetupFile, agentInstaller, CATEGORIES, DEFAULT_POLICY, AUDIT_ENTITIES, isMonitorAdmin, accessOf, heartbeat, usage, auditRows, settings, saveSettings, hasConsent, recordConsent, hashToken, deviceOf, registerDevice,
+  liveUpdate, liveRows, liveStatus, istTime, hmOf, addDays, validDay, shiftDay, atShift, overrideIndex, effective, saveOverride, listOverrides, removeOverride, latestAgent, needsUpdate, isSuper, isIt, isItIn, canManageDevices, totalsOf, newSetupCode, readSetupCode, endSetupCode, agentSetupFile, agentInstaller, CATEGORIES, DEFAULT_POLICY, AUDIT_ENTITIES, isMonitorAdmin, accessOf, heartbeat, usage, auditRows, settings, saveSettings, hasConsent, recordConsent, hashToken, deviceOf, registerDevice,
   ingest, categoryIndex, overview, employeeDetail, reportRows, uncategorised, pcActivity, purge, startSweep, todayIst, istDay, cleanTitle,
 };

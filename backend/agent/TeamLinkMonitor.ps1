@@ -21,10 +21,25 @@ param(
   [switch]$AfterUpdate       # started by its own older copy, which is closing
 )
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '2.1'
+$AgentVersion = '2.2'
 # older Windows would otherwise try an old, refused kind of secure connection
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, System.Security
+
+# ---------------------------------------------------------------- the agent's own short diary, on this PC only
+# Only when it starts, updates, wakes, loses or finds the connection, is stopped and closes - never an app, a title or any activity.
+# When a PC shows Offline while the person is working, %APPDATA%\TeamLinkMonitor\agent.log says why (founder 2026-11-09).
+$LogFile = Join-Path $env:APPDATA 'TeamLinkMonitor\agent.log'
+function Write-Log($text) {
+  try {
+    [void][IO.Directory]::CreateDirectory((Split-Path $LogFile))
+    if ((Test-Path $LogFile) -and (Get-Item $LogFile).Length -gt 256KB) { Move-Item -Path $LogFile -Destination ($LogFile -replace '\.log$', '.old.log') -Force }
+    Add-Content -Path $LogFile -Value ('{0}  {1}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $text) -Encoding UTF8
+  } catch {}
+}
+# an error nobody caught is written down, and a click that goes wrong does not close the agent
+try { [Windows.Forms.Application]::SetUnhandledExceptionMode([Windows.Forms.UnhandledExceptionMode]::CatchException) } catch {}
+[Windows.Forms.Application]::add_ThreadException({ param($s, $e) Write-Log "error, kept running: $($e.Exception.Message)" })
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
@@ -47,10 +62,16 @@ public static class TLWin {
 
 # one agent per PC login: running the setup file again must not start a second copy (two icons, every minute counted twice)
 $script:OneCopy = New-Object Threading.Mutex($false, 'Local\TeamLinkMonitor')
-if (-not $script:OneCopy.WaitOne($(if ($AfterUpdate) { 30000 } else { 0 }))) {
+# After an update the older copy closes still holding this - Windows then hands it over with an "abandoned" error, which used to
+# stop the NEW copy too and leave the PC with no agent until the next sign-in (founder 2026-11-09: working, but shown Offline).
+$got = $false
+try { $got = $script:OneCopy.WaitOne($(if ($AfterUpdate) { 30000 } else { 0 })) } catch [Threading.AbandonedMutexException] { $got = $true }
+if (-not $got) {
   [Windows.Forms.MessageBox]::Show('TeamLink Monitor is already running on this PC. Look for its icon next to the clock.', 'TeamLink') | Out-Null
   exit 0
 }
+
+Write-Log "started: version $AgentVersion$(if ($AfterUpdate) { ', after an update' })"
 
 $Dir = Join-Path $env:APPDATA 'TeamLinkMonitor'
 $ConfigFile = Join-Path $Dir 'config.json'
@@ -330,8 +351,9 @@ function Apply-Update($u) {
     $errs = $null; [void][System.Management.Automation.Language.Parser]::ParseFile($new, [ref]$null, [ref]$errs)
     if ($errs.Count) { throw 'parse' }
     Move-Item -Path $new -Destination $copy -Force
-  } catch { Remove-Item -Path $new -ErrorAction SilentlyContinue; return }
+  } catch { Write-Log "update to $($u.version) not taken: $($_.Exception.Message)"; Remove-Item -Path $new -ErrorAction SilentlyContinue; return }
   try { Flush } catch {}
+  Write-Log "updating to $($u.version): the new copy takes over"
   Start-Process -FilePath "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', "`"$copy`"", '-AfterUpdate')
   $script:tray.Visible = $false
   $script:updating = $true
@@ -343,7 +365,9 @@ function Heartbeat {
   $state = if ($script:stopping) { 'stopped' } elseif ($script:clockedOutDay) { 'clockout' } elseif ($script:onBreak) { 'break' } else { $null }
   $beat = @{ agentVersion = $AgentVersion; paused = $state; currentApp = $(if ($c -and -not $c.brk) { $c.app } else { '' }); title = $(if ($c -and -not $c.brk) { $c.title } else { '' }); idle = [bool]($c -and $c.idle) }
   $r = Call-Api 'POST' '/heartbeat' $beat $script:cfg.token
+  if ($r.status -ne 200 -and -not $script:beatFailing) { $script:beatFailing = $true; Write-Log "cannot reach TeamLink (answer $($r.status))" }
   if ($r.status -eq 200) {
+    if ($script:beatFailing) { $script:beatFailing = $false; Write-Log 'reaching TeamLink again' }
     $script:lastBeatOk = Get-Date   # it is reaching the server: the wake handler uses this to know it is back online
     $s = $r.data.settings
     $script:lastLive = ''   # this heartbeat may be up to 15 seconds old: the watcher sets the picture right
@@ -371,8 +395,8 @@ function Update-Menu {
   $script:tray.Text = if ($script:clockedOutDay) { 'TeamLink: clocked out for today, nothing is recorded' } elseif ($script:onBreak) { 'TeamLink: on a break, nothing is recorded' } else { 'TeamLink: recording PC use in work hours' }
 }
 # HR sees that it was stopped: stopping is allowed, and never silent
-[void]$menu.Items.Add('Stop recording and close', $null, { Flush; $script:stopping = $true; try { Heartbeat } catch {}; $script:tray.Visible = $false; [Windows.Forms.Application]::Exit() })
-[void]$menu.Items.Add('Do not start with Windows', $null, { Remove-Item -Path $StartupLink -ErrorAction SilentlyContinue; $script:tray.ShowBalloonTip(5000, 'TeamLink', 'It will not start with Windows any more.', 'Info') })
+[void]$menu.Items.Add('Stop recording and close', $null, { Write-Log 'stopped by the employee (Stop recording and close)'; Flush; $script:stopping = $true; try { Heartbeat } catch {}; $script:tray.Visible = $false; [Windows.Forms.Application]::Exit() })
+[void]$menu.Items.Add('Do not start with Windows', $null, { Write-Log 'set not to start with Windows'; Remove-Item -Path $StartupLink -ErrorAction SilentlyContinue; $script:tray.ShowBalloonTip(5000, 'TeamLink', 'It will not start with Windows any more.', 'Info') })
 $tray.ContextMenuStrip = $menu
 $tray.ShowBalloonTip(6000, 'TeamLink', 'Recording PC use in work hours: app names, window titles, active and idle time. Nothing you type is recorded.', 'Info')
 # the icon above is what shows it is running: the black window goes, so closing it by mistake does not stop the agent
@@ -381,7 +405,7 @@ try { [void][TLWin]::ShowWindow([TLWin]::GetConsoleWindow(), 0) } catch {}
 Sample   # so the very first heartbeat already says what is in front
 Heartbeat
 # an update on this first heartbeat: the message loop has not started, so Exit above did nothing and the new copy is waiting for this one
-if ($updating) { $tray.Dispose(); exit 0 }
+if ($updating) { $tray.Dispose(); Write-Log 'closed for the update'; exit 0 }
 $sampleTimer = New-Object Windows.Forms.Timer; $sampleTimer.Interval = 15000; $sampleTimer.Add_Tick({ try { Sample } catch {} }); $sampleTimer.Start()
 $flushTimer = New-Object Windows.Forms.Timer; $flushTimer.Interval = 120000; $flushTimer.Add_Tick({ try { Flush } catch {} }); $flushTimer.Start()
 $liveTimer = New-Object Windows.Forms.Timer; $liveTimer.Interval = 2000; $liveTimer.Add_Tick({ try { Watch-Front } catch {} }); $liveTimer.Start()
@@ -401,14 +425,22 @@ try {
 } catch { }
 $wakeTimer = New-Object Windows.Forms.Timer
 $wakeTimer.Interval = 4000   # the work runs here, on the UI thread, not inside the power event
+$script:lastWakeTick = Get-Date
 $wakeTimer.Add_Tick({
+  # Windows does not always say "resumed": a lid opened with no key pressed sends a signal .NET leaves out. So a 4-second timer
+  # that did not tick for 30 seconds also means the PC slept (tested 2026-11-09: only the keyed resume reached the handler above).
+  $now = Get-Date
+  if (($now - $script:lastWakeTick).TotalSeconds -gt 30 -and -not $script:resumeAt) { $script:resumeAt = $now }
+  $script:lastWakeTick = $now
+  if ($script:resumeAt -and -not $script:wakeLogged) { $script:wakeLogged = $true; Write-Log 'woke from sleep' }
   if (-not $script:resumeAt) { return }
   $since = (Get-Date) - $script:resumeAt
   # a heartbeat that got through AFTER we woke, or 90 seconds of trying, ends the catch-up
-  if (($script:lastBeatOk -and $script:lastBeatOk -gt $script:resumeAt) -or $since.TotalSeconds -gt 90) { $script:resumeAt = $null; return }
+  if (($script:lastBeatOk -and $script:lastBeatOk -gt $script:resumeAt) -or $since.TotalSeconds -gt 90) { $script:resumeAt = $null; $script:wakeLogged = $false; return }
   try { Sample; Watch-Front; Heartbeat; Flush } catch { }
 })
 $wakeTimer.Start()
 
 [Windows.Forms.Application]::Run()
 $tray.Dispose()
+Write-Log $(if ($updating) { 'closed for the update' } else { 'closed' })
