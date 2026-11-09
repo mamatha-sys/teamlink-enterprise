@@ -1165,6 +1165,39 @@ router.patch('/:id/cancel-request', async (req, res) => {
 // History: cancelledAt / cancelledBy / cancelReason on the request, the closed steps' note and an audit row.
 const istToday = () => new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
 const SELF_CANCEL_NOTE = 'Not needed - the employee cancelled this leave.';
+// DELETE a leave request (founder 2026-11-09: one person applied twice for the same day - "sick leave dhi remove cheyyu"). Super Admin only, signed in as
+// themselves. An approved leave is cancelled first (its days go back that way); a pending one that already took its days gives them back here.
+router.delete('/:id', async (req, res, next) => {
+  try {
+    if (req.viewAs || req.actingAs || !req.user || req.user.role !== 'SUPER_ADMIN' || req.user.hrSuper) {
+      return res.status(403).json({ error: 'Only a Super Admin can delete a leave request.' });
+    }
+    const existing = await prisma.leaveRequest.findUnique({ where: { id: req.params.id }, select: { id: true, employeeId: true, type: true, fromDate: true, toDate: true, days: true, status: true, employee: { select: { name: true, employeeCode: true } } } });
+    if (!existing) return res.status(404).json({ error: 'Leave request not found' });
+    if (['Approved', 'Cancellation Requested'].includes(existing.status)) {
+      return res.status(409).json({ error: 'This leave is approved. Cancel it first so the days go back, then delete it.' });
+    }
+    if (existing.status === 'Pending') {
+      const preCounted = !!await prisma.auditLog.findFirst({ where: { entity: 'LeaveRequest', entityId: existing.id, action: LEAVE_PRECOUNTED }, select: { id: true } });
+      if (preCounted) {
+        const days = existing.days != null ? existing.days : daySpan(existing.fromDate, existing.toDate);
+        const balance = await prisma.leaveBalance.findUnique({ where: { employeeId_type: { employeeId: existing.employeeId, type: existing.type } } });
+        if (balance) await prisma.leaveBalance.update({ where: { id: balance.id }, data: { taken: Math.max(0, balance.taken - days) } });
+      }
+    }
+    await markedLeave.clearMarks(existing, req.user, 'Deleted').catch(() => null);
+    await prisma.approvalStep.deleteMany({ where: { workflow: WF, recordId: existing.id } });
+    await prisma.leaveRequest.deleteMany({ where: { id: existing.id } });
+    await logAudit({
+      userId: req.user.id, action: 'Leave request deleted', entity: 'LeaveRequest', entityId: existing.id,
+      fromValue: `${existing.employee ? existing.employee.name : ''} · ${existing.type} · ${existing.fromDate} to ${existing.toDate} · ${existing.status}`,
+    });
+    return res.json({ ok: true, message: `${existing.type} of ${existing.employee ? existing.employee.name : 'this employee'} (${existing.fromDate}) is deleted.` });
+  } catch (err) {
+    return next(err);
+  }
+});
+
 router.post('/:id/cancel', async (req, res, next) => {
   try {
     const own = await prisma.employee.findUnique({ where: { userId: req.user.id } });

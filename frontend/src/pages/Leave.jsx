@@ -520,6 +520,12 @@ function DashboardTab({ user, isHR, canEditPolicy, canApprove, canConfigure, rel
   }
 
   async function requestCancel(id) { await api.patch(`/leave/${id}/cancel-request`); onReload(); }
+  // Super Admin: a leave request made twice by mistake goes completely
+  const mayDeleteRequest = user && user.role === 'SUPER_ADMIN' && !user.hrSuper;
+  async function deleteRequest(r) {
+    if (!window.confirm(`Delete this ${r.type} request of ${r.employee?.name || 'this employee'} (${r.fromDate})? It cannot be brought back.`)) return;
+    try { await api.delete(`/leave/${r.id}`); onReload(); } catch (e) { window.alert(e.response?.data?.error || 'Could not delete it.'); }
+  }
 
   async function editCap(type) {
     const v = prompt(`Annual/monthly cap for ${type.name} (${type.unit})`, type.cap);
@@ -608,6 +614,7 @@ function DashboardTab({ user, isHR, canEditPolicy, canApprove, canConfigure, rel
                     {/* It opens the request with its chain, the reason, the employee's comments, the TL rule, Approve / Reject and the reassign picker. */}
                     <button className={`btn btn-sm${mayDecide ? ' btn-primary' : ''}`} title={mayDecide ? (direct ? 'Approve or reject now - the levels still waiting are skipped' : 'Approve, reject or reassign') : 'See who approves this request'} onClick={() => setChainFor(r.id)}>{mayDecide ? 'Approve / Reject' : 'View'}</button>
                     <ChainButton requestId={r.id} />
+                    {mayDeleteRequest && <button type="button" className="btn btn-sm btn-danger" onClick={() => deleteRequest(r)}>Delete</button>}
                   </span>
                 </AssignRow>
               );
@@ -723,6 +730,7 @@ function DashboardTab({ user, isHR, canEditPolicy, canApprove, canConfigure, rel
             <>
               {canApprove && r.status === 'Pending' && <button className="btn btn-sm btn-primary" onClick={() => setChainFor(r.id)}>Approve / Reject</button>}
               <ChainButton requestId={r.id} />
+              {mayDeleteRequest && !['Approved', 'Cancellation Requested'].includes(r.status) && <button type="button" className="btn btn-sm btn-danger" onClick={() => deleteRequest(r)}>Delete</button>}
               {/* Confirming a cancellation is a DECISION, so it needs the
                   approve permission. */}
               {canApprove && r.status === 'Cancellation Requested' && <button className="btn btn-sm" onClick={() => decide(r, 'Cancelled')}>Confirm Cancel</button>}
