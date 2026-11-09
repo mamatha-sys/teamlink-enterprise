@@ -240,6 +240,21 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const gh = await talk('gq2', '9111222209', ['yes', 'English', 'yes', 'yes interested']);
     const gh1 = await gh.dd.hear('', { heard: 'unclear' }); const gh2 = await gh.dd.hear('', { heard: 'unclear' }); const gh3 = await gh.dd.hear('', { heard: 'unclear' }); const gh4 = await gh.dd.hear('', { heard: 'unclear' });
     check('nothing at all heard: asked again up to four times before the line is called not clear', !gh1.done && !gh2.done && !gh3.done && !gh4.done, [gh1.say, gh4.say]);
+    // FOUNDER 2026-11-09: the relocation question was asked four times; "which number?" at the resume ended the call; a reply should come soon after the person stops
+    const PRE = ['yes speaking', 'English', 'yes tell me', 'yes interested', '3 years', 'B.Com', 'yes', 'one month', 'current ten thousand, expected ten thousand'];
+    const rl1 = await talk('rl1', '9111222251', [...PRE, 'it is too far for me', 'Miyapur', 'hmm let me see']);
+    check('the relocation question is asked once: an answer that is not a no (even an unclear one) goes on to the next question', /relocating/.test(rl1.outs[10].say) && /any questions about this job/.test(rl1.outs[11].say) && !/based in Kukatpally already/.test(rl1.outs[11].say), rl1.outs.slice(9).map((x) => x.say));
+    const rl2 = await talk('rl2', '9111222252', [...PRE, 'Miyapur', 'hmm let me see', 'okay', 'whatever']);
+    const relocN = rl2.outs.slice(9).filter((x) => /relocating/.test(x.say)).length;
+    check('a place that is not the job place: relocation is asked one time, then the call goes on', relocN === 1 && /any questions about this job/.test(rl2.outs.slice(9).map((x) => x.say).join(' ')), rl2.outs.slice(9).map((x) => x.say));
+    const rn1 = await talk('rn1', '9111222253', [...PRE, 'I stay in Kukatpally', 'no doubts', 'yes correct', 'which number should I send it to?']);
+    const rn2 = await rn1.dd.hear('okay I will send');
+    check('at the resume, "which number?" is answered (the team sends the number when none was given), the call does not end on it', !rn1.outs[12].done && /send you the number on WhatsApp/.test(rn1.outs[12].say) && rn2.done === true && /Thank you for your time/.test(rn2.say) && rn1.dd.outcome().pendingQuestions.some((q) => /which number/i.test(q)), { a: rn1.outs[12], b: rn2 });
+    const rn3 = await talk('rn3', '9111222254', [...PRE, 'I stay in Kukatpally', 'no doubts', 'yes correct', 'what is the number?'], FACTS + '; Channel: 98480 12345 on WhatsApp');
+    check('with a number in the facts, that number is said', /Please send it to 98480 12345/.test(rn3.outs[12].say) && !rn3.outs[12].done, rn3.outs[12]);
+    const VAD = require('../src/calling/voice/vad').Vad;
+    const vv = new VAD({}); vv.frames = new Array(50).fill(Buffer.alloc(0)); vv.quietMs = 200;
+    check('the pause that ends an answer can follow how much was said (the person\'s speech so far is known)', vv.speechMs() === 800, vv.speechMs());
     // PACE (founder 2026-11-09): a long script is told in parts, the person is heard between the parts
     const LONGSAY = ['Opening: Hello {name}, this is the AI assistant of Teamlink Consultants.', 'Say: We are hiring for the HR Recruiter position in Kukatpally with a good salary and a friendly team that you will enjoy working with every day.', 'Say: The work is sourcing candidates, screening resumes and scheduling interviews, and you will get training from our senior recruiters in the first month.', 'Say: The office is open from nine thirty to six thirty, Monday to Saturday, and there is a monthly incentive on every successful joining.', 'Say: Freshers are welcome, and the company also gives a hostel facility for candidates who come from other districts.', 'Closing: Thank you for your time. Goodbye.'].join('\n');
     const pc = await omni.create({ externalId: 'pace1', toNumber: '9111222241', name: 'Kiran', script: LONGSAY }, { ...deps, ami: AMI });
@@ -283,7 +298,7 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     await sip.sweep(Date.now() + 3 * 3600000);
     const rt1 = await omni.status(rs1.id); const rt2 = await omni.status(rs2.id);
     check('a call cut off by a server restart is dropped (rung again); one that never answered is not', rt1.ended && rt1.dropped === true && rt1.status === 'failed' && rt2.status === 'no-answer' && rt2.dropped === false, { rt1: rt1.status + '/' + rt1.dropped, rt2: rt2.status + '/' + rt2.dropped });
-    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 34, { before, now: originated.length });
+    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 4 + 34, { before, now: originated.length });
     check('Asterisk refusing the call fails it in words (and leaves a failed row)', await (async () => { const x = await refuse({ toNumber: '9333333333' }, { ...deps, ami: { action: async () => ({ Response: 'Error', Message: 'no trunk' }) } }); return !x.ok && x.code === 'not_dialled'; })());
   } finally {
     await prisma.$disconnect().catch(() => {});

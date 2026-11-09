@@ -58,6 +58,8 @@ const CITY_HINT = ' Hyderabad, Secunderabad, Bangalore, Chennai, Vijayawada, Vis
 // how long a pause ends the answer (founder 2026-11-02: "conversation lo gap theeskuntundhi"): 750 / 1150 ms -> 600 / 950 ms
 const END_YESNO_MS = Math.min(2000, Math.max(400, num(process.env.AI_VOICE_END_YESNO_MS, 600)));
 const END_SCRIPT_MS = Math.min(3000, Math.max(600, num(process.env.AI_VOICE_END_SCRIPT_MS, 1500))); // a script call (Omni-Channel, AI Voice): the pause that ends an answer
+const SHORT_END_MS = Math.min(2000, Math.max(500, num(process.env.AI_VOICE_END_SHORT_MS, 850))); // a script call: after a short reply
+const MID_END_MS = Math.min(2500, Math.max(600, num(process.env.AI_VOICE_END_MID_MS, 1150)));
 const END_OPEN_MS = Math.min(2500, Math.max(600, num(process.env.AI_VOICE_END_OPEN_MS, 950)));
 // A SHORT "OKAY" WHILE THINKING (2026-11-02): hearing the answer takes ~0.9 s on the server (up to 1.5 s, more when the
 // language is checked again), and a new sentence's voice can take longer still. When the reply is not playing FILLER_MS after
@@ -578,7 +580,15 @@ function handle(sock, engines, opts = {}) {
     strict: () => speaker.busy,
     // a yes / no question: a short pause ends the answer; "how many years / which city / when": people think aloud, wait longer
     endMs: () => {
-      if (d && d.scriptName) return END_SCRIPT_MS + (d.language !== 'English' ? 500 : 0);
+      // a script call: the pause that ends an answer follows how much was said - "yes", "okay", a place name are answered quickly; a long answer gets the full pause, so nobody is cut
+      // (founder 2026-11-09: "candidate matladadam finish avaganey matladali")
+      if (d && d.scriptName) {
+        const said = typeof vad !== 'undefined' && vad.speechMs ? vad.speechMs() : 99999;
+        const extra = d.language !== 'English' ? 400 : 0;
+        if (said < 1400) return Math.min(END_SCRIPT_MS, SHORT_END_MS) + extra;
+        if (said < 4000) return Math.min(END_SCRIPT_MS, MID_END_MS) + extra;
+        return END_SCRIPT_MS + extra + 100;
+      }
       return d && OPEN_STEPS.includes(d.st.step) ? END_OPEN_MS : END_YESNO_MS;
     },
     onStart: () => { lastVoice = Date.now(); if (speaker.busy) {

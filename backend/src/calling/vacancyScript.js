@@ -102,6 +102,7 @@ const L = {
     sum: (a) => `Let me confirm what I noted. ${a.loc ? `Location, ${a.loc}. ` : ''}${a.exp ? `Experience, ${a.exp}. ` : ''}${a.edu ? `Qualification, ${a.edu}. ` : ''}${a.work ? `Working and notice period, ${a.work}. ` : ''}${a.sal ? `Salary, ${a.sal}. ` : ''}Is that correct?`,
     sumFix: () => 'Okay, I will note the correction for our team.',
     calm: () => 'I understand, I am sorry for the trouble. Thank you for your time. Goodbye.',
+    numWhere: (f) => (/\d/.test(f.channel) ? `Please send it to ${f.channel}. Will you be able to send it today?` : 'Our recruiter will send you the number on WhatsApp right after this call. Will you be able to send your resume there?'),
   },
   Telugu: {
     open: () => '{greet}, {name} గారేనా మాట్లాడేది?',
@@ -159,6 +160,7 @@ const L = {
     sum: (a) => `నేను నోట్ చేసుకున్నది కన్ఫర్మ్ చేస్తాను. ${a.loc ? `లొకేషన్, ${a.loc}. ` : ''}${a.exp ? `ఎక్స్‌పీరియన్స్, ${a.exp}. ` : ''}${a.edu ? `క్వాలిఫికేషన్, ${a.edu}. ` : ''}${a.work ? `జాబ్ మరియు నోటీస్ పీరియడ్, ${a.work}. ` : ''}${a.sal ? `సాలరీ, ${a.sal}. ` : ''}ఇది కరెక్టేనా?`,
     sumFix: () => 'సరే, ఆ కరెక్షన్ మా టీమ్‌కి తెలియజేస్తాను.',
     calm: () => 'అర్థమైంది, ఇబ్బందికి క్షమించండి. మీ సమయానికి ధన్యవాదాలు. నమస్కారం.',
+    numWhere: (f) => (/\d/.test(f.channel) ? `దయచేసి ${f.channel} కి పంపండి. ఈ రోజు పంపగలరా?` : 'మా రిక్రూటర్ ఈ కాల్ తర్వాత మీకు వాట్సాప్‌లో నంబర్ పంపుతారు. అక్కడ మీ రెజ్యూమ్ పంపగలరా?'),
   },
   Hindi: {
     open: () => '{greet}, क्या मेरी बात {name} जी से हो रही है?',
@@ -216,6 +218,7 @@ const L = {
     sum: (a) => `मैंने जो नोट किया वह कन्फर्म करता हूँ। ${a.loc ? `लोकेशन, ${a.loc}। ` : ''}${a.exp ? `एक्सपीरियंस, ${a.exp}। ` : ''}${a.edu ? `क्वालिफिकेशन, ${a.edu}। ` : ''}${a.work ? `जॉब और नोटिस पीरियड, ${a.work}। ` : ''}${a.sal ? `सैलरी, ${a.sal}। ` : ''}क्या यह सही है?`,
     sumFix: () => 'ठीक है, मैं यह सुधार अपनी टीम को बता दूँगा।',
     calm: () => 'समझ गया, तकलीफ़ के लिए माफ़ कीजिए। आपके समय के लिए धन्यवाद। नमस्ते।',
+    numWhere: (f) => (/\d/.test(f.channel) ? `कृपया इसे ${f.channel} पर भेजिए। क्या आप आज भेज पाएँगे?` : 'हमारे रिक्रूटर इस कॉल के बाद आपको व्हाट्सएप पर नंबर भेजेंगे। क्या आप वहाँ अपना रिज्यूमे भेज पाएँगे?'),
   },
 };
 function cap(s) { const t = String(s).trim(); return t ? t[0].toUpperCase() + t.slice(1) : t; }
@@ -324,6 +327,9 @@ const TOPICS = [
 ];
 const NOT_INTERESTED = /not interested|no interest|don'?t want|do not want|ఇంట్రెస్ట్ లేదు|వద్దు|ఇష్టం లేదు|इंटरेस्ट नहीं|नहीं चाहिए/i;
 const HOSTILE = /\b(idiot|stupid|nonsense|bloody|shut up|fool)\b|ఎందుకు విసిగిస్త|పిచ్చి|बकवास|बेवकूफ|पागल/i;
+// "which number?", "where do I send it?", "email id?" - asked at the resume step
+const WHERE = /\b(which|what('?s| is)|your|the)\s+(number|no\b|email|e-?mail|mail|id|whatsapp)|where\s+(to|should i|can i|do i)\s+(send|share)|send\s+(it\s+)?(where|to whom)|number\??$|ఏ\s*(నంబర్|నెంబర్|నంబరు)|నంబర్\s*(ఇవ్వండి|చెప్పండి|ఏమిటి)|నెంబర్|ఎక్కడికి\s*పంపాలి|कौन\s*सा\s*(नंबर|ईमेल)|नंबर\s*(दीजिए|बताइए|क्या)|कहाँ\s*भेज|कहां\s*भेज/i;
+const asksWhere = (text) => WHERE.test(String(text || ''));
 const notInterested = (text) => NOT_INTERESTED.test(String(text || ''));
 const hostile = (text) => HOSTILE.test(String(text || ''));
 
@@ -381,5 +387,5 @@ function greeting(lang, now = new Date()) {
 }
 
 module.exports = {
-  callbackQuestion, callbackOk, parseFacts, build, startLanguage, answer, near, words, stepOf, languageChoice, topic, notInterested, hostile, overBudget, needsYears, maxNotice, greeting, KEYS,
+  callbackQuestion, callbackOk, parseFacts, build, startLanguage, answer, near, words, stepOf, languageChoice, topic, asksWhere, notInterested, hostile, overBudget, needsYears, maxNotice, greeting, KEYS,
 };

@@ -374,7 +374,11 @@ class ScriptDialogue extends D.Dialogue {
     const reply = (...say) => ({ result: { say: this.speak(...say), done: false } });
     const follow = (line, sub) => { st.sub = sub; return reply(line); };
     const note = (t) => { st.notes = [...(st.notes || []), S.clean(t, 120)].slice(-8); };
-    const again = (...say) => reply(...say, this.line(sc.idx)); // what was said, then the question again
+    const again = (...say) => { // what was said, then the question again - but never the same question a third time (founder 2026-11-09: it asked the relocation question four times)
+      st.againN = { ...(st.againN || {}) }; st.againN[sc.idx] = (st.againN[sc.idx] || 0) + 1;
+      if (st.againN[sc.idx] > 2) return { k: YES, lead: say.join(' ') };
+      return reply(...say, this.line(sc.idx));
+    };
     const YES = { intent: 'yes', human: false };
     // the answer was a yes to the question: on with the call; otherwise the question again
     const goOn = (line, yes = true) => {
@@ -389,6 +393,7 @@ class ScriptDialogue extends D.Dialogue {
     const sub = st.sub;
     if (sub) {
       st.sub = null;
+      if (sub === 'resumeNum') { if (no) note('Did not agree to send the resume now'); return { k: no ? kIn : YES, lead: '' }; }
       if (sub === 'readback') {
         if (no) st.corrections = [...(st.corrections || []), heard];
         const nxt = this.upTo(sc.idx + 1);
@@ -401,13 +406,14 @@ class ScriptDialogue extends D.Dialogue {
       }
       if (sub === 'prefloc') {
         st.prefLoc = heard; note(`Preferred location: ${heard}`);
-        if (vacancy.near(this.facts, text)) return goOn('');
+        if (vacancy.near(this.facts, text) || st.relocAsked) return { k: YES, lead: '' };
+        st.relocAsked = true;
         return follow(W.reloc(), 'reloc');
       }
       if (sub === 'reloc') {
         if (no) { st.interest = 'no'; st.declineReason = st.prefLoc ? `location: prefers ${st.prefLoc}` : 'location'; return end('Not Interested', 'location does not suit', `${W.locKeep()} ${W.bye()}`); }
         note('Open to relocating');
-        return goOn('');
+        return { k: YES, lead: '' }; // anything that is not a no: on with the call (never the same question again)
       }
       if (sub === 'budget') {
         if (no) { st.interest = 'no'; st.declineReason = st.declineReason || 'salary'; return { result: this.endWith('Not Interested', 'salary does not suit') }; }
@@ -434,6 +440,10 @@ class ScriptDialogue extends D.Dialogue {
     }
 
     const step = vacancy.stepOf(this.facts, this.language, cur.text);
+    if (step === 'next' && vacancy.asksWhere(text)) { // "which number?": the number is told, or the team sends it; then the call goes on to its close
+      if (!/\d/.test(this.facts.channel || '')) { st.sendDetails = true; if (st.pending.length < 5) st.pending.push('Asked which number to send the resume to (send our WhatsApp number)'); }
+      return follow(W.numWhere(), 'resumeNum');
+    }
     if (step === 'next') return null; // "yes, I will send it": the answer to the resume, nothing to look for
     if (vacancy.hostile(text)) return end('Not Interested', 'the person was upset', W.calm());
     if (kIn.intent === 'ai_q') return again(W.aiYes());
@@ -489,7 +499,7 @@ class ScriptDialogue extends D.Dialogue {
     }
     if (step === 'loc' && this.facts.location) {
       if (vacancy.near(this.facts, text) && !st.script.branchNo) return { lead: W.near() };
-      if (!/\b(yes|ok|okay|fine|sure|relocat\w*)\b|అవును|సరే|రెడీ|हाँ|ठीक/i.test(text)) { st.prefLoc = S.clean(text, 80); st.sub = 'reloc'; return { result: { say: this.speak(W.reloc()), done: false } }; }
+      if (!st.relocAsked && !/\b(yes|ok|okay|fine|sure|relocat\w*)\b|అవును|సరే|రెడీ|हाँ|ठीक/i.test(text)) { st.prefLoc = S.clean(text, 80); st.sub = 'reloc'; st.relocAsked = true; return { result: { say: this.speak(W.reloc()), done: false } }; }
     }
     return null;
   }

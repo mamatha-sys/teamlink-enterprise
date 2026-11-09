@@ -87,6 +87,8 @@ class Vad {
     }
   }
 
+  /** how long the person has really spoken in the answer so far (ms) */
+  speechMs() { return Math.max(0, this.frames.length * FRAME_MS - this.quietMs); }
   reset() { this.talking = false; this.loud = 0; this.frames = []; this.pre = []; this.quietMs = 0; }
 }
 
