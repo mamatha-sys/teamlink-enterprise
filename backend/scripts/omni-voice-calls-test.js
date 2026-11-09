@@ -256,6 +256,8 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const VAD = require('../src/calling/voice/vad').Vad;
     const vv = new VAD({}); vv.frames = new Array(50).fill(Buffer.alloc(0)); vv.quietMs = 200;
     check('the pause that ends an answer can follow how much was said (the person\'s speech so far is known)', vv.speechMs() === 800, vv.speechMs());
+    const rb = await talk('rb1', '9111222281', [...PRE, 'I stay in Kukatpally', 'no doubts']);
+    check('the read-back says what was noted (place, experience, qualification ...), not an empty "what I noted"', /Let me confirm what I noted\. Location, I stay in Kukatpally\. Experience, 3 years\./.test(rb.outs[10].say) && /Is that correct\?$/.test(rb.outs[10].say), rb.outs[10]);
     // THE RECRUITER'S NUMBER (founder 2026-11-09: "number ai script lo recruiters ni adagali, candidate ki aa number estundi ai")
     const cn = await omni.create({ externalId: 'cn1', toNumber: '9111222261', name: 'Kiran Rao', script: FACTS, contactNumber: '98480 12345' }, { ...deps, ami: AMI });
     const cnd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(cn.id)); cnd.start();
@@ -326,7 +328,7 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     await sip.sweep(Date.now() + 3 * 3600000);
     const rt1 = await omni.status(rs1.id); const rt2 = await omni.status(rs2.id);
     check('a call cut off by a server restart is dropped (rung again); one that never answered is not', rt1.ended && rt1.dropped === true && rt1.status === 'failed' && rt2.status === 'no-answer' && rt2.dropped === false, { rt1: rt1.status + '/' + rt1.dropped, rt2: rt2.status + '/' + rt2.dropped });
-    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 10 + 34, { before, now: originated.length });
+    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 11 + 34, { before, now: originated.length });
     check('Asterisk refusing the call fails it in words (and leaves a failed row)', await (async () => { const x = await refuse({ toNumber: '9333333333' }, { ...deps, ami: { action: async () => ({ Response: 'Error', Message: 'no trunk' }) } }); return !x.ok && x.code === 'not_dialled'; })());
   } finally {
     await prisma.$disconnect().catch(() => {});
