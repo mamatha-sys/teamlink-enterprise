@@ -33,6 +33,10 @@ const ASKS = ['ask', 'interest', 'ifyes', 'ifno', 'language'];
 const isAsk = (kind) => ASKS.includes(kind);
 const OWN_ACK = /^(that is|thank|perfect|great|no problem|పర్వాలేదు|థాంక్యూ|ధన్యవాదాలు|మీ సమయానికి|చాలా బాగుంది|कोई बात नहीं|धन्यवाद|आपके समय|बहुत अच्छा)/i;
 const MAX_STEPS = 14;
+// PACE (founder 2026-11-09: "AI matladuthuney undi, pause raavatledhu, script lo em undho adhey continuous ga chepthundi"): a run of Say lines is never spoken in one go;
+// after about this many characters the call stops and waits for the person ("okay", "yes", a question), then goes on with the next part
+const CHUNK = 260;
+const REFUSE = /\b(not going to|don'?t want|do not want|no interest|not interested|not required|not looking|leave me|stop talking)\b|వద్దు|ఇష్టం లేదు|నాకు అక్కర్లేదు|नहीं चाहिए|मुझे नहीं/i;
 const MAX_LINE = 300;
 
 // text -> { ok, steps:[{ kind, text }], error }
@@ -121,6 +125,7 @@ class ScriptDialogue extends D.Dialogue {
     this.facts = opts.facts || null; // the facts of a vacancy: a person's questions about the pay, the place ... are answered from them
     // no question in the script (only what the AI says): the call says all of it and ends
     this.noQuestion = !mainSplit.steps.some((s) => isAsk(s.kind));
+    this.longMessage = this.noQuestion && mainSplit.steps.reduce((n, s) => n + s.text.length, 0) > CHUNK + 60; // told in parts, not all at once
     this.autoLanguage = Object.keys(this.byLang).length > 1; // follow the person's language only when there is another version to speak
     // the language the call starts in: the call's own if the script has it, else the script's
     if (!this.byLang[this.language]) this.setLanguage(first);
@@ -157,13 +162,14 @@ class ScriptDialogue extends D.Dialogue {
       if ((s.kind === 'ifyes' && branchNo) || (s.kind === 'ifno' && !branchNo)) { j += 1; continue; } // eslint-disable-line no-continue
       parts.push(this.line(j));
       if (isAsk(s.kind)) return { parts, stopAt: j };
+      if (parts.join(' ').length >= CHUNK && this.steps[j + 1] && this.steps[j + 1].kind === 'say') return { parts, stopAt: j, checkpoint: true }; // a pause: the person answers, then the next part
       j += 1;
     }
     return { parts, stopAt: j }; // only Say lines left: the call ends after them
   }
 
   start() {
-    if (this.noQuestion) { // nothing to ask: Opening, the Say lines and the Closing are said together, then the call ends
+    if (this.noQuestion && !this.longMessage) { // nothing to ask: Opening, the Say lines and the Closing are said together, then the call ends
       this.st.step = 'script';
       this.st.messageOnly = true; // the message was delivered: not an unanswered call (Omni-Channel must not ring this person again)
       return this.endWith('Unclear', 'the message was said (the script has no question)', this.steps.map((_, i) => this.line(i)).join(' '));
@@ -247,6 +253,7 @@ class ScriptDialogue extends D.Dialogue {
     const cur = this.steps[sc.idx];
 
     // the same safety words as every AI call
+    if (cur.kind === 'say' && k.intent === 'no' && REFUSE.test(text)) { st.interest = 'no'; st.declineReason = S.clean(text, 120); return this.endWith('Not Interested', 'not interested', this.declineLine || (this.ackText(k, cur) + (this.steps[this.steps.length - 1].kind === 'closing' ? ` ${this.line(this.steps.length - 1)}` : ''))); }
     if (k.intent === 'stop') { st.stop = true; st.sub = null; return this.endWith('Not Interested', 'asked not to be called again', this.P.closeNotInterested); }
     if (k.intent === 'cant_hear') return { say: this.speak(this.again()), done: false };
     if (k.intent === 'repeat') return { say: this.speak(this.again()), done: false };
@@ -286,7 +293,11 @@ class ScriptDialogue extends D.Dialogue {
         turn.understood = 'question_noted';
         return { say: this.speak(vacancy.answer(this.facts, text, this.language), cur.kind === 'ask' || cur.kind === 'interest' ? this.line(sc.idx) : this.again()), done: false }; // answered from the facts, then the question again
       }
-      if (!st.pitchCount && (k.intent === 'info_q' || k.intent === 'salary_q' || k.intent === 'ai_q' || k.intent === 'other_cand')) { // (after a try to convince, what is said is the reason, kept below)
+      if (cur.kind === 'say' && (k.intent === 'info_q' || k.intent === 'salary_q' || k.intent === 'ai_q' || k.intent === 'other_cand')) { // a question at a pause: kept for the team, and the message goes on
+        const q = S.clean(text, 200);
+        if (q && !st.pending.includes(q) && st.pending.length < 5) st.pending.push(q);
+        turn.understood = 'question_noted';
+      } else if (!st.pitchCount && (k.intent === 'info_q' || k.intent === 'salary_q' || k.intent === 'ai_q' || k.intent === 'other_cand')) { // (after a try to convince, what is said is the reason, kept below)
         const q = S.clean(text, 200);
         if (q && !st.pending.includes(q) && st.pending.length < 5) st.pending.push(q);
         turn.understood = 'question_noted';
@@ -340,6 +351,7 @@ class ScriptDialogue extends D.Dialogue {
     // on to the next question (Say lines are spoken with it); no more questions: the closing
     const nxt = this.upTo(sc.idx + 1);
     if (nxt.closing !== undefined || nxt.stopAt >= this.steps.length) {
+      if (this.longMessage) st.messageOnly = true; // the whole message was told: not an unanswered call
       const outcome = st.interest === 'no' ? 'Not Interested' : (st.interest === 'yes' ? 'Interested' : 'Unclear');
       return this.endWith(outcome, 'script finished', S.clean([this.leadFor(lead, k, cur, nxt.parts[0] || nxt.closing), ...nxt.parts, nxt.closing].filter(Boolean).join(' '), 3000) || undefined);
     }

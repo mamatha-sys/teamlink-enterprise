@@ -240,6 +240,29 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const gh = await talk('gq2', '9111222209', ['yes', 'English', 'yes', 'yes interested']);
     const gh1 = await gh.dd.hear('', { heard: 'unclear' }); const gh2 = await gh.dd.hear('', { heard: 'unclear' }); const gh3 = await gh.dd.hear('', { heard: 'unclear' }); const gh4 = await gh.dd.hear('', { heard: 'unclear' });
     check('nothing at all heard: asked again up to four times before the line is called not clear', !gh1.done && !gh2.done && !gh3.done && !gh4.done, [gh1.say, gh4.say]);
+    // PACE (founder 2026-11-09): a long script is told in parts, the person is heard between the parts
+    const LONGSAY = ['Opening: Hello {name}, this is the AI assistant of Teamlink Consultants.', 'Say: We are hiring for the HR Recruiter position in Kukatpally with a good salary and a friendly team that you will enjoy working with every day.', 'Say: The work is sourcing candidates, screening resumes and scheduling interviews, and you will get training from our senior recruiters in the first month.', 'Say: The office is open from nine thirty to six thirty, Monday to Saturday, and there is a monthly incentive on every successful joining.', 'Say: Freshers are welcome, and the company also gives a hostel facility for candidates who come from other districts.', 'Closing: Thank you for your time. Goodbye.'].join('\n');
+    const pc = await omni.create({ externalId: 'pace1', toNumber: '9111222241', name: 'Kiran', script: LONGSAY }, { ...deps, ami: AMI });
+    const pcd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(pc.id));
+    const pc0 = pcd.start(); const pc1 = await pcd.hear('hello'); const pc2 = await pcd.hear('okay');
+    check('a long statement-only script is not said in one go: the opening, then parts, each followed by a wait for the person; the call ends after the last part', !pc0.done && /Hello Kiran/.test(pc0.say) && !/HR Recruiter position/.test(pc0.say) && !pc1.done && /HR Recruiter position/.test(pc1.say) && !/hostel/.test(pc1.say) && !/Thank you for your time/.test(pc1.say) && pc2.done === true && /hostel/.test(pc2.say) && /Thank you for your time/.test(pc2.say), { pc0, pc1, pc2 });
+    const pcs = pcd.outcome();
+    const pc5 = await omni.create({ externalId: 'pace2', toNumber: '9111222242', name: 'Kiran', script: LONGSAY }, { ...deps, ami: AMI });
+    const pcd2 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(pc5.id)); pcd2.start(); await pcd2.hear('hello');
+    const pq = await pcd2.hear('what is the salary?');
+    check('at a pause a question is kept for the team and the message goes on to its end', pq.done === true && /hostel/.test(pq.say) && /what is the salary/.test(pcd2.outcome().summary), { pq, o: pcd2.outcome() });
+    const pn0 = await omni.create({ externalId: 'pace2b', toNumber: '9111222245', name: 'Kiran', script: LONGSAY }, { ...deps, ami: AMI });
+    const pnd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(pn0.id)); pnd.start(); await pnd.hear('hello');
+    const pn = await pnd.hear('I am not interested');
+    check('at a pause a clear no ends politely (Not Interested)', pn.done === true && !/hostel/.test(pn.say) && pnd.outcome().outcome === 'Not Interested', { pn, o: pnd.outcome().outcome });
+    const sh = await omni.create({ externalId: 'pace3', toNumber: '9111222243', name: 'Kiran', script: 'Opening: Hello {name}, good morning. This is the AI assistant of Teamlink.\nSay: We will send you the job details on WhatsApp.\nClosing: Thank you.' }, { ...deps, ami: AMI });
+    const shd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(sh.id)); const sh0 = shd.start();
+    check('a short message (only a few lines) is still said whole and the call ends', sh0.done === true && /WhatsApp/.test(sh0.say) && /Thank you/.test(sh0.say), sh0);
+    const SAYQ = ['Opening: Hello {name}, this is Teamlink.', 'Say: We are hiring for the HR Recruiter position in Kukatpally with a good salary and a friendly team that you will enjoy working with every day.', 'Say: The work is sourcing candidates, screening resumes and scheduling interviews, and you will get training from our senior recruiters in the first month.', 'Say: The office is open from nine thirty to six thirty, Monday to Saturday, and there is a monthly incentive on every successful joining.', 'Interest: Are you interested?', 'Closing: Thank you.'].join('\n');
+    const sq = await omni.create({ externalId: 'pace4', toNumber: '9111222244', name: 'Kiran', script: SAYQ }, { ...deps, ami: AMI });
+    const sqd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(sq.id)); sqd.start();
+    const sq1 = await sqd.hear('hello'); const sq2 = await sqd.hear('okay');
+    check('Say lines before a question are also told in parts, then the question', !/Are you interested/.test(sq1.say) && /Are you interested\?$/.test(sq2.say), { sq1, sq2 });
     // a call that was CUT before its conversation ended is marked dropped (Omni-Channel rings again); a finished one is not
     const dr = await omni.create({ externalId: 'drop1', toNumber: '9111222210', name: 'Kiran', script: FACTS }, { ...deps, ami: AMI });
     const ddr = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(dr.id)); ddr.start(); await ddr.hear('hello');
@@ -260,7 +283,7 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     await sip.sweep(Date.now() + 3 * 3600000);
     const rt1 = await omni.status(rs1.id); const rt2 = await omni.status(rs2.id);
     check('a call cut off by a server restart is dropped (rung again); one that never answered is not', rt1.ended && rt1.dropped === true && rt1.status === 'failed' && rt2.status === 'no-answer' && rt2.dropped === false, { rt1: rt1.status + '/' + rt1.dropped, rt2: rt2.status + '/' + rt2.dropped });
-    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 29, { before, now: originated.length });
+    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 34, { before, now: originated.length });
     check('Asterisk refusing the call fails it in words (and leaves a failed row)', await (async () => { const x = await refuse({ toNumber: '9333333333' }, { ...deps, ami: { action: async () => ({ Response: 'Error', Message: 'no trunk' }) } }); return !x.ok && x.code === 'not_dialled'; })());
   } finally {
     await prisma.$disconnect().catch(() => {});
