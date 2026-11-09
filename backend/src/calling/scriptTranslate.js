@@ -35,9 +35,10 @@ async function translateScript(text, to, deps = {}) {
   const ask = deps.chat || (async (system, user) => {
     const model = await pickModel(c);
     if (!model) throw new Error('no model is installed in Ollama');
+    await require('./voice/liveLoad').whenQuiet(); // a live call comes first (the voice shares the processor)
     const r = await fetch(`${c.url}/api/chat`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model, stream: false, format: 'json', options: { temperature: 0.2 }, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
+      body: JSON.stringify({ model, stream: false, format: 'json', options: { temperature: 0.2, num_thread: Math.max(1, Number(process.env.OLLAMA_NUM_THREAD) || Math.floor(require('os').cpus().length / 2)) }, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
       signal: AbortSignal.timeout(c.timeoutMs),
     });
     if (!r.ok) throw new Error(`Ollama answered ${r.status}`);

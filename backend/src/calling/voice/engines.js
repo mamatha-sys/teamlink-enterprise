@@ -182,9 +182,17 @@ function kokoroHttp({ url, key, voice, speed = 1.1 }) {
 function piperTts({ exe, voices, lengthScale = 0.75 }) {
   const scaleOf = (lang) => (typeof lengthScale === 'object' && lengthScale ? (lengthScale[lang] || 1) : lengthScale);
   const path = require('path'); const fs = require('fs'); const os = require('os'); const { spawn } = require('child_process'); // eslint-disable-line global-require
-  const procs = {};
+  const POOL = Math.max(1, Math.min(6, Number(process.env.AI_VOICE_TTS_WORKERS) || Math.min(3, Math.max(1, Math.floor(os.cpus().length / 2)))));
+  const procs = {}; // lang -> [process state] (up to POOL, started when the others are busy)
+  // the least busy running process of the voice; a new one while all are busy and the pool is not full
   function procFor(lang) {
-    if (procs[lang] && !procs[lang].dead) return procs[lang];
+    const list = (procs[lang] = (procs[lang] || []).filter((x) => !x.dead));
+    const idle = list.find((x) => x.queue.length === 0);
+    if (idle) return idle;
+    if (list.length < POOL) { const st = spawnOne(lang); list.push(st); return st; }
+    return list.reduce((a, b) => (b.queue.length < a.queue.length ? b : a));
+  }
+  function spawnOne(lang) {
     // TELUGU: steady sound lengths (founder 2026-10-30: "telugu kuda letters ni sagadhisthundhi"). Piper's noise_w (default
     // 0.8) makes each sound's length random - the same sentence came out 8.40-8.77 s, some sounds dragged; at 0.5 it is
     // 8.34-8.38 s every time. AI_VOICE_NOISE_W_TELUGU tunes it; the other voices keep Piper's own setting.
@@ -201,7 +209,6 @@ function piperTts({ exe, voices, lengthScale = 0.75 }) {
     });
     p.stderr.on('data', () => {});
     p.on('exit', () => { st.dead = true; st.queue.splice(0).forEach((w) => w.reject(new Error('Piper stopped'))); });
-    procs[lang] = st;
     return st;
   }
   return async (text, lang) => {

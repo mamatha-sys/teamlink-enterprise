@@ -232,26 +232,34 @@ function polish(pcm) {
 // time. Sentences sent all at once were made in any order - the FIRST sentence of a goodbye waited 12 s behind the others -
 // and the background "prepare" work could hold up a live reply. Now each language's voice works through its own queue:
 // live sentences (high) in the order they are said, background preparing (low) only when nothing live is waiting.
-const lanes = new Map(); // lang -> { busy, high: [], low: [] }
+// PARALLEL CALLS (founder 2026-11-05: all numbers are called at once): one voice maker per language made every call wait for every other call's sentences;
+// now up to TTS_PAR sentences of one language are made at the same time (AI_VOICE_TTS_WORKERS, default half the processor cores, 1 to 3)
+const TTS_PAR = Math.max(1, Math.min(6, Number(process.env.AI_VOICE_TTS_WORKERS) || Math.min(3, Math.max(1, Math.floor(require('os').cpus().length / 2))))); // eslint-disable-line global-require
+const lanes = new Map(); // lang -> { running, high: [], low: [] }
 const pending = new Map(); // `${lang}|${sentence}` -> job (asked twice = made once; a live ask lifts a waiting low job)
 function pump(lang) {
   const lane = lanes.get(lang);
-  if (!lane || lane.busy) return;
-  const job = lane.high.shift() || lane.low.shift();
-  if (!job) return;
-  lane.busy = true;
+  if (!lane) return;
+  while (lane.running < TTS_PAR) {
+    const job = lane.high.shift() || lane.low.shift();
+    if (!job) return;
+    lane.running += 1;
+    makeOne(lang, lane, job);
+  }
+}
+function makeOne(lang, lane, job) {
   job.started = true;
   Promise.resolve().then(() => job.engines.tts(require('./speakScript').native(job.sentence, lang), lang)) // eslint-disable-line global-require
     .then((pcm) => { const out = polish(pcm); if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value); cache.set(job.key, out); diskPut(job.engines, job.key, out); job.resolve(out); })
     .catch((e) => job.reject(e))
-    .finally(() => { pending.delete(job.key); lane.busy = false; pump(lang); });
+    .finally(() => { pending.delete(job.key); lane.running -= 1; pump(lang); });
 }
 function voiceOf(engines, sentence, lang, high = true) {
   const key = `${lang}|${sentence}`;
   if (cache.has(key)) return Promise.resolve(cache.get(key));
   const saved = diskGet(engines, key);
   if (saved && saved.length) { if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value); cache.set(key, saved); return Promise.resolve(saved); }
-  if (!lanes.has(lang)) lanes.set(lang, { busy: false, high: [], low: [] });
+  if (!lanes.has(lang)) lanes.set(lang, { running: 0, high: [], low: [] });
   const lane = lanes.get(lang);
   const had = pending.get(key);
   if (had) {
@@ -326,6 +334,8 @@ async function finish(row, d, why) {
 
 // One phone call.
 function handle(sock, engines, opts = {}) {
+  const LL = require('./liveLoad'); // eslint-disable-line global-require
+  LL.enter(); let counted = true;
   const reader = new A.Reader();
   const speaker = new Speaker(sock);
   let row = null; let d = null; let ended = false; let saved = false; let busy = false; let pending = null; let gen = 0;
@@ -618,6 +628,7 @@ function handle(sock, engines, opts = {}) {
     }
   });
   sock.on('close', () => {
+    if (counted) { counted = false; require('./liveLoad').leave(); } // eslint-disable-line global-require
     if (quietTimer) { clearInterval(quietTimer); quietTimer = null; }
     speaker.stop();
     if (!ended) { ended = true; save('the person hung up'); } else save(); // cut during the goodbye: the assistant had finished, keep its result

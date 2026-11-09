@@ -137,9 +137,13 @@ function postJson(url, payload, timeoutMs) {
   });
 }
 
+// the voice of a live AI call comes first: the model waits for the calls to end (at most OLLAMA_WAIT_FOR_CALLS_MS, default 2 min) and uses only part of the cores
+const modelThreads = () => Math.max(1, Number(process.env.OLLAMA_NUM_THREAD) || Math.floor(require('os').cpus().length / 2)); // eslint-disable-line global-require
+
 async function ollamaChat(systemPrompt, history, { json = false, model: wanted = null, timeoutMs = null } = {}) {
   const model = wanted || ollamaModel();
   let res;
+  try { await require('../calling/voice/liveLoad').whenQuiet(Number(process.env.OLLAMA_WAIT_FOR_CALLS_MS) || 120000); } catch { /* never blocks */ } // eslint-disable-line global-require
   try {
     res = await postJson(`${ollamaBase()}/api/chat`, {
       model,
@@ -147,7 +151,7 @@ async function ollamaChat(systemPrompt, history, { json = false, model: wanted =
       ...(json ? { format: 'json' } : {}),
       // Low temperature: these answers are read off a facts block, and the
       // agent's plan is a JSON object, not prose. Nothing here wants flair.
-      options: { num_ctx: ollamaNumCtx(), temperature: json ? 0 : 0.2 },
+      options: { num_ctx: ollamaNumCtx(), temperature: json ? 0 : 0.2, num_thread: modelThreads() },
       keep_alive: '30m',
       messages: [{ role: 'system', content: systemPrompt }, ...cleanHistory(history)],
     }, timeoutMs || chatTimeoutMs());
