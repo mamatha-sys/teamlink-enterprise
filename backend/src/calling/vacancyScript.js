@@ -20,7 +20,7 @@ const KEYS = {
   benefits: 'benefits|perks', vacancies: 'vacancies|openings|no of vacancies|number of vacancies', keyreq: 'key requirement|requirement|note', persuasion: 'persuasion|hook|advantage|upside', channel: 'channel|contact channel',
   contact: 'contact|recruiter|manager|contact person', next: 'next|next step', language: 'language|start language',
   caller: 'caller|caller name|agent name', client: 'client|client name|hiring company|employer', industry: 'industry|sector', interview: 'interview|interview mode',
-  workmode: 'work mode|workmode|mode of work', notice: 'notice|notice period',
+  workmode: 'work mode|workmode|mode of work', notice: 'notice|notice period', reqlang: 'languages|languages required|required languages|language requirement|languages needed|known languages',
 };
 const ALL = Object.values(KEYS).join('|');
 const KEY_OF = Object.entries(KEYS).map(([k, v]) => [k, new RegExp(`^(${v})$`, 'i')]);
@@ -52,7 +52,8 @@ const L = {
     langOk: () => 'Perfect, I will continue in English.',
     intro: (f) => `This is ${f.caller}, an AI assistant calling from ${f.company}, on behalf of our recruitment team.`,
     perm: () => 'I have a job opportunity to share. Do you have two minutes?',
-    say: (f) => `We have an opening for ${f.role}${f.industry ? ` with a ${f.industry} company` : ''}${f.location ? `, based in ${f.location}` : ''}.${f.details ? ` The role involves ${f.details}.` : ''}${f.qualification ? ` They are looking for ${f.qualification}.` : ''}${f.experience ? ` The experience needed is around ${f.experience}.` : ''}${f.salary ? ` The salary is ${f.salary}.` : ''}${f.vacancies ? ` There are ${f.vacancies} positions open right now.` : ''}${f.keyreq ? ` One thing to flag for this role: ${f.keyreq}.` : ''}`,
+    say: (f) => `We have an opening for ${f.role}${f.industry ? ` with a ${f.industry} company` : ''}${f.location ? `, based in ${f.location}` : ''}.${f.details ? ` The role involves ${f.details}.` : ''}`,
+    say2: (f) => `${f.qualification ? `They are looking for ${f.qualification}.` : ''}${f.experience ? ` The experience needed is around ${f.experience}.` : ''}${f.salary ? ` The salary is ${f.salary}.` : ''}${f.vacancies ? ` There are ${f.vacancies} positions open right now.` : ''}${f.keyreq ? ` One thing to flag for this role: ${f.keyreq}.` : ''}`.trim(),
     interest: () => 'Would this be of interest to you?',
     exp: () => 'How many years of relevant experience do you have?',
     ind: (f) => `Is your experience in a ${f.industry} company?`,
@@ -102,6 +103,9 @@ const L = {
     sum: (a) => `Let me confirm what I noted. ${a.loc ? `Location, ${a.loc}. ` : ''}${a.exp ? `Experience, ${a.exp}. ` : ''}${a.edu ? `Qualification, ${a.edu}. ` : ''}${a.work ? `Working and notice period, ${a.work}. ` : ''}${a.sal ? `Salary, ${a.sal}. ` : ''}Is that correct?`,
     sumFix: () => 'Okay, I will note the correction for our team.',
     calm: () => 'I understand, I am sorry for the trouble. Thank you for your time. Goodbye.',
+    langs: () => 'Which languages can you speak?',
+    langMatch: (x) => `Perfect! This job role needs ${x} as well.`,
+    langNo: (f) => `Okay, noted. This job role needs ${f.reqlang}.`,
     numWhere: (f) => (/\d/.test(f.channel) ? `Please send it to ${f.channel}. Will you be able to send it today?` : 'Our recruiter will send you the number on WhatsApp right after this call. Will you be able to send your resume there?'),
   },
   Telugu: {
@@ -110,7 +114,8 @@ const L = {
     langOk: () => 'సరే, తెలుగులో మాట్లాడుతాను.',
     intro: (f) => `నేను ${f.caller}, ${f.company} నుండి మా రిక్రూట్‌మెంట్ టీమ్ తరపున మాట్లాడుతున్న AI అసిస్టెంట్‌ని.`,
     perm: () => 'ఒక జాబ్ ఆపర్చునిటీ గురించి చెప్పాలి. మీకు రెండు నిమిషాలు ఉన్నాయా?',
-    say: (f) => `${f.industry ? `${f.industry} కంపెనీలో ` : ''}${f.role} ఓపెనింగ్ ఉంది.${f.location ? ` లొకేషన్ ${f.location}.` : ''}${f.details ? ` ఈ రోల్‌లో ${f.details} ఉంటాయి.` : ''}${f.qualification ? ` క్వాలిఫికేషన్ ${f.qualification}.` : ''}${f.experience ? ` ఎక్స్‌పీరియన్స్ సుమారు ${f.experience} కావాలి.` : ''}${f.salary ? ` సాలరీ ${f.salary}.` : ''}${f.vacancies ? ` ఇప్పుడు ${f.vacancies} పొజిషన్లు ఉన్నాయి.` : ''}${f.keyreq ? ` ఈ రోల్‌కి ఒక ముఖ్యమైన విషయం: ${f.keyreq}.` : ''}`,
+    say: (f) => `${f.industry ? `${f.industry} కంపెనీలో ` : ''}${f.role} ఓపెనింగ్ ఉంది.${f.location ? ` లొకేషన్ ${f.location}.` : ''}${f.details ? ` ఈ రోల్‌లో ${f.details} ఉంటాయి.` : ''}`,
+    say2: (f) => `${f.qualification ? `క్వాలిఫికేషన్ ${f.qualification}.` : ''}${f.experience ? ` ఎక్స్‌పీరియన్స్ సుమారు ${f.experience} కావాలి.` : ''}${f.salary ? ` సాలరీ ${f.salary}.` : ''}${f.vacancies ? ` ఇప్పుడు ${f.vacancies} పొజిషన్లు ఉన్నాయి.` : ''}${f.keyreq ? ` ఈ రోల్‌కి ఒక ముఖ్యమైన విషయం: ${f.keyreq}.` : ''}`.trim(),
     interest: () => 'ఇది మీకు ఇంట్రెస్ట్‌గా ఉందా?',
     exp: () => 'మీకు ఎన్ని ఇయర్స్ రిలీవెంట్ ఎక్స్‌పీరియన్స్ ఉంది?',
     ind: (f) => `మీ ఎక్స్‌పీరియన్స్ ${f.industry} కంపెనీలోనేనా?`,
@@ -160,6 +165,9 @@ const L = {
     sum: (a) => `నేను నోట్ చేసుకున్నది కన్ఫర్మ్ చేస్తాను. ${a.loc ? `లొకేషన్, ${a.loc}. ` : ''}${a.exp ? `ఎక్స్‌పీరియన్స్, ${a.exp}. ` : ''}${a.edu ? `క్వాలిఫికేషన్, ${a.edu}. ` : ''}${a.work ? `జాబ్ మరియు నోటీస్ పీరియడ్, ${a.work}. ` : ''}${a.sal ? `సాలరీ, ${a.sal}. ` : ''}ఇది కరెక్టేనా?`,
     sumFix: () => 'సరే, ఆ కరెక్షన్ మా టీమ్‌కి చెప్తాను.',
     calm: () => 'అర్థమైంది, ఇబ్బందికి సారీ. మీ టైమ్‌కి థాంక్స్. నమస్కారం.',
+    langs: () => 'మీకు ఏ భాషలు వచ్చు?',
+    langMatch: (x) => `పర్ఫెక్ట్! ఈ జాబ్ రోల్‌కి కూడా ${x} కావాలి.`,
+    langNo: (f) => `సరే, నోట్ చేసుకున్నాను. ఈ జాబ్ రోల్‌కి ${f.reqlang} కావాలి.`,
     numWhere: (f) => (/\d/.test(f.channel) ? `${f.channel} కి పంపండి. ఈ రోజు పంపుతారా?` : 'మా రిక్రూటర్ ఈ కాల్ తర్వాత మీకు వాట్సాప్‌లో నంబర్ పంపుతారు. అక్కడ మీ రెజ్యూమ్ పంపుతారా?'),
   },
   Hindi: {
@@ -168,7 +176,8 @@ const L = {
     langOk: () => 'ठीक है, मैं हिंदी में बात करता हूँ।',
     intro: (f) => `यह ${f.caller} है, ${f.company} से हमारी रिक्रूटमेंट टीम की ओर से AI असिस्टेंट की कॉल है।`,
     perm: () => 'एक जॉब ऑपॉर्च्युनिटी के बारे में बताना है। क्या आपके पास दो मिनट हैं?',
-    say: (f) => `${f.industry ? `एक ${f.industry} कंपनी में ` : ''}${f.role} की ओपनिंग है।${f.location ? ` लोकेशन ${f.location} है।` : ''}${f.details ? ` इस रोल में ${f.details} शामिल है।` : ''}${f.qualification ? ` क्वालिफिकेशन ${f.qualification} चाहिए।` : ''}${f.experience ? ` एक्सपीरियंस करीब ${f.experience} चाहिए।` : ''}${f.salary ? ` सैलरी ${f.salary} है।` : ''}${f.vacancies ? ` अभी ${f.vacancies} पोज़िशन खुली हैं।` : ''}${f.keyreq ? ` इस रोल की एक खास बात: ${f.keyreq}।` : ''}`,
+    say: (f) => `${f.industry ? `एक ${f.industry} कंपनी में ` : ''}${f.role} की ओपनिंग है।${f.location ? ` लोकेशन ${f.location} है।` : ''}${f.details ? ` इस रोल में ${f.details} शामिल है।` : ''}`,
+    say2: (f) => `${f.qualification ? `क्वालिफिकेशन ${f.qualification} चाहिए।` : ''}${f.experience ? ` एक्सपीरियंस करीब ${f.experience} चाहिए।` : ''}${f.salary ? ` सैलरी ${f.salary} है।` : ''}${f.vacancies ? ` अभी ${f.vacancies} पोज़िशन खुली हैं।` : ''}${f.keyreq ? ` इस रोल की एक खास बात: ${f.keyreq}।` : ''}`.trim(),
     interest: () => 'क्या यह आपको इंटरेस्टिंग लगता है?',
     exp: () => 'आपके पास कितने साल का रिलेवेंट एक्सपीरियंस है?',
     ind: (f) => `क्या आपका एक्सपीरियंस ${f.industry} कंपनी में है?`,
@@ -218,6 +227,9 @@ const L = {
     sum: (a) => `मैंने जो नोट किया वह कन्फर्म करता हूँ। ${a.loc ? `लोकेशन, ${a.loc}। ` : ''}${a.exp ? `एक्सपीरियंस, ${a.exp}। ` : ''}${a.edu ? `क्वालिफिकेशन, ${a.edu}। ` : ''}${a.work ? `जॉब और नोटिस पीरियड, ${a.work}। ` : ''}${a.sal ? `सैलरी, ${a.sal}। ` : ''}क्या यह सही है?`,
     sumFix: () => 'ठीक है, मैं यह सुधार अपनी टीम को बता दूँगा।',
     calm: () => 'समझ गया, तकलीफ़ के लिए माफ़ कीजिए। आपके समय के लिए धन्यवाद। नमस्ते।',
+    langs: () => 'आपको कौन सी भाषाएँ आती हैं?',
+    langMatch: (x) => `परफेक्ट! इस जॉब रोल के लिए भी ${x} चाहिए।`,
+    langNo: (f) => `ठीक है, नोट कर लिया। इस जॉब रोल के लिए ${f.reqlang} चाहिए।`,
     numWhere: (f) => (/\d/.test(f.channel) ? `कृपया इसे ${f.channel} पर भेजिए। क्या आप आज भेज पाएँगे?` : 'हमारे रिक्रूटर इस कॉल के बाद आपको व्हाट्सएप पर नंबर भेजेंगे। क्या आप वहाँ अपना रिज्यूमे भेज पाएँगे?'),
   },
 };
@@ -244,9 +256,10 @@ function build(factsIn) {
   const out = {};
   Object.entries(L).forEach(([lang, t]) => {
     const f = sayable(factsIn, lang);
-    const lines = [`Opening: ${t.open(f)}`, `Language: ${t.lang(f)}`, `Say: ${t.intro(f)}`, `Ask: ${t.perm(f)}`, `Say: ${t.say(f)}`, `Interest: ${t.interest(f)}`, `Ask: ${t.exp(f)}`];
+    const lines = [`Opening: ${t.open(f)}`, `Language: ${t.lang(f)}`, `Say: ${t.intro(f)}`, `Ask: ${t.perm(f)}`, `Say: ${t.say(f)}`, `Interest: ${t.interest(f)}`, ...(t.say2(f) ? [`Say: ${t.say2(f)}`] : []), `Ask: ${t.exp(f)}`];
     if (f.industry) lines.push(`Ask: ${t.ind(f)}`, `IfNo: ${t.indOther(f)}`, `IfNo: ${t.duties(f)}`);
     if (f.qualification) lines.push(`Ask: ${t.edu(f)}`);
+    if (f.reqlang) lines.push(`Ask: ${t.langs(f)}`);
     lines.push(`Ask: ${t.work(f)}`, `IfYes: ${t.notice(f)}`, `Ask: ${t.sal(f)}`, `Ask: ${t.loc(f)}`, `Ask: ${t.doubt(f)}`, `Ask: ${t.next(f)}`, `Closing: ${t.close(f)}`, `Convince: ${t.reason(f)}`, `Decline: ${t.keep(f)}`);
     out[lang] = lines.join('\n');
   });
@@ -290,7 +303,7 @@ function near(facts, text) {
 const words = (facts, lang) => { const t = L[lang] || L.English; const f = sayable(facts, lang); return Object.fromEntries(Object.keys(t).map((k) => [k, (arg) => t[k](arg === undefined ? f : arg)])); };
 
 // which line of the call this is (the same words as build())
-const STEP_KEYS = ['perm', 'interest', 'exp', 'ind', 'edu', 'work', 'notice', 'sal', 'loc', 'doubt', 'next'];
+const STEP_KEYS = ['perm', 'interest', 'exp', 'ind', 'edu', 'langs', 'work', 'notice', 'sal', 'loc', 'doubt', 'next'];
 function stepOf(facts, lang, lineText) {
   const t = L[lang] || L.English;
   const f = sayable(facts, lang);
@@ -390,10 +403,24 @@ function inferFacts(raw) {
     const lo = /\b(?:opening|openings|vacancy|vacancies|position|hiring|recruiting)\s+(?:for|of)\s+(?:an?\s+|the\s+)?([a-z][a-z &/-]{2,40}?)(?=\s+(?:in|at|with|near|for|who|that|having|from|on)\b|[.,;!?]|$)/i.exec(text);
     if (lo) role = lo[1];
   }
+  if (!role) {
+    const deg = /\b(MBBS|BDS|B\.?\s?Pharm|M\.?\s?Pharm|GNM|ANM|BAMS|BHMS|DMLT|MBA|MCA|CMA)\b[^.]{0,24}\b(job|jobs|vacancy|vacancies|opening|position|post|requirement|needed|required)\b/i.exec(text) || /\b(job|vacancy|opening|position|post|requirement)\b[^.]{0,24}\b(MBBS|BDS|B\.?\s?Pharm|M\.?\s?Pharm|GNM|ANM|BAMS|BHMS|DMLT|MBA|MCA|CMA)\b/i.exec(text);
+    if (deg) role = (/^(job|vacancy|opening|position|post|requirement)/i.test(deg[1]) ? deg[2] : deg[1]).toUpperCase();
+  }
+  if (!role) {
+    const cap = /\b((?:[A-Z][A-Za-z+./&-]*)(?:\s+[A-Z][A-Za-z+./&-]*){0,3})\s+(?:job|jobs|vacancy|vacancies|position|post|role|opening|openings|requirement)\b/.exec(text);
+    if (cap) role = cap[1];
+  }
+  if (!role && /\b(job|jobs|vacancy|vacancies|opening|openings|position|hiring|recruit\w*|post|requirement)\b/i.test(text)) {
+    const occ = /(?:\b([A-Za-z.]+)\s+)?\b(doctor|nurse|teacher|lecturer|professor|accountant|engineer|developer|driver|manager|executive|recruiter|technician|operator|pharmacist|receptionist|telecaller|electrician|plumber|cook|chef|security guard|mechanic|supervisor|clerk|analyst|designer|tutor|counsellor|therapist|surgeon|dentist)\b/i.exec(text);
+    if (occ) role = `${occ[1] && !/^(a|an|the|for|as|our|of|with|good|new|any|one|some|need|needed|hiring|we|are|is|have|has)$/i.test(occ[1]) ? `${occ[1]} ` : ''}${occ[2]}`.trim();
+  }
   if (!role) return null;
   role = role.replace(/\s+(?:position|role|post|job|vacancy|opening)s?$/i, '').replace(/\s+(?:in|at|of|and|&)$/i, '').trim();
   if (role.length < 3 || role.length > 50 || NOT_ROLE.test(role) || CITIES.some((c) => c.toLowerCase() === role.toLowerCase())) return null;
   const facts = { role };
+  const rl = text.split(/(?<=[.!?])\s+/).filter((x) => /\b(?:languages?|speak|speaking|know|knowledge of|fluent|fluency)\b/i.test(x)).join(' ');
+  if (rl && languagesIn(rl).length) facts.reqlang = languagesIn(rl).join(', ');
   const city = CITIES.find((c) => new RegExp(`\\b${c}\\b`, 'i').test(text));
   if (city) facts.location = city;
   const sal = /\b(?:salary|pay|package|ctc)\s*(?:is|of|up to|:)?\s*((?:up to\s+)?(?:₹|rs\.?\s*)?\d[\d,]*(?:\.\d+)?\s*(?:k|thousand|lakhs?|lpa)?(?:\s*(?:per|a|\/)\s*(?:month|annum|year))?)/i.exec(text) || /((?:₹|rs\.?\s*)\d[\d,]*(?:\.\d+)?\s*(?:k|thousand|lakhs?|lpa)?(?:\s*(?:per|a|\/)\s*(?:month|annum|year))?|\b\d+(?:\.\d+)?\s*(?:k|lpa|lakhs?)\b(?:\s*(?:per|a|\/)\s*(?:month|annum|year))?)/i.exec(text);
@@ -412,6 +439,24 @@ function inferFacts(raw) {
 /** the facts of a vacancy: the labelled ones (Role: ...) when the team wrote them so, else what a plain-sentence script says about a job; null when it names no job */
 const factsFrom = (raw) => parseFacts(raw) || inferFacts(raw);
 
+// ---- LANGUAGES (founder 2026-11-09): "which languages can you speak?" - the ones the job needs are told back: "Perfect! This job role needs Telugu as well."
+const LANG_NAMES = [
+  ['Telugu', /telugu|తెలుగు|तेलुगु|तेलुगू/i, { Telugu: 'తెలుగు', Hindi: 'तेलुगु' }], ['Hindi', /hindi|హిందీ|हिंदी|हिन्दी/i, { Telugu: 'హిందీ', Hindi: 'हिंदी' }],
+  ['English', /english|ఇంగ్లీష్|ఇంగ్లిష్|इंग्लिश|अंग्रेज़ी|अंग्रेजी/i, { Telugu: 'ఇంగ్లీష్', Hindi: 'इंग्लिश' }], ['Tamil', /tamil|తమిళ|तमिल/i, {}], ['Kannada', /kannada|కన్నడ|कन्नड़/i, {}],
+  ['Malayalam', /malayalam|మలయాళ|मलयालम/i, {}], ['Urdu', /urdu|ఉర్దూ|उर्दू/i, {}], ['Marathi', /marathi|మరాఠీ|मराठी/i, {}], ['Bengali', /bengali|bangla|బెంగాలీ|बंगाली/i, {}],
+  ['Gujarati', /gujarati|గుజరాతీ|गुजराती/i, {}], ['Odia', /odia|oriya|ఒడియా|ओड़िया/i, {}], ['Punjabi', /punjabi|పంజాబీ|पंजाबी/i, {}],
+];
+const languagesIn = (text) => LANG_NAMES.filter(([, re]) => re.test(String(text || ''))).map(([n]) => n);
+const shownName = (name, lang) => { const r = LANG_NAMES.find(([n]) => n === name); return (r && r[2] && r[2][lang]) || name; };
+/** { needed: [names the job asks for], matched: 'Telugu and Hindi' | null } for what the person said they speak */
+function languageOverlap(facts, answer, lang = 'English') {
+  const needed = languagesIn(facts && facts.reqlang);
+  const said = languagesIn(answer);
+  const both = needed.filter((n) => said.includes(n));
+  const joiner = { English: ' and ', Telugu: ' మరియు ', Hindi: ' और ' }[lang] || ' and ';
+  return { needed, matched: both.length ? both.map((n) => shownName(n, lang)).join(joiner) : null };
+}
+
 const callbackQuestion = (lang) => (L[lang] || L.English).cbq();
 const callbackOk = (lang) => (L[lang] || L.English).cbok();
 const GREET = {
@@ -424,5 +469,5 @@ function greeting(lang, now = new Date()) {
 }
 
 module.exports = {
-  callbackQuestion, callbackOk, parseFacts, inferFacts, factsFrom, build, startLanguage, answer, near, words, stepOf, languageChoice, topic, asksWhere, notInterested, hostile, overBudget, needsYears, maxNotice, greeting, KEYS,
+  callbackQuestion, callbackOk, languagesIn, languageOverlap, parseFacts, inferFacts, factsFrom, build, startLanguage, answer, near, words, stepOf, languageChoice, topic, asksWhere, notInterested, hostile, overBudget, needsYears, maxNotice, greeting, KEYS,
 };

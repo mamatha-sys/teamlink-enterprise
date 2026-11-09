@@ -221,11 +221,12 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
       const outs = []; for (const t of steps) outs.push(await dd.hear(...[].concat(t))); return { dd, outs, first };
     };
     const fc1 = await talk('vac1', '9222333301', ['yes speaking', 'English', 'yes tell me', 'what is the salary?', 'yes interested', '3 years', 'B.Com', 'yes', 'one month', 'current ten thousand, expected twelve thousand', 'I stay in Kukatpally', 'no doubts', 'yes correct', 'yes I will send it']);
-    check('the call is built from the facts: the name, the language, who is calling, two minutes?, the vacancy', /^Good (morning|afternoon|evening), am I speaking with Kiran\?$/.test(fc1.first) && /which language/.test(fc1.outs[0].say) && /AI assistant calling from Teamlink Consultants/.test(fc1.outs[1].say) && /two minutes/.test(fc1.outs[1].say) && /We have an opening for HR Recruiter, based in Kukatpally/.test(fc1.outs[2].say) && /The salary is 10 thousand per month/.test(fc1.outs[2].say), fc1.outs.slice(0, 3).map((x) => x.say));
+    check('the call is built from the facts: the name, the language, who is calling, two minutes?, the vacancy', /^Good (morning|afternoon|evening), am I speaking with Kiran\?$/.test(fc1.first) && /which language/.test(fc1.outs[0].say) && /AI assistant calling from Teamlink Consultants/.test(fc1.outs[1].say) && /two minutes/.test(fc1.outs[1].say) && /We have an opening for HR Recruiter, based in Kukatpally/.test(fc1.outs[2].say) && !/salary/i.test(fc1.outs[2].say) && /Would this be of interest/.test(fc1.outs[2].say), fc1.outs.slice(0, 3).map((x) => x.say));
+    check('after a yes the rest is told with the next question (qualification, experience, pay), not all at the start', /They are looking for any graduate/i.test(fc1.outs[4].say) && /The salary is 10 thousand per month/.test(fc1.outs[4].say) && /relevant experience/.test(fc1.outs[4].say), fc1.outs[4]);
     check('a question about the salary is answered from the facts, then the question is asked again', /^The salary is 10 thousand per month\. Would this be of interest/.test(fc1.outs[3].say), fc1.outs[3]);
     check('one question at a time to the resume, then the close; the summary says INT', /relevant experience/.test(fc1.outs[4].say) && /highest qualification/.test(fc1.outs[5].say) && /currently working\?$/.test(fc1.outs[6].say) && /notice period\?$/.test(fc1.outs[7].say) && /current and expected salary/.test(fc1.outs[8].say) && /Kukatpally/.test(fc1.outs[9].say) && /any questions/.test(fc1.outs[10].say) && /confirm what I noted/.test(fc1.outs[11].say) && /resume/.test(fc1.outs[12].say) && fc1.outs[13].done === true && /^Disposition: INT/.test(fc1.dd.outcome().summary), fc1.outs.map((x) => x.say));
     const fc2 = await talk('vac2', '9222333302', ['అవును', 'తెలుగు', ['అవును చెప్పండి', { heard: 'clear' }]]);
-    check('the language the person picks: the rest of the call is in Telugu, built from the same facts', fc2.dd.language === 'Telugu' && /రెండు నిమిషాలు/.test(fc2.outs[1].say) && /HR Recruiter/.test(fc2.outs[2].say) && /Kukatpally/.test(fc2.outs[2].say) && /10 వేలు/.test(fc2.outs[2].say), fc2.outs.map((x) => x.say));
+    check('the language the person picks: the rest of the call is in Telugu, built from the same facts', fc2.dd.language === 'Telugu' && /రెండు నిమిషాలు/.test(fc2.outs[1].say) && /HR Recruiter/.test(fc2.outs[2].say) && /Kukatpally/.test(fc2.outs[2].say), fc2.outs.map((x) => x.say));
     const fc3 = await talk('vac3', '9222333303', [], FACTS.replace('Contact:', 'Language: Hindi; Contact:'));
     check('"Language: Hindi" starts the call in Hindi', /क्या मेरी बात Kiran जी से/.test(fc3.first), fc3.first);
     const fc4 = await talk('vac4', '9222333304', ['yes', 'English', 'yes', 'no', 'the salary is low', 'no', 'okay']);
@@ -285,21 +286,34 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     const lg1 = await lgd.hear('hello'); const lg2 = await lgd.hear('English please');
     process.env.AI_CALL_ASK_LANGUAGE = '0';
     check('every script call asks which language after the opening, then goes on with the script', /which language are you most comfortable with/.test(lg1.say) && /Do you have one minute/.test(lg2.say) && /continue in English/.test(lg2.say), { lg1, lg2 });
+    // LANGUAGES (founder 2026-11-09): which languages can you speak?; the ones the job needs are told back
+    const LF = FACTS + '; Languages: Telugu, Hindi';
+    const lj = await omni.create({ externalId: 'lang1', toNumber: '9111222291', name: 'Kiran Rao', script: LF }, { ...deps, ami: AMI });
+    const ljd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(lj.id)); ljd.start();
+    const ljOuts = []; for (const t of ['yes speaking', 'English', 'yes tell me', 'yes interested', '3 years', 'B.Com']) ljOuts.push(await ljd.hear(t));
+    const lj1 = await ljd.hear('I can speak Telugu and English');
+    check('after the qualification the call asks which languages the person speaks; the job\'s languages they speak are told back ("Perfect! This job role needs Telugu as well")', /Which languages can you speak\?$/.test(ljOuts[5].say) && /^Perfect! This job role needs Telugu as well\./.test(lj1.say) && /currently working/.test(lj1.say), { a: ljOuts[5].say, b: lj1.say });
+    const lk = await omni.create({ externalId: 'lang2', toNumber: '9111222292', name: 'Kiran Rao', script: LF }, { ...deps, ami: AMI });
+    const lkd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(lk.id)); lkd.start();
+    for (const t of ['yes speaking', 'English', 'yes tell me', 'yes interested', '3 years', 'B.Com']) await lkd.hear(t);
+    const lk1 = await lkd.hear('only Tamil');
+    check('a person who speaks none of them: noted, and the job\'s languages are said', /This job role needs Telugu, Hindi/.test(lk1.say) && /currently working/.test(lk1.say) && /The job needs Telugu, Hindi/.test(lkd.outcome().summary + JSON.stringify(lkd.st.notes)), lk1.say);
+    check('a plain script that says the job needs languages gives them as facts, and a job named by a degree or an occupation is found', (VAC.inferFacts('Hello, we have a job for MBBS in Hyderabad. Telugu and Hindi speaking is required. Salary 50000 per month.') || {}).role === 'MBBS' && /Telugu, Hindi/.test((VAC.inferFacts('Hello, we have a job for MBBS in Hyderabad. Telugu and Hindi speaking is required. Salary 50000 per month.') || {}).reqlang) && (VAC.inferFacts('We need a staff nurse urgently. Vacancy in Vijayawada.') || {}).role === 'staff nurse' && VAC.inferFacts('Opening: Hello, this is the AI assistant of Teamlink. Are you looking for a job?') === null, VAC.inferFacts('We need a staff nurse urgently. Vacancy in Vijayawada.'));
     // PACE (founder 2026-11-09): a long script is told in parts, the person is heard between the parts
     const LONGSAY = ['Opening: Hello {name}, this is the AI assistant of Teamlink Consultants.', 'Say: We are hiring people for our office with a good salary and a friendly team that you will enjoy working with every day.', 'Say: The work is sourcing candidates, screening resumes and scheduling interviews, and you will get training from our senior recruiters in the first month.', 'Say: The office is open from nine thirty to six thirty, Monday to Saturday, and there is a monthly incentive on every successful joining.', 'Say: Freshers are welcome, and the company also gives a hostel facility for candidates who come from other districts.', 'Closing: Thank you for your time. Goodbye.'].join('\n');
     const pc = await omni.create({ externalId: 'pace1', toNumber: '9111222241', name: 'Kiran', script: LONGSAY }, { ...deps, ami: AMI });
     const pcd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(pc.id));
-    const pc0 = pcd.start(); const pc1 = await pcd.hear('hello'); const pc2 = await pcd.hear('okay');
-    check('a long statement-only script is not said in one go: the opening, then parts, each followed by a wait for the person; the call ends after the last part', !pc0.done && /Hello Kiran/.test(pc0.say) && !/HR Recruiter position/.test(pc0.say) && !pc1.done && /good salary/.test(pc1.say) && !/hostel/.test(pc1.say) && !/Thank you for your time/.test(pc1.say) && pc2.done === true && /hostel/.test(pc2.say) && /Thank you for your time/.test(pc2.say), { pc0, pc1, pc2 });
-    const pcs = pcd.outcome();
+    const pc0 = pcd.start(); const pc1 = await pcd.hear('hello'); const pc2 = await pcd.hear('yes');
+    check('a long statement-only script is not said in one go: the opening, then the first part with "would this be of interest?", then the rest after a yes; the call ends after the last part', !pc0.done && /Hello Kiran/.test(pc0.say) && !/good salary/.test(pc0.say) && !pc1.done && /good salary/.test(pc1.say) && /Would this be of interest to you\?$/.test(pc1.say) && !/hostel/.test(pc1.say) && pc2.done === true && /hostel/.test(pc2.say) && /Thank you for your time/.test(pc2.say), { pc0, pc1, pc2 });
     const pc5 = await omni.create({ externalId: 'pace2', toNumber: '9111222242', name: 'Kiran', script: LONGSAY }, { ...deps, ami: AMI });
     const pcd2 = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(pc5.id)); pcd2.start(); await pcd2.hear('hello');
     const pq = await pcd2.hear('what is the salary?');
-    check('at a pause a question is kept for the team and the message goes on to its end', pq.done === true && /hostel/.test(pq.say) && /what is the salary/.test(pcd2.outcome().summary), { pq, o: pcd2.outcome() });
+    const pq2 = await pcd2.hear('yes');
+    check('a question at the interest check is kept for the team and the interest question comes again; a yes goes on to the end', !pq.done && /Would this be of interest/.test(pq.say) && pq2.done === true && /hostel/.test(pq2.say) && /what is the salary/.test(pcd2.outcome().summary), { pq, pq2, o: pcd2.outcome().summary });
     const pn0 = await omni.create({ externalId: 'pace2b', toNumber: '9111222245', name: 'Kiran', script: LONGSAY }, { ...deps, ami: AMI });
     const pnd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(pn0.id)); pnd.start(); await pnd.hear('hello');
-    const pn = await pnd.hear('I am not interested');
-    check('at a pause a clear no ends politely (Not Interested)', pn.done === true && !/hostel/.test(pn.say) && pnd.outcome().outcome === 'Not Interested', { pn, o: pnd.outcome().outcome });
+    const pn = await pnd.hear('I am not interested'); const pn2 = await pnd.hear('no, not interested');
+    check('a "no" gets one try (why?), then ends politely (Not Interested)', !pn.done && /May I ask why/.test(pn.say) && pn2.done === true && !/hostel/.test(pn2.say) && pnd.outcome().outcome === 'Not Interested', { pn, pn2, o: pnd.outcome().outcome });
     const sh = await omni.create({ externalId: 'pace3', toNumber: '9111222243', name: 'Kiran', script: 'Opening: Hello {name}, good morning. This is the AI assistant of Teamlink.\nSay: We will send you the job details on WhatsApp.\nClosing: Thank you.' }, { ...deps, ami: AMI });
     const shd = await require('../src/calling/webTalk').dialogueFor(await svc.getCall(sh.id)); const sh0 = shd.start();
     check('a short message (only a few lines) is still said whole and the call ends', sh0.done === true && /WhatsApp/.test(sh0.say) && /Thank you/.test(sh0.say), sh0);
@@ -328,7 +342,7 @@ const AMI = { action: async (a) => { originated.push(a); return { Response: 'Suc
     await sip.sweep(Date.now() + 3 * 3600000);
     const rt1 = await omni.status(rs1.id); const rt2 = await omni.status(rs2.id);
     check('a call cut off by a server restart is dropped (rung again); one that never answered is not', rt1.ended && rt1.dropped === true && rt1.status === 'failed' && rt2.status === 'no-answer' && rt2.dropped === false, { rt1: rt1.status + '/' + rt1.dropped, rt2: rt2.status + '/' + rt2.dropped });
-    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 11 + 34, { before, now: originated.length });
+    check('every call that was accepted was dialled once, the refused ones never', originated.length === before + 13 + 34, { before, now: originated.length });
     check('Asterisk refusing the call fails it in words (and leaves a failed row)', await (async () => { const x = await refuse({ toNumber: '9333333333' }, { ...deps, ami: { action: async () => ({ Response: 'Error', Message: 'no trunk' }) } }); return !x.ok && x.code === 'not_dialled'; })());
   } finally {
     await prisma.$disconnect().catch(() => {});

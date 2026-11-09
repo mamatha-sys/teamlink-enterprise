@@ -33,6 +33,25 @@ const ASKS = ['ask', 'interest', 'ifyes', 'ifno', 'language'];
 const isAsk = (kind) => ASKS.includes(kind);
 const OWN_ACK = /^(that is|thank|perfect|great|no problem|పర్వాలేదు|థాంక్యూ|ధన్యవాదాలు|మీ సమయానికి|చాలా బాగుంది|कोई बात नहीं|धन्यवाद|आपके समय|बहुत अच्छा)/i;
 const MAX_STEPS = 14;
+// A SCRIPT IS TOLD IN 3-4 PARTS (founder 2026-11-09: "script estey dhanini oka 3-4 parts la convert chesukoni matladali"): the sentences of a run of Say lines are grouped into parts of about two sentences
+// (at most four), each part is said on its own and the call waits for the person before the next one. The count follows the number of sentences, not their length, so a translation of the same script
+// has the same number of parts.
+const SENT = /(?<=[.!?।])\s+/;
+function partsOf(steps) {
+  const out = [];
+  let i = 0;
+  while (i < steps.length) {
+    if (steps[i].kind !== 'say') { out.push(steps[i]); i += 1; continue; } // eslint-disable-line no-continue
+    const group = [];
+    while (i < steps.length && steps[i].kind === 'say') { group.push(steps[i]); i += 1; }
+    const sents = group.flatMap((g) => g.text.split(SENT).map((x) => x.trim()).filter(Boolean));
+    if (sents.length < 3) { out.push(...group); continue; } // eslint-disable-line no-continue
+    const n = Math.min(4, Math.ceil(sents.length / 2));
+    const per = Math.ceil(sents.length / n);
+    for (let k = 0; k < n; k += 1) { const t = sents.slice(k * per, (k + 1) * per).join(' '); if (t) out.push({ kind: 'say', text: t, part: true }); }
+  }
+  return out;
+}
 // PACE (founder 2026-11-09: "AI matladuthuney undi, pause raavatledhu, script lo em undho adhey continuous ga chepthundi"): a run of Say lines is never spoken in one go;
 // after about this many characters the call stops and waits for the person ("okay", "yes", a question), then goes on with the next part
 const CHUNK = 260;
@@ -111,7 +130,17 @@ class ScriptDialogue extends D.Dialogue {
     // a "Decline:" line is what is said when the person is not interested (instead of the Closing); it is not one of the steps
     const split = (steps) => ({ steps: steps.filter((s) => s.kind !== 'decline' && s.kind !== 'convince'), decline: (steps.find((s) => s.kind === 'decline') || {}).text || null, convince: steps.filter((s) => s.kind === 'convince').map((s) => s.text) });
     const mainSplit = split(main.steps);
-    this.byLang = { [first]: mainSplit.steps };
+    const noQ = !mainSplit.steps.some((s) => isAsk(s.kind));
+    const longM = noQ && mainSplit.steps.reduce((n, s) => n + s.text.length, 0) > CHUNK + 60;
+    // the parts, and for a long message with no question of its own: "would this be of interest?" after the first part
+    const shape = (steps, lang) => {
+      if (!opts.limits || opts.facts || mainSplit.decline || mainSplit.convince.length) return steps; // a script with its own Convince / Decline lines is told as written
+      let out = partsOf(steps);
+      if (noQ && longM) { const i = out.findIndex((s) => s.kind === 'say'); if (i >= 0) out = [...out.slice(0, i + 1), { kind: 'interest', text: vacancy.words({}, lang).interest() }, ...out.slice(i + 1)]; }
+      return out;
+    };
+    const mainShaped = shape(mainSplit.steps, first);
+    this.byLang = { [first]: mainShaped };
     this.declines = { [first]: mainSplit.decline };
     this.convinces = { [first]: mainSplit.convince };
     const sameShape = (a, b) => a.length === b.length && a.every((x, i) => x.kind === b[i].kind);
@@ -119,7 +148,7 @@ class ScriptDialogue extends D.Dialogue {
       if (!S.LANGS.includes(lang) || lang === first || !text) return;
       const p = parseScript(text, opts.limits);
       const ps = p.ok ? split(p.steps) : null;
-      if (ps && sameShape(ps.steps, mainSplit.steps)) { this.byLang[lang] = ps.steps; this.declines[lang] = ps.decline; this.convinces[lang] = ps.convince; } // a version that does not match line for line is not used
+      if (ps && sameShape(shape(ps.steps, lang), mainShaped)) { this.byLang[lang] = shape(ps.steps, lang); this.declines[lang] = ps.decline; this.convinces[lang] = ps.convince; } // a version that does not match line for line is not used
     });
     this.scriptLanguage = first;
     this.contactNumber = opts.contactNumber || null; // the recruiter's number: told to a candidate who asks where to send the resume
@@ -166,7 +195,7 @@ class ScriptDialogue extends D.Dialogue {
       if ((s.kind === 'ifyes' && branchNo) || (s.kind === 'ifno' && !branchNo)) { j += 1; continue; } // eslint-disable-line no-continue
       parts.push(this.line(j));
       if (isAsk(s.kind)) return { parts, stopAt: j };
-      if (parts.join(' ').length >= CHUNK && this.steps[j + 1] && this.steps[j + 1].kind === 'say') return { parts, stopAt: j, checkpoint: true }; // a pause: the person answers, then the next part
+      if (((s.part) || parts.join(' ').length >= CHUNK) && this.steps[j + 1] && this.steps[j + 1].kind === 'say') return { parts, stopAt: j, checkpoint: true }; // a pause: the person answers, then the next part
       j += 1;
     }
     return { parts, stopAt: j }; // only Say lines left: the call ends after them
@@ -503,6 +532,12 @@ class ScriptDialogue extends D.Dialogue {
       const need = vacancy.needsYears(this.facts);
       const y = D.readYears(text);
       if (need != null && y != null && y < need - 1) { st.interest = 'no'; st.oq = true; st.keepDone = true; st.declineReason = `${y} years, the job asks for ${this.facts.experience}`; return { result: this.endWith('Not Interested', 'experience does not match', W.objExp()) }; }
+    }
+    if (step === 'langs') { // which languages can you speak?: the ones this job needs are told back
+      const o = vacancy.languageOverlap(this.facts, text, this.language);
+      if (o.matched) return { lead: W.langMatch(o.matched) };
+      st.notes = [...(st.notes || []), `The job needs ${this.facts.reqlang}; the person said: ${S.clean(text, 40)}`].slice(-8);
+      return { lead: W.langNo() };
     }
     if (step === 'notice') {
       const most = vacancy.maxNotice(this.facts);
