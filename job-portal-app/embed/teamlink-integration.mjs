@@ -430,6 +430,37 @@ export function teamlinkFrontRouter({ root, express }) {
     return next();
   }, json);
 
+  /*
+   * WHY A CANDIDATE'S SIGN-IN SAYS "INCORRECT EMAIL OR PASSWORD" (founder 2026-11-10; backend/scripts/portal-login-check.js,
+   * check-portal-login-on-vps.ps1). Asked through the running portal, not with a second database connection: the live portal's own
+   * database takes one connection only ("Connection terminated unexpectedly"). READ ONLY, as the portal administrator (the row rules
+   * let it read accounts and login messages); never a password, hash or token.
+   *   POST /api/integrations/teamlink/login-check  { find }  ->  { users: [...], candidates: [{ ..., invites: [...] }] }
+   */
+  r.post('/api/integrations/teamlink/login-check', wrap(async (req, res) => {
+    const find = String((req.body && req.body.find) || '').trim().toLowerCase().replace(/[%_]/g, '');
+    if (find.length < 4) return res.status(422).json({ error: { code: 'VALIDATION_FAILED', message: 'find needs at least 4 letters' } });
+    const like = `%${find}%`;
+    const digits = find.replace(/\D/g, '');
+    const { withUser } = await portal();
+    const out = await withUser(SYSTEM, async (c) => {
+      const users = (await c.query(`select id, email, role, status, created_at, last_login_at, must_change_password
+          from users where lower(email) like $1 order by created_at limit 20`, [like])).rows;
+      const cands = (await c.query(`select c.id, c.name, c.email, c.phone, c.user_id, c.created_at, u.email as login_email, u.status as login_status
+          from candidates c left join users u on u.id = c.user_id
+          where lower(coalesce(c.email,'')) like $1 or lower(c.name) like $1
+             ${digits.length >= 6 ? "or regexp_replace(coalesce(c.phone,''), '\\D', '', 'g') like $2" : ''}
+          order by c.created_at limit 20`, digits.length >= 6 ? [like, `%${digits}%`] : [like])).rows;
+      for (const k of cands) {
+        // eslint-disable-next-line no-await-in-loop
+        k.invites = (await c.query(`select channel, status, to_address, provider, error, created_at from candidate_invites
+            where candidate_id = $1 order by created_at desc limit 6`, [k.id]).catch(() => ({ rows: [] }))).rows;
+      }
+      return { users, candidates: cands };
+    });
+    return res.json(out);
+  }));
+
   loadAutoLogins();
   // GET / POST .../candidates/auto  { on }  -> { on }: whether imported Naukri / Shine candidates are sent their login by the portal itself
   r.get('/api/integrations/teamlink/candidates/auto', (_req, res) => res.json({ on: /^true$/i.test(String(process.env.INTAKE_NOTIFY_CANDIDATES || '')) }));
