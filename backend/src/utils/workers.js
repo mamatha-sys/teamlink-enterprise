@@ -92,6 +92,36 @@ const REAL_EVENT = {
 };
 const realActor = (e) => !!e.actorUserId || !isPlaceholderName(e.actorName);
 
+// A SHORT FORM OF A NAME (founder 2026-11-10: "m sirisha anna, masabattula sirisha anna okarey"): the joining sheets write
+// "M.Sai Sirisha" for the login "Masabattula Sai Sirisha", and an exact match made them two people on every count. A typed name
+// with at least one initial fits a full name when its words are the full name's words in order and each initial is the first
+// letter of one of the remaining words, with no word left over. Used only when the exact name finds nobody, and only when ONE
+// person fits.
+const nameTokens = (v) => clean(v).toLowerCase().replace(/[^a-z\s.]/g, ' ').split(/[\s.]+/).filter(Boolean);
+function shortFormFits(typed, full) {
+  const T = nameTokens(typed);
+  const U = nameTokens(full);
+  const inits = T.filter((t) => t.length === 1);
+  const words = T.filter((t) => t.length > 1);
+  if (!inits.length || !words.length || !words.some((w) => w.length >= 3) || T.length !== U.length) return false;
+  const used = new Array(U.length).fill(false);
+  let from = 0;
+  for (const w of words) {
+    let i = from;
+    while (i < U.length && U[i] !== w) i += 1;
+    if (i >= U.length) return false;
+    used[i] = true; from = i + 1;
+  }
+  const rest = U.filter((_, i) => !used[i]);
+  return rest.length === inits.length && rest.every((u, i) => u.startsWith(inits[i]));
+}
+// the ONE name in `names` that `typed` is a short form of, else null (none, or more than one person fits)
+function shortFormOf(typed, names) {
+  if (!nameTokens(typed).some((t) => t.length === 1)) return null;
+  const fits = [...new Set(names.filter((n) => n && shortFormFits(typed, n)).map(nameKey))];
+  return fits.length === 1 ? fits[0] : null;
+}
+
 // --- People directory ---------------------------------------------------------
 // Resolves (userId, name) to ONE person, the way ATS Reports always has.
 function makeResolver(users) {
@@ -99,9 +129,20 @@ function makeResolver(users) {
   const byName = new Map();
   users.forEach((u) => { const k = nameKey(u.name); if (k && !byName.has(k)) byName.set(k, u); });
   const asPerson = (u) => ({ key: `u:${u.id}`, userId: u.id, label: u.name, team: u.team || null });
+  const shortCache = new Map();
+  const byShort = (name) => {
+    const k = nameKey(name);
+    if (!shortCache.has(k)) {
+      // one person among everyone, else one among the active logins
+      const all = shortFormOf(name, users.map((u) => u.name));
+      const hit = all || shortFormOf(name, users.filter((u) => (u.status || 'Active') === 'Active').map((u) => u.name));
+      shortCache.set(k, hit ? byName.get(hit) || null : null);
+    }
+    return shortCache.get(k);
+  };
   const person = (id, name) => {
     if (id && byId.has(id)) return asPerson(byId.get(id));
-    const u = byName.get(nameKey(name));
+    const u = byName.get(nameKey(name)) || (clean(name) ? byShort(name) : null);
     if (u) return asPerson(u);
     return clean(name) ? { key: `n:${nameKey(name)}`, userId: null, label: clean(name), team: null } : null;
   };
@@ -152,7 +193,9 @@ async function nameVariantsFor(keys) {
     prisma.applicationStageEvent.groupBy({ by: ['actorName'], where: REAL_EVENT, _count: { _all: true } }),
   ]);
   const out = new Set();
-  const take = (v) => { if (v && want.has(nameKey(v))) out.add(v); };
+  // a short form on file ("M.Sai Sirisha") is a spelling of the person it resolves to
+  const person = makeResolver(await prisma.user.findMany({ select: { id: true, name: true, status: true } }));
+  const take = (v) => { if (v && (want.has(nameKey(v)) || (() => { const p = person(null, v); return !!(p && p.userId && want.has(nameKey(p.label))); })())) out.add(v); };
   o.forEach((g) => take(g.ownerName));
   t.forEach((g) => take(g.tlName));
   b.forEach((g) => take(g.bdeName));
@@ -657,7 +700,7 @@ async function listWorkers(user, { department = '', role = '' } = {}) {
 module.exports = {
   ROLES, ROLE_LABEL, LEFT_STATUSES, REAL_EVENT, ATTR_SELECT,
   clean, nameKey, seatRole, roleOfLabel, realActor,
-  makeResolver, loadDirectory, resolvePersonValue, nameVariantsFor,
+  makeResolver, loadDirectory, resolvePersonValue, nameVariantsFor, shortFormFits, shortFormOf,
   attribute, creditAt, stepAt, attributionWhere, seatWhere, seatCodes, personQuery, hasPersonQuery,
   attributedApplications, attributedCounts, listWorkers,
 };
